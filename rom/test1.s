@@ -1,44 +1,67 @@
-.org 0x0
+#####################################################
+#test execution latency for ADD, SUB, AND, OR, XOR, LW and SW
+#####################################################
+
 .section .text
 .global _start
 _start:
-main:   addi x2, x0, 5            # x2 = 5                  0  00500113
-        addi x3, x0, 12           # x3 = 12                 4  00C00193
- #check_forward
-        addi x7, x3, -9           # x7 = (12 - 9) = 3       8  FF718393    #signed
- #check_forward
-        or   x4, x7, x2           # x4 = (3 OR 5) = 7       C  0023E233
- #check_forward
-        and  x5, x3, x4           # x5 = (12 AND 7) = 4     10 0041F2B3
- #check_forward
-        add  x5, x5, x4           # x5 = 4 + 7 = 11         14 004282B3
- #check_forward & branch
-        beq  x5, x7, end          # shouldn't be taken      18 02728863
-        slt  x4, x3, x4           # x4 = (12 < 7) = 0       1C 0041A233
- #check_forward & branch
-        beq  x4, x0, around       # should be taken         20 00020463
-        addi x5, x0, 0            # shouldn't execute       24 00000293
-around: slt x4, x7, x2            # x4 = (3 < 5) = 1        28 0023A233
- #check_forward
-        add x7, x4, x5            # x7 = (1 + 11) = 12      2C 005203B3
- #check_forward
-        sub x7, x7, x2            # x7 = (12 - 5) = 7       30 402383B3
- #check_forward_store
-        sw x7, 84(x3)             # [96] = 7                34 0471AA23
-        lw x2, 96(x0)             # x2 = [96] = 7           38 06002103
- #check stall
-        add x9, x2, x5            # x9 = (7 + 11) = 18      3C 005104B3
-# jump
-        jal x3, end               # jump to end, x3 = 0x44  40 008001EF
-        addi x2, x0, 1            # shouldn't execute       44 00100113
-#check_forward
-end:    add x2, x2, x9            # x2 = (7 + 18) = 25      48 00910133
-#check_forward_store
-        sw x2, 0x20(x3)           # [100] = 25              4C 0221A023
- #check_forward & branch
-done:   beq x2, x2, done          # infinite loop           50 00210063
 
+   # initialize x1 and x2
+   li x1, 0x1  #addi x1, x0, 0x1
+   li x2, 0x2  #addi x2, x0, 0x2
+   # set base address for data access
+   la x3, data_seg #auipc, addi
+   # remove RAW hazard
+   nop
+   nop
+   nop
+   nop
+   nop
+   nop
+   nop
+   nop
 
+main:
+   add  x4, x1, x2
+   sub  x5, x1, x2
+   and  x6, x1, x2
+   or     x7, x1, x2
+   xor  x8, x1, x2
+   lw x9, 0(x3)
+   sw x1, 0(x3)
+  
+_finish:
+    # initialize TUBE address
+    li x4,   0x13000000 #lui x4, 0x13000
+    # send CTRL+D to TUBE to indicate test is finished
+    addi x5, x0, 0x4
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    sb x5, 0(x4)
+    #dead loop
+    #beq x0, x0, _finish
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
+    nop
 
+.data
+data_seg:
+.word 0xf3f2f1f0
+.word 0xf7f6f5f4
+.word 0xfbfaf9f8
+.word 0xfffefdfc
 
 

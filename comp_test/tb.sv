@@ -1,7 +1,8 @@
 `timescale 1ns/1ns
 `define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_ram_data
-`define TB_REGS tb.u_adam_riscv.u_stage_id.u_regs
+`define TB_REGS tb.u_adam_riscv.u_stage_ro.u_regs_mt
 `define TB_DRAM tb.u_adam_riscv.u_stage_mem.u_data_memory.u_ram_data
+
 `define RAM_DEEP 4096
 
 
@@ -13,8 +14,9 @@ always begin
 #25    clk = ~clk;
 end
 
-reg [31:0] imem [0:4095];
-integer i,j;
+reg [7:0] inst_bytes [0:(`RAM_DEEP*4)-1];
+reg [7:0] data_bytes [0:(`RAM_DEEP*4)-1];
+integer j;
 
 adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
@@ -22,29 +24,41 @@ adam_riscv u_adam_riscv(
 );
 
 //------------------------------------------------------------------------------------------------
-// Gen FSDB
+// Wave dump (default VCD for iverilog/gtkwave)
 //------------------------------------------------------------------------------------------------
-
-initial	begin
-	    $fsdbDumpfile("tb.fsdb");//这个是产生名为tb.fsdb的文件
-	    $fsdbDumpvars(0,tb);
-        $fsdbDumpMDA();
+initial begin
+    $dumpfile("tb.vcd");
+    $dumpvars(0, tb);
 end
 
 
 //------------------------------------------------------------------------------------------------
-// initial Instruction ROM
+// initial Instruction ROM: load from .text (inst.hex)
 //------------------------------------------------------------------------------------------------
-initial begin
-    for (i=0;i<(`RAM_DEEP*8);i=i+1) begin
-    imem[i] = 32'd0;
+initial begin : init_irom
+    integer i;
+    for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
+        inst_bytes[i] = 8'd0;
     end
-    $readmemh("../rom/main_s.verilog",imem);
-    for (i=0;i<(`RAM_DEEP);i=i+1) begin
-        `TB_IROM.mem[i][00+7:00] = imem[i*4+0];
-        `TB_IROM.mem[i][08+7:08] = imem[i*4+1];
-        `TB_IROM.mem[i][16+7:16] = imem[i*4+2];
-        `TB_IROM.mem[i][24+7:24] = imem[i*4+3];
+    $readmemh("../rom/inst.hex", inst_bytes);
+
+    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
+        `TB_IROM.mem[i] = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
+    end
+end
+
+//------------------------------------------------------------------------------------------------
+// initial Data RAM: load from .data (data.hex)
+//------------------------------------------------------------------------------------------------
+initial begin : init_dram
+    integer i;
+    for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
+        data_bytes[i] = 8'd0;
+    end
+    $readmemh("../rom/data.hex", data_bytes);
+
+    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
+        `TB_DRAM.mem[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
     end
 end
 

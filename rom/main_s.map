@@ -1,0 +1,36 @@
+
+There are no discarded input sections
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+*default*        0x00000000         0xffffffff
+
+Linker script and memory map
+
+                0x00000000                        . = 0x0
+
+.text           0x00000000      0x838
+ *(.text*)
+ .text          0x00000000      0x838 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+                0x00000000                _start
+ *(.rodata*)
+                0x00001000                        . = 0x1000
+
+.data           0x00001000       0x10
+ *(.data*)
+ .data          0x00001000       0x10 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+ *(.sdata*)
+
+.bss            0x00001010        0x0
+ *(.sbss*)
+ *(.bss*)
+ .bss           0x00001010        0x0 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+ *(COMMON)
+LOAD C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+OUTPUT(E:\AdamRiscv\rom\main_s.elf elf32-littleriscv)
+
+.riscv.attributes
+                0x00000000       0x1a
+ .riscv.attributes
+                0x00000000       0x1a C:\Users\23178\AppData\Local\Temp\ccwObCgV.o

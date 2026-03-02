@@ -1,2 +1,0 @@
-#!/usr/bin/perl
-system "verdi -cov -covdir merge_total.vdb&";
