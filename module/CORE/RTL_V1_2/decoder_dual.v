@@ -196,10 +196,13 @@ assign thread_mismatch = (inst0_tid != inst1_tid);
 assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch;
 
 // ─── Final valid signals ────────────────────────────────────────────────────
+// Important: We always consume from fetch_buffer (consume_0 always asserted if inst0_valid)
+// Invalid/illegal instructions are marked with fu=FU_NOP and dec*_valid=0
+// This prevents deadlock when buffer contains illegal instructions
 wire dec0_valid_int;
 wire dec1_valid_int;
 
-assign dec0_valid_int = inst0_valid && d0_valid_raw;
+assign dec0_valid_int = inst0_valid && d0_valid_raw;  // Only valid if decoded properly
 assign dec1_valid_int = inst1_valid && d1_valid_raw && dec0_valid_int && !structural_conflict;
 
 assign dec0_valid = dec0_valid_int;
@@ -249,7 +252,11 @@ assign dec1_fu           = d1_fu;
 assign dec1_tid          = inst1_tid;
 
 // ─── Consume signals (feedback to fetch_buffer) ─────────────────────────────
-assign consume_0 = dec0_valid_int;
-assign consume_1 = dec1_valid_int;
+// Important: We always consume from fetch_buffer when we have valid entries.
+// Invalid/illegal instructions are consumed and discarded (not dispatched to scoreboard).
+// This prevents deadlock when buffer contains illegal instructions like 0x00000000.
+// Note: inst0_valid is actually fb_pop0_valid from fetch_buffer (buffer has entry)
+assign consume_0 = inst0_valid;  // Always consume if buffer has entry for slot 0
+assign consume_1 = dec1_valid_int;  // Consume inst1 only if both valid and no conflict
 
 endmodule

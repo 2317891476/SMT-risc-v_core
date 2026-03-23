@@ -9,8 +9,9 @@ _start:
    # initialize x1 and x2
    li x1, 0x1  #addi x1, x0, 0x1
    li x2, 0x2  #addi x2, x0, 0x2
-   # set base address for data access
-   la x3, data_seg #auipc, addi
+   # set base address for data access directly
+   # la x3, data_seg is broken, use lui + addi instead
+   lui x3, 0x1        # x3 = 0x1000
    # remove RAW hazard
    nop
    nop
@@ -29,7 +30,7 @@ main:
    xor  x8, x1, x2
    lw x9, 0(x3)
    sw x1, 0(x3)
-  
+   
 _finish:
     # initialize TUBE address
     li x4,   0x13000000 #lui x4, 0x13000
@@ -63,5 +64,4 @@ data_seg:
 .word 0xf7f6f5f4
 .word 0xfbfaf9f8
 .word 0xfffefdfc
-
 

@@ -1,4 +1,4 @@
-`include "define.v"
+`include "define_v2.v"
 
 module stage_is(
     input  wire[31:0]   is_inst,
@@ -58,34 +58,26 @@ imm_gen u_imm_gen(
 );
 
 always @(*) begin
-    is_fu = 3'd0;
+    is_fu = `FU_NOP;
     case (opcode)
         `Rtype: begin
-            case (func3)
-                3'b000: is_fu = func7_code ? 3'd2 : 3'd1; // SUB or ADD
-                3'b111: is_fu = 3'd3; // AND
-                3'b110: is_fu = 3'd4; // OR
-                3'b100: is_fu = 3'd5; // XOR
-                default: is_fu = 3'd1;
-            endcase
+            // RV32M multiplication instructions (func3 0,1,2,3,4 with func7=1)
+            // MUL, MULH, MULHSU, MULHU need FU_MUL
+            if (func7_code && (func3 == 3'd0 || func3 == 3'd1 || func3 == 3'd2 || func3 == 3'd3 || func3 == 3'd4)) begin
+                is_fu = `FU_MUL;
+            end else begin
+                is_fu = `FU_INT1;  // R-type ALU -> Pipe 1
+            end
         end
-        `ItypeA: begin
-            case (func3)
-                3'b000: is_fu = 3'd1; // ADDI
-                3'b111: is_fu = 3'd3; // ANDI
-                3'b110: is_fu = 3'd4; // ORI
-                3'b100: is_fu = 3'd5; // XORI
-                default: is_fu = 3'd1;
-            endcase
-        end
-        `ItypeL: is_fu = 3'd6; // LW
-        `Stype : is_fu = 3'd7; // SW
-        `UtypeL: is_fu = 3'd1; // LUI
-        `UtypeU: is_fu = 3'd1; // AUIPC
-        `Btype : is_fu = 3'd1;
-        `ItypeJ: is_fu = 3'd1;
-        `Jtype : is_fu = 3'd1;
-        default: is_fu = 3'd0;
+        `ItypeA: is_fu = `FU_INT1;  // ALU immediate -> Pipe 1
+        `ItypeL: is_fu = `FU_LOAD;  // Load -> Pipe 1 (MEM)
+        `Stype : is_fu = `FU_STORE; // Store -> Pipe 1 (MEM)
+        `UtypeL: is_fu = `FU_INT0;  // LUI -> Pipe 0
+        `UtypeU: is_fu = `FU_INT0;  // AUIPC -> Pipe 0
+        `Btype : is_fu = `FU_INT0;  // Branch -> Pipe 0 (has branch resolution)
+        `ItypeJ: is_fu = `FU_INT0;  // JALR -> Pipe 0
+        `Jtype : is_fu = `FU_INT0;  // JAL -> Pipe 0
+        default: is_fu = `FU_NOP;
     endcase
 end
 

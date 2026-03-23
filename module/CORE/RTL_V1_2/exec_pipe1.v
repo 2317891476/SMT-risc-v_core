@@ -9,7 +9,7 @@
 //   The pipe arbitrates between ALU/MUL/AGU based on in_fu and in_mem* signals.
 //   Only one sub-unit operates per cycle (guaranteed by scoreboard FU checking).
 // =============================================================================
-`include "define.v"
+`include "define_v2.v"
 
 module exec_pipe1 #(
     parameter TAG_W = 5
@@ -130,13 +130,43 @@ mul_unit #(.TAG_W(TAG_W)) u_mul (
 // ─── ALU output (INT + AGU share, but only one active at a time) ────────────
 // For memory ops: ALU out carries the effective address (used for bypass of rd
 // in store-to-load forwarding scenarios, but rd write is deferred to MEM stage)
-assign alu_out_valid      = is_alu_op;
-assign alu_out_tag        = in_tag;
-assign alu_out_result     = is_mem_op ? eff_addr : alu_result;
-assign alu_out_rd         = in_rd;
-assign alu_out_regs_write = is_alu_op ? in_regs_write : 1'b0; // mem writes via MEM stage
-assign alu_out_fu         = in_fu;
-assign alu_out_tid        = in_tid;
+// Added output registers for proper 1-cycle pipeline timing
+
+reg        alu_out_valid_r;
+reg [TAG_W-1:0] alu_out_tag_r;
+reg [31:0] alu_out_result_r;
+reg [4:0]  alu_out_rd_r;
+reg        alu_out_regs_write_r;
+reg [2:0]  alu_out_fu_r;
+reg [0:0]  alu_out_tid_r;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        alu_out_valid_r      <= 1'b0;
+        alu_out_tag_r        <= {TAG_W{1'b0}};
+        alu_out_result_r     <= 32'd0;
+        alu_out_rd_r         <= 5'd0;
+        alu_out_regs_write_r <= 1'b0;
+        alu_out_fu_r         <= 3'd0;
+        alu_out_tid_r        <= 1'b0;
+    end else begin
+        alu_out_valid_r      <= is_alu_op;
+        alu_out_tag_r        <= in_tag;
+        alu_out_result_r     <= is_mem_op ? eff_addr : alu_result;
+        alu_out_rd_r         <= in_rd;
+        alu_out_regs_write_r <= is_alu_op ? in_regs_write : 1'b0;
+        alu_out_fu_r         <= in_fu;
+        alu_out_tid_r        <= in_tid;
+    end
+end
+
+assign alu_out_valid      = alu_out_valid_r;
+assign alu_out_tag        = alu_out_tag_r;
+assign alu_out_result     = alu_out_result_r;
+assign alu_out_rd         = alu_out_rd_r;
+assign alu_out_regs_write = alu_out_regs_write_r;
+assign alu_out_fu         = alu_out_fu_r;
+assign alu_out_tid        = alu_out_tid_r;
 
 // ─── Memory request output ─────────────────────────────────────────────────
 assign mem_req_valid      = in_valid && is_mem_op;

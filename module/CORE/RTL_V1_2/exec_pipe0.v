@@ -85,17 +85,54 @@ alu u_alu (
 wire [31:0] br_addr_op_A;
 assign br_addr_op_A = (in_br_addr_mode == `J_REG) ? op_A_pre : in_pc;
 
-// ─── Output: single-cycle, directly combinational ───────────────────────────
-assign out_valid      = in_valid;
-assign out_tag        = in_tag;
-assign out_result     = alu_out;
-assign out_rd         = in_rd;
-assign out_regs_write = in_regs_write;
-assign out_fu         = in_fu;
-assign out_tid        = in_tid;
+// ─── Output: single-cycle, with output registers for proper timing ─────────
+reg               out_valid_r;
+reg [TAG_W-1:0]   out_tag_r;
+reg [31:0]        out_result_r;
+reg [4:0]         out_rd_r;
+reg               out_regs_write_r;
+reg [2:0]         out_fu_r;
+reg [0:0]         out_tid_r;
+reg               br_ctrl_r;
+reg [31:0]        br_addr_r;
+reg [0:0]         br_tid_r;
 
-assign br_ctrl = in_valid && in_br && br_mark;
-assign br_addr = br_addr_op_A + in_imm;
-assign br_tid  = in_tid;
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        out_valid_r      <= 1'b0;
+        out_tag_r        <= {TAG_W{1'b0}};
+        out_result_r     <= 32'd0;
+        out_rd_r         <= 5'd0;
+        out_regs_write_r <= 1'b0;
+        out_fu_r         <= 3'd0;
+        out_tid_r        <= 1'b0;
+        br_ctrl_r        <= 1'b0;
+        br_addr_r        <= 32'd0;
+        br_tid_r         <= 1'b0;
+    end else begin
+        out_valid_r      <= in_valid;
+        out_tag_r        <= in_tag;
+        out_result_r     <= alu_out;
+        out_rd_r         <= in_rd;
+        out_regs_write_r <= in_regs_write;
+        out_fu_r         <= in_fu;
+        out_tid_r        <= in_tid;
+        br_ctrl_r        <= in_valid && in_br && br_mark;
+        br_addr_r        <= br_addr_op_A + in_imm;
+        br_tid_r         <= in_tid;
+    end
+end
+
+assign out_valid      = out_valid_r;
+assign out_tag        = out_tag_r;
+assign out_result     = out_result_r;
+assign out_rd         = out_rd_r;
+assign out_regs_write = out_regs_write_r;
+assign out_fu         = out_fu_r;
+assign out_tid        = out_tid_r;
+
+assign br_ctrl = br_ctrl_r;
+assign br_addr = br_addr_r;
+assign br_tid  = br_tid_r;
 
 endmodule

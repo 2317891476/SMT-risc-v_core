@@ -1,0 +1,31 @@
+# Iverilog compilation outputs
+*.out
+*.vvp
+
+# Waveform files
+*.vcd
+*.fst
+
+# Log files
+*.log
+
+# Object files and executables
+*.o
+*.elf
+
+# Verilog hex files (generated from assembly)
+*.hex
+
+# Backup files
+*.bak
+*~
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS generated
+.DS_Store
+Thumbs.db

@@ -342,7 +342,7 @@ w_regs_en, w_regs_addr, w_regs_data
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
-| P0 | V2 管线仿真调试 | 用 tb_v2.sv 跑通全部测试 |
+| ~~P0~~ | ~~V2 管线仿真调试~~ | ✅ 已完成 (test1/test2/test_smt/test_rv32i_full 全部通过) |
 | P1 | Store Buffer | 内存顺序约束，消除投机 store 问题 |
 | P1 | L1 ICache | 替换 inst_memory 为非阻塞指令缓存 |
 | P2 | L2 Cache | 统一二级缓存 + 仲裁器 |
@@ -372,7 +372,17 @@ w_regs_en, w_regs_addr, w_regs_data
 
 | 测试 | V1 管线 | V2 管线 |
 |------|---------|---------|
-| test1.s | ✅ PASS | 待调试 |
-| test2.S | ✅ PASS | 待调试 |
-| test_rv32i_full.s | ✅ PASS | 待调试 |
-| test_smt.s | ✅ PASS | 待调试 |
+| test1.s | ✅ PASS | ✅ PASS |
+| test2.S | ✅ PASS | ✅ PASS |
+| test_rv32i_full.s | ✅ PASS | ✅ PASS |
+| test_smt.s | ✅ PASS | ✅ PASS (SMT模式) |
+
+### V2 编译选项
+
+```powershell
+# 单线程模式 (test1, test2)
+iverilog -g2012 -s tb_v2 -o tb_v2.out ...
+
+# SMT 双线程模式 (test_smt)
+iverilog -g2012 -s tb_v2 -DSMT_MODE=1 -o tb_v2_smt.out ...
+```

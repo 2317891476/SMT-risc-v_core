@@ -52,7 +52,7 @@ assign pc_stall_combined = pc_stall || !fb_ready;
 
 pc_mt #(
     .N_T             (2             ),
-    .THREAD1_BOOT_PC (32'h00000800  )
+    .THREAD1_BOOT_PC (32'h00000800  )  // Thread 1 starts at 0x800 for SMT tests
 ) u_pc_mt (
     .clk         (clk                 ),
     .rstn        (rstn                ),
@@ -101,9 +101,36 @@ bpu_bimodal #(
 );
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
-assign if_pc         = pc_out;
-assign if_tid        = tid_out;
-assign if_valid      = rstn && !flush_active && !pc_stall_combined;
+// CRITICAL FIX: Synchronous RAM has 1-cycle latency
+// - Cycle N: RAM receives address (pc_out), latches PC and valid flag
+// - Cycle N+1: RAM outputs instruction data
+// The PC and valid must be delayed by 1 cycle to match RAM output timing.
+reg [31:0] pc_latched;
+reg [0:0]  tid_latched;
+reg        valid_latched;
+wire       fetch_in_progress;
+
+assign fetch_in_progress = rstn && !flush_active && !pc_stall_combined;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        pc_latched    <= 32'd0;
+        tid_latched   <= 1'b0;
+        valid_latched <= 1'b0;
+    end
+    else begin
+        // Latch PC when we send address to RAM (before PC advances)
+        // This value will be valid when RAM outputs data next cycle
+        pc_latched    <= pc_out;
+        tid_latched   <= tid_out;
+        valid_latched <= fetch_in_progress;
+    end
+end
+
+// Use latched values for output (matches RAM timing)
+assign if_pc         = pc_latched;
+assign if_tid        = tid_latched;
+assign if_valid      = valid_latched;
 assign if_pred_taken = bpu_pred_taken;
 
 endmodule

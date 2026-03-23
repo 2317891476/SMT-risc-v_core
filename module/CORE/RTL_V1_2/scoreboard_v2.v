@@ -23,7 +23,7 @@
 //   CDB (Common Data Bus) Wakeup:
 //     - Two writeback ports broadcast tag; matching qj/qk/qd entries are cleared
 // =============================================================================
-`include "define.v"
+`include "define_v2.v"
 
 module scoreboard_v2 #(
     parameter RS_DEPTH   = 16,
@@ -341,9 +341,12 @@ always @(*) begin
     iss1_fu = 0; iss1_tid = 0;
 
     // ── Pass 1: select oldest ready instruction for Port 0 ─────
+    // Port 0 (exec_pipe0) handles: FU_INT0 (Branch/LUI/AUIPC), and can also take FU_INT1
+    // Note: FU_INT0 and FU_INT1 don't use fu_busy since they can dual-issue
     for (i = 0; i < RS_DEPTH; i = i + 1) begin
         if (win_valid[i] && !win_issued[i] && win_ready[i] &&
-            (win_fu[i] != 3'd0) && !fu_busy[win_fu[i]]) begin
+            (win_fu[i] != `FU_NOP) && 
+            (win_fu[i] == `FU_INT0 || win_fu[i] == `FU_INT1)) begin
 
             // WAR check (same as original)
             war_block_0 = 1'b0;
@@ -368,12 +371,16 @@ always @(*) begin
     end
 
     // ── Pass 2: select second instruction for Port 1 ───────────
-    // Must be different entry, different FU from sel0
+    // Port 1 (exec_pipe1) handles: FU_INT1, FU_MUL, FU_LOAD, FU_STORE
+    // Note: FU_INT0 and FU_INT1 don't use fu_busy since they can dual-issue
     for (i = 0; i < RS_DEPTH; i = i + 1) begin
         if (win_valid[i] && !win_issued[i] && win_ready[i] &&
-            (win_fu[i] != 3'd0) && !fu_busy[win_fu[i]] &&
+            (win_fu[i] == `FU_INT1 || win_fu[i] == `FU_MUL || 
+             win_fu[i] == `FU_LOAD || win_fu[i] == `FU_STORE) &&
+            !(win_fu[i] == `FU_MUL && fu_busy[win_fu[i]]) &&
+            !(win_fu[i] == `FU_LOAD && fu_busy[win_fu[i]]) &&
+            !(win_fu[i] == `FU_STORE && fu_busy[win_fu[i]]) &&
             !(sel0_found && (i[RS_IDX_W-1:0] == sel0_idx)) &&                 // not same entry
-            !(sel0_found && (win_fu[i] == win_fu[sel0_idx])) &&              // not same FU
             !(sel0_found && win_br[sel0_idx] && win_br[i]) &&                // at most 1 branch
             !(sel0_found && (win_mem_read[sel0_idx]||win_mem_write[sel0_idx])  // at most 1 mem
                          && (win_mem_read[i]||win_mem_write[i]))) begin
@@ -554,16 +561,17 @@ always @(posedge clk or negedge rstn) begin
         end
         else begin
             // ── Issue: mark selected entries as issued ───────────
+            // Note: Only set fu_busy for MUL/LOAD/STORE, not for INT operations
             if (sel0_found) begin
                 win_issued[sel0_idx] <= 1'b1;
                 win_ready[sel0_idx]  <= 1'b0;
-                if (win_fu[sel0_idx] != 3'd0)
+                if (win_fu[sel0_idx] != `FU_NOP && win_fu[sel0_idx] != `FU_INT0 && win_fu[sel0_idx] != `FU_INT1)
                     fu_busy[win_fu[sel0_idx]] <= 1'b1;
             end
             if (sel1_found) begin
                 win_issued[sel1_idx] <= 1'b1;
                 win_ready[sel1_idx]  <= 1'b0;
-                if (win_fu[sel1_idx] != 3'd0)
+                if (win_fu[sel1_idx] != `FU_NOP && win_fu[sel1_idx] != `FU_INT0 && win_fu[sel1_idx] != `FU_INT1)
                     fu_busy[win_fu[sel1_idx]] <= 1'b1;
             end
 

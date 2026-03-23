@@ -25,6 +25,13 @@ module adam_riscv_v2(
     input wire sys_rstn
 );
 
+// SMT mode parameter (0=single-thread, 1=SMT)
+// Can be overridden at instantiation time
+`ifndef SMT_MODE
+    `define SMT_MODE 0
+`endif
+wire smt_mode = `SMT_MODE;
+
 // ─── Clock / Reset ───────────────────────────────────────────────────────────
 wire rstn;
 wire clk;
@@ -41,11 +48,15 @@ syn_rst u_syn_rst(
     .syn_rstn (rstn    )
 );
 
-// ─── SMT / Flush Control ────────────────────────────────────────────────────
+// ─── Thread Scheduler ──────────────────────────────────────────────────────
 wire [0:0] fetch_tid;
 wire [1:0] smt_stall;
 wire [1:0] smt_flush;
 wire       flush_any;
+
+// SMT mode control (hardcoded for now, can be made configurable)
+// Set to 0 for single-thread tests, 1 for SMT tests
+// Use `define SMT_MODE 1 before including this file to enable SMT
 
 // Branch from Pipe0
 wire       pipe0_br_ctrl;
@@ -67,6 +78,7 @@ thread_scheduler u_thread_scheduler(
     .clk          (clk         ),
     .rstn         (rstn        ),
     .thread_stall (smt_stall   ),
+    .smt_mode     (smt_mode    ),
     .fetch_tid    (fetch_tid   )
 );
 
@@ -480,18 +492,22 @@ bypass_network u_bypass0(
     .ro_rs2_addr     (iss0_rs2       ),
     .ro_rs1_regdata  (ro0_data1      ),
     .ro_rs2_regdata  (ro0_data2      ),
+    .ro_tid          (iss0_tid       ),
     .pipe0_valid     (p0_ex_valid    ),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
+    .pipe0_tid       (p0_ex_tid      ),
     .pipe1_valid     (p1_alu_valid   ),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
+    .pipe1_tid       (p1_alu_tid     ),
     .mem_valid       (mem_wb_valid   ),
     .mem_rd          (mem_wb_rd      ),
     .mem_rd_wen      (mem_wb_rd_wen  ),
     .mem_data        (mem_wb_data    ),
+    .mem_tid         (mem_wb_tid_r   ),
     .op_a            (byp0_op_a      ),
     .op_b            (byp0_op_b      ),
     .fwd_src_a       (byp0_fwd_a     ),
@@ -507,18 +523,22 @@ bypass_network u_bypass1(
     .ro_rs2_addr     (iss1_rs2       ),
     .ro_rs1_regdata  (ro1_data1      ),
     .ro_rs2_regdata  (ro1_data2      ),
+    .ro_tid          (iss1_tid       ),
     .pipe0_valid     (p0_ex_valid    ),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
+    .pipe0_tid       (p0_ex_tid      ),
     .pipe1_valid     (p1_alu_valid   ),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
+    .pipe1_tid       (p1_alu_tid     ),
     .mem_valid       (mem_wb_valid   ),
     .mem_rd          (mem_wb_rd      ),
     .mem_rd_wen      (mem_wb_rd_wen  ),
     .mem_data        (mem_wb_data    ),
+    .mem_tid         (mem_wb_tid_r   ),
     .op_a            (byp1_op_a      ),
     .op_b            (byp1_op_b      ),
     .fwd_src_a       (byp1_fwd_a     ),
@@ -676,6 +696,7 @@ reg [4:0]  mem_wb_tag_r;
 reg [2:0]  mem_wb_fu_r;
 reg [0:0]  mem_wb_tid_r;
 reg        mem_wb_mem2reg_r;
+reg [2:0]  mem_wb_func3_r;  // Added: delayed func3
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -687,6 +708,7 @@ always @(posedge clk or negedge rstn) begin
         mem_wb_fu_r      <= 3'd0;
         mem_wb_tid_r     <= 1'b0;
         mem_wb_mem2reg_r <= 1'b0;
+        mem_wb_func3_r   <= 3'd0;
     end else begin
         mem_wb_valid_r   <= p1_mem_req_valid;
         mem_wb_rd_r      <= p1_mem_req_rd;
@@ -695,6 +717,7 @@ always @(posedge clk or negedge rstn) begin
         mem_wb_fu_r      <= p1_mem_req_fu;
         mem_wb_tid_r     <= p1_mem_req_tid;
         mem_wb_mem2reg_r <= p1_mem_req_mem2reg;
+        mem_wb_func3_r   <= p1_mem_req_func3;  // Save func3 for later use
     end
 end
 
@@ -706,7 +729,7 @@ stage_wb u_stage_wb_mem(
     .wb_mem_data   (mem_rdata        ),
     .wb_alu_o      (32'd0            ), // not used for load path
     .wb_mem2reg    (1'b1             ), // always select mem data for this path
-    .wb_func3_code (p1_mem_req_func3 ),
+    .wb_func3_code (mem_wb_func3_r   ), // Use delayed func3
     .w_regs_data   (wb_load_data     )
 );
 

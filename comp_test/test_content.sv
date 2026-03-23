@@ -74,6 +74,17 @@ initial begin
     end
     else if (test_id == 4) begin
         // test_rv32i_full.s — comprehensive RV32I instruction test
+        // Debug output
+        $display("test_rv32i_full Debug:");
+        $display("DRAM[1029] BEQ  = %h, expected 0x01", `TB_DRAM.mem[1029]);
+        $display("DRAM[1030] BNE  = %h, expected 0x02", `TB_DRAM.mem[1030]);
+        $display("DRAM[1031] BLT  = %h, expected 0x03", `TB_DRAM.mem[1031]);
+        $display("DRAM[1032] BGE  = %h, expected 0x04", `TB_DRAM.mem[1032]);
+        $display("DRAM[1033] BLTU = %h, expected 0x05", `TB_DRAM.mem[1033]);
+        $display("DRAM[1034] BGEU = %h, expected 0x06", `TB_DRAM.mem[1034]);
+        $display("DRAM[1035] JAL  = %h, expected 0x07", `TB_DRAM.mem[1035]);
+        $display("DRAM[1036] JALR = %h, expected 0x08", `TB_DRAM.mem[1036]);
+        $display("DRAM[1037] LUI  = %h, expected 0xDEADB000", `TB_DRAM.mem[1037]);
         // Check branch-pass markers stored to DRAM by the test
         pass = pass
             && (`TB_DRAM.mem[0][7:0]   === 8'h04)        // TUBE end marker

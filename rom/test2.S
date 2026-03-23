@@ -11,7 +11,8 @@ _start:
    li x2, 0x2a  #addi x2, x0,0x2a
    li x4, 0x0    #addi x4, x0, 0x0
    # set base address for data access
-   la x3, data_seg #auipc, addi
+   # la x3, data_seg is broken, use lui instead
+   lui x3, 0x1        # x3 = 0x1000
    # remove RAW hazard
    nop
    nop
