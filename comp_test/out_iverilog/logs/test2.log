@@ -1158,6 +1158,6 @@ id_inst: 00000013
 ==================================================================
 ========= This case is pass !!!                 8400
 ==================================================================
-E:\AdamRiscv\comp_test\tb.sv:98: $finish called at 8400 (1ns)
+E:\SMT-risc-v_core\comp_test\tb.sv:98: $finish called at 8400 (1ns)
 me_alu_o: 00000000
 wb_alu_o     : 00000000

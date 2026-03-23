@@ -1,0 +1,27 @@
+../module/CORE/RTL_V1_2/adam_riscv_v2.v
+../module/CORE/RTL_V1_2/define.v
+../module/CORE/RTL_V1_2/syn_rst.v
+../module/CORE/RTL_V1_2/thread_scheduler.v
+../module/CORE/RTL_V1_2/pc_mt.v
+../module/CORE/RTL_V1_2/inst_memory.v
+../module/CORE/RTL_V1_2/bpu_bimodal.v
+../module/CORE/RTL_V1_2/fetch_buffer.v
+../module/CORE/RTL_V1_2/decoder_dual.v
+../module/CORE/RTL_V1_2/stage_is.v
+../module/CORE/RTL_V1_2/ctrl.v
+../module/CORE/RTL_V1_2/imm_gen.v
+../module/CORE/RTL_V1_2/scoreboard_v2.v
+../module/CORE/RTL_V1_2/regs_mt.v
+../module/CORE/RTL_V1_2/bypass_network.v
+../module/CORE/RTL_V1_2/exec_pipe0.v
+../module/CORE/RTL_V1_2/exec_pipe1.v
+../module/CORE/RTL_V1_2/mul_unit.v
+../module/CORE/RTL_V1_2/alu.v
+../module/CORE/RTL_V1_2/alu_control.v
+../module/CORE/RTL_V1_2/stage_mem.v
+../module/CORE/RTL_V1_2/data_memory.v
+../module/CORE/RTL_V1_2/stage_wb.v
+../module/CORE/RTL_V1_2/csr_unit.v
+../module/CORE/RTL_V1_2/stage_if_v2.v
++libext+ ../libs/REG_ARRAY/SRAM/ram_bfm.v
++incdir+../module/CORE/RTL_V1_2/

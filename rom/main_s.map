@@ -12,25 +12,25 @@ Linker script and memory map
 
 .text           0x00000000      0x838
  *(.text*)
- .text          0x00000000      0x838 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+ .text          0x00000000      0x838 C:\Users\23178\AppData\Local\Temp\ccWce5ZO.o
                 0x00000000                _start
  *(.rodata*)
                 0x00001000                        . = 0x1000
 
 .data           0x00001000       0x10
  *(.data*)
- .data          0x00001000       0x10 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+ .data          0x00001000       0x10 C:\Users\23178\AppData\Local\Temp\ccWce5ZO.o
  *(.sdata*)
 
 .bss            0x00001010        0x0
  *(.sbss*)
  *(.bss*)
- .bss           0x00001010        0x0 C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+ .bss           0x00001010        0x0 C:\Users\23178\AppData\Local\Temp\ccWce5ZO.o
  *(COMMON)
-LOAD C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
-OUTPUT(E:\AdamRiscv\rom\main_s.elf elf32-littleriscv)
+LOAD C:\Users\23178\AppData\Local\Temp\ccWce5ZO.o
+OUTPUT(E:\SMT-risc-v_core\rom\main_s.elf elf32-littleriscv)
 
 .riscv.attributes
                 0x00000000       0x1a
  .riscv.attributes
-                0x00000000       0x1a C:\Users\23178\AppData\Local\Temp\ccwObCgV.o
+                0x00000000       0x1a C:\Users\23178\AppData\Local\Temp\ccWce5ZO.o

@@ -14,6 +14,8 @@ initial begin
         test_id = 2;
     else if (`TB_IROM.mem[0] === 32'h00001237)   // test_smt: lui x4, 1 (0x00001237)
         test_id = 3;
+    else if (`TB_IROM.mem[0] === 32'h06400093)   // test_rv32i_full: addi x1, x0, 100 (0x064_000_93)
+        test_id = 4;
     else
         test_id = 0;
 end
@@ -69,6 +71,21 @@ initial begin
             && (`TB_DRAM.mem[1152]     === 32'h00000037)  // T0 sum = 55
             && (`TB_DRAM.mem[1153]     === 32'h0000001E)  // T1 product = 30
             && (`TB_DRAM.mem[0][7:0]   === 8'h04);        // TUBE end marker
+    end
+    else if (test_id == 4) begin
+        // test_rv32i_full.s — comprehensive RV32I instruction test
+        // Check branch-pass markers stored to DRAM by the test
+        pass = pass
+            && (`TB_DRAM.mem[0][7:0]   === 8'h04)        // TUBE end marker
+            && (`TB_DRAM.mem[1029]      === 32'h00000001)  // BEQ  passed
+            && (`TB_DRAM.mem[1030]      === 32'h00000002)  // BNE  passed
+            && (`TB_DRAM.mem[1031]      === 32'h00000003)  // BLT  passed
+            && (`TB_DRAM.mem[1032]      === 32'h00000004)  // BGE  passed
+            && (`TB_DRAM.mem[1033]      === 32'h00000005)  // BLTU passed
+            && (`TB_DRAM.mem[1034]      === 32'h00000006)  // BGEU passed
+            && (`TB_DRAM.mem[1035]      === 32'h00000007)  // JAL  passed
+            && (`TB_DRAM.mem[1036]      === 32'h00000008)  // JALR passed
+            && (`TB_DRAM.mem[1037]      === 32'hDEADB000); // LUI  result
     end
     else begin
         $display("Unknown ROM signature, TB_IROM.mem[0]=%h", `TB_IROM.mem[0]);

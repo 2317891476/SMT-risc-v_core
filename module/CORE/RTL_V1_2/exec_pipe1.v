@@ -1,0 +1,154 @@
+// =============================================================================
+// Module : exec_pipe1
+// Description: Execution Pipeline 1 — Integer ALU + Multiplier + AGU (Load/Store)
+//   This pipe handles:
+//     1) Integer ALU ops (same 1-cycle latency as pipe0, no branch resolution)
+//     2) Multiplier ops (3-cycle latency, via mul_unit)
+//     3) Address Generation for Load/Store (1-cycle, base + offset)
+//
+//   The pipe arbitrates between ALU/MUL/AGU based on in_fu and in_mem* signals.
+//   Only one sub-unit operates per cycle (guaranteed by scoreboard FU checking).
+// =============================================================================
+`include "define.v"
+
+module exec_pipe1 #(
+    parameter TAG_W = 5
+)(
+    input  wire               clk,
+    input  wire               rstn,
+
+    // ─── Input from Issue / RO stage ────────────────────────────
+    input  wire               in_valid,
+    input  wire [TAG_W-1:0]   in_tag,
+    input  wire [31:0]        in_pc,
+    input  wire [31:0]        in_op_a,       // rs1 data (after bypass)
+    input  wire [31:0]        in_op_b,       // rs2 data (after bypass)
+    input  wire [31:0]        in_imm,
+    input  wire [2:0]         in_func3,
+    input  wire               in_func7,
+    input  wire [2:0]         in_alu_op,
+    input  wire [1:0]         in_alu_src1,
+    input  wire [1:0]         in_alu_src2,
+    input  wire               in_br,         // should always be 0 for pipe1
+    input  wire               in_mem_read,
+    input  wire               in_mem_write,
+    input  wire               in_mem2reg,
+    input  wire [4:0]         in_rd,
+    input  wire               in_regs_write,
+    input  wire [2:0]         in_fu,
+    input  wire [0:0]         in_tid,
+
+    // ─── ALU / AGU result (1-cycle path) ────────────────────────
+    output wire               alu_out_valid,
+    output wire [TAG_W-1:0]   alu_out_tag,
+    output wire [31:0]        alu_out_result,
+    output wire [4:0]         alu_out_rd,
+    output wire               alu_out_regs_write,
+    output wire [2:0]         alu_out_fu,
+    output wire [0:0]         alu_out_tid,
+
+    // ─── Memory interface (to D-TLB / DCache) ──────────────────
+    output wire               mem_req_valid,
+    output wire               mem_req_wen,     // 1=store, 0=load
+    output wire [31:0]        mem_req_addr,    // effective address
+    output wire [31:0]        mem_req_wdata,   // store data
+    output wire [2:0]         mem_req_func3,   // LB/LH/LW/SB/SH/SW
+    output wire [TAG_W-1:0]   mem_req_tag,
+    output wire [4:0]         mem_req_rd,
+    output wire               mem_req_regs_write,
+    output wire [2:0]         mem_req_fu,
+    output wire               mem_req_mem2reg,
+    output wire [0:0]         mem_req_tid,
+
+    // ─── Multiplier result (3-cycle path) ───────────────────────
+    output wire               mul_out_valid,
+    output wire [TAG_W-1:0]   mul_out_tag,
+    output wire [31:0]        mul_out_result,
+    output wire [4:0]         mul_out_rd,
+    output wire               mul_out_regs_write,
+    output wire [2:0]         mul_out_fu,
+    output wire [0:0]         mul_out_tid
+);
+
+// ─── Routing logic ──────────────────────────────────────────────────────────
+wire is_mem_op = in_mem_read || in_mem_write;
+wire is_mul_op = (in_fu == `FU_MUL);
+wire is_alu_op = in_valid && !is_mem_op && !is_mul_op;
+
+// ─── ALU path (same logic as pipe0 but no branch) ──────────────────────────
+wire [3:0] alu_ctrl;
+
+alu_control u_alu_control (
+    .alu_op     (in_alu_op  ),
+    .func3_code (in_func3   ),
+    .func7_code (in_func7   ),
+    .alu_ctrl_r (alu_ctrl   )
+);
+
+wire [31:0] alu_op_A, alu_op_B;
+assign alu_op_A = (in_alu_src1 == `NULL) ? 32'd0 :
+                  (in_alu_src1 == `PC)   ? in_pc  : in_op_a;
+assign alu_op_B = (in_alu_src2 == `PC_PLUS4) ? 32'd4   :
+                  (in_alu_src2 == `IMM)      ? in_imm   : in_op_b;
+
+wire [31:0] alu_result;
+wire        alu_br_mark; // unused
+
+alu u_alu (
+    .alu_ctrl (alu_ctrl   ),
+    .op_A     (alu_op_A   ),
+    .op_B     (alu_op_B   ),
+    .alu_o    (alu_result ),
+    .br_mark  (alu_br_mark)
+);
+
+// ─── AGU (Address Generation Unit) ──────────────────────────────────────────
+wire [31:0] eff_addr = in_op_a + in_imm;  // base + offset
+
+// ─── MUL Unit ───────────────────────────────────────────────────────────────
+mul_unit #(.TAG_W(TAG_W)) u_mul (
+    .clk           (clk           ),
+    .rstn          (rstn          ),
+    .in_valid      (in_valid && is_mul_op),
+    .in_tag        (in_tag        ),
+    .in_op_a       (in_op_a       ),
+    .in_op_b       (in_op_b       ),
+    .in_func3      (in_func3      ),
+    .in_rd         (in_rd         ),
+    .in_regs_write (in_regs_write ),
+    .in_fu         (in_fu         ),
+    .in_tid        (in_tid        ),
+    .out_valid     (mul_out_valid     ),
+    .out_tag       (mul_out_tag       ),
+    .out_result    (mul_out_result    ),
+    .out_rd        (mul_out_rd        ),
+    .out_regs_write(mul_out_regs_write),
+    .out_fu        (mul_out_fu        ),
+    .out_tid       (mul_out_tid       )
+);
+
+// ─── ALU output (INT + AGU share, but only one active at a time) ────────────
+// For memory ops: ALU out carries the effective address (used for bypass of rd
+// in store-to-load forwarding scenarios, but rd write is deferred to MEM stage)
+assign alu_out_valid      = is_alu_op;
+assign alu_out_tag        = in_tag;
+assign alu_out_result     = is_mem_op ? eff_addr : alu_result;
+assign alu_out_rd         = in_rd;
+assign alu_out_regs_write = is_alu_op ? in_regs_write : 1'b0; // mem writes via MEM stage
+assign alu_out_fu         = in_fu;
+assign alu_out_tid        = in_tid;
+
+// ─── Memory request output ─────────────────────────────────────────────────
+assign mem_req_valid      = in_valid && is_mem_op;
+assign mem_req_wen        = in_mem_write;
+assign mem_req_addr       = eff_addr;
+assign mem_req_wdata      = in_op_b;  // rs2 data for store
+assign mem_req_func3      = in_func3;
+assign mem_req_tag        = in_tag;
+assign mem_req_rd         = in_rd;
+assign mem_req_regs_write = in_regs_write;
+assign mem_req_fu         = in_fu;
+assign mem_req_mem2reg    = in_mem2reg;
+assign mem_req_tid        = in_tid;
+
+endmodule
