@@ -62,6 +62,7 @@ wire       flush_any;
 wire       pipe0_br_ctrl;
 wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
+wire       pipe0_br_complete;  // branch execution complete (taken or not)
 
 assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
@@ -390,7 +391,10 @@ scoreboard_v2 #(
     .wb1_rd          (wb1_rd          ),
     .wb1_regs_write  (wb1_regs_write  ),
     .wb1_fu          (wb1_fu          ),
-    .wb1_tid         (wb1_tid         )
+    .wb1_tid         (wb1_tid         ),
+
+    // Branch completion
+    .br_complete     (pipe0_br_complete)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -418,41 +422,44 @@ wire [0:0]  w_regs_tid_1;
 // For now: single write port, prioritize pipe 0 writeback, pipe 1 writes next cycle
 // (simplified approach for correctness; true dual-port can be added)
 
-// Merged writeback: pipe0 wins if both are valid
-wire        w_regs_en   = w_regs_en_0 ? w_regs_en_0 : w_regs_en_1;
-wire [4:0]  w_regs_addr = w_regs_en_0 ? w_regs_addr_0 : w_regs_addr_1;
-wire [31:0] w_regs_data = w_regs_en_0 ? w_regs_data_0 : w_regs_data_1;
-wire [0:0]  w_regs_tid  = w_regs_en_0 ? w_regs_tid_0  : w_regs_tid_1;
-
+// Dual write ports for dual-issue support
 regs_mt #(.N_T(2)) u_regs_mt(
-    .clk          (clk             ),
-    .rstn         (rstn            ),
-    .r_thread_id  (iss0_tid        ),
-    .r_regs_addr1 (iss0_rs1        ),
-    .r_regs_addr2 (iss0_rs2        ),
-    .w_thread_id  (w_regs_tid      ),
-    .w_regs_addr  (w_regs_addr     ),
-    .w_regs_data  (w_regs_data     ),
-    .w_regs_en    (w_regs_en       ),
-    .r_regs_o1    (ro0_data1       ),
-    .r_regs_o2    (ro0_data2       )
+    .clk            (clk             ),
+    .rstn           (rstn            ),
+    .r_thread_id    (iss0_tid        ),
+    .r_regs_addr1   (iss0_rs1        ),
+    .r_regs_addr2   (iss0_rs2        ),
+    .w_thread_id_0  (w_regs_tid_0    ),
+    .w_regs_addr_0  (w_regs_addr_0   ),
+    .w_regs_data_0  (w_regs_data_0   ),
+    .w_regs_en_0    (w_regs_en_0     ),
+    .w_thread_id_1  (w_regs_tid_1    ),
+    .w_regs_addr_1  (w_regs_addr_1   ),
+    .w_regs_data_1  (w_regs_data_1   ),
+    .w_regs_en_1    (w_regs_en_1     ),
+    .r_regs_o1      (ro0_data1       ),
+    .r_regs_o2      (ro0_data2       )
 );
 
 // Port 1 read: second instance for pipe1 operands
 wire [31:0] ro1_data1, ro1_data2;
 
 regs_mt #(.N_T(2)) u_regs_mt_p1(
-    .clk          (clk             ),
-    .rstn         (rstn            ),
-    .r_thread_id  (iss1_tid        ),
-    .r_regs_addr1 (iss1_rs1        ),
-    .r_regs_addr2 (iss1_rs2        ),
-    .w_thread_id  (w_regs_tid      ),
-    .w_regs_addr  (w_regs_addr     ),
-    .w_regs_data  (w_regs_data     ),
-    .w_regs_en    (w_regs_en       ),
-    .r_regs_o1    (ro1_data1       ),
-    .r_regs_o2    (ro1_data2       )
+    .clk            (clk             ),
+    .rstn           (rstn            ),
+    .r_thread_id    (iss1_tid        ),
+    .r_regs_addr1   (iss1_rs1        ),
+    .r_regs_addr2   (iss1_rs2        ),
+    .w_thread_id_0  (w_regs_tid_0    ),
+    .w_regs_addr_0  (w_regs_addr_0   ),
+    .w_regs_data_0  (w_regs_data_0   ),
+    .w_regs_en_0    (w_regs_en_0     ),
+    .w_thread_id_1  (w_regs_tid_1    ),
+    .w_regs_addr_1  (w_regs_addr_1   ),
+    .w_regs_data_1  (w_regs_data_1   ),
+    .w_regs_en_1    (w_regs_en_1     ),
+    .r_regs_o1      (ro1_data1       ),
+    .r_regs_o2      (ro1_data2       )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -575,7 +582,8 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .out_tid          (p0_ex_tid        ),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
-    .br_tid           (pipe0_br_tid     )
+    .br_tid           (pipe0_br_tid     ),
+    .br_complete      (pipe0_br_complete)
 );
 
 // ─── Execution Pipe 1 (INT + MUL + AGU) ────────────────────────────────────

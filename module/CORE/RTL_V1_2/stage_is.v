@@ -57,13 +57,18 @@ imm_gen u_imm_gen(
     .imm_o (is_imm )
 );
 
+// func7[0] indicates MUL instructions (func7 = 0000001)
+wire func7_mul = is_inst[25];  // bit 25 of instruction = func7[0]
+
 always @(*) begin
     is_fu = `FU_NOP;
     case (opcode)
         `Rtype: begin
-            // RV32M multiplication instructions (func3 0,1,2,3,4 with func7=1)
+            // RV32M multiplication instructions (func3 0,1,2,3,4 with func7=0000001)
             // MUL, MULH, MULHSU, MULHU need FU_MUL
-            if (func7_code && (func3 == 3'd0 || func3 == 3'd1 || func3 == 3'd2 || func3 == 3'd3 || func3 == 3'd4)) begin
+            // Note: func7_code is inst[30] (func7[5]), but MUL uses func7=0000001
+            // SUB uses func7=0100000, so we need to check func7[0] (inst[25])
+            if (func7_mul && (func3 == 3'd0 || func3 == 3'd1 || func3 == 3'd2 || func3 == 3'd3 || func3 == 3'd4)) begin
                 is_fu = `FU_MUL;
             end else begin
                 is_fu = `FU_INT1;  // R-type ALU -> Pipe 1

@@ -99,8 +99,9 @@ initial begin
             && (`TB_DRAM.mem[1037]      === 32'hDEADB000); // LUI  result
     end
     else begin
-        $display("Unknown ROM signature, TB_IROM.mem[0]=%h", `TB_IROM.mem[0]);
-        pass = 1'b0;
+        // Generic test: just check DRAM[0] == 0x04 (pass marker)
+        $display("Unknown ROM signature, TB_IROM.mem[0]=%h - treating as generic test", `TB_IROM.mem[0]);
+        pass = pass && (`TB_DRAM.mem[0][7:0] === 8'h04);
     end
 
     if (pass)

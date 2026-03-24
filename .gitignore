@@ -13,8 +13,35 @@
 *.o
 *.elf
 
+# RISC-V test config files
+*.cgf
+
+# Build artifacts
+*.s
+*.map
+*.dump
+*.verilog
+
 # Verilog hex files (generated from assembly)
 *.hex
+
+# RISCOF work directories
+verification/riscof/dut/
+verification/riscof/references/
+verification/riscof/riscof_work/
+verification/riscof/sail_cSim/
+**/__pycache__/
+
+# Downloaded test suites (auto-downloaded)
+verification/riscv-arch-test/
+verification/riscv-tests/
+
+# Test run outputs
+verification/riscv_test_runs/
+verification/adapter/
+
+# Downloaded zip files
+*.zip
 
 # Backup files
 *.bak

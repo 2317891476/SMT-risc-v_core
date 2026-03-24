@@ -46,7 +46,8 @@ module exec_pipe0 #(
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
     output wire [31:0]        br_addr,       // branch target address
-    output wire [0:0]         br_tid         // which thread branched
+    output wire [0:0]         br_tid,        // which thread branched
+    output wire               br_complete    // branch execution complete (taken or not)
 );
 
 // ─── ALU control ────────────────────────────────────────────────────────────
@@ -96,6 +97,16 @@ reg [0:0]         out_tid_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
+reg               br_complete_r;   // branch execution complete
+
+// Store issue-time values for branch resolution (these are used 1 cycle later)
+reg [31:0]        stored_pc;
+reg [31:0]        stored_imm;
+reg [31:0]        stored_op_a;     // for JALR
+reg               stored_br;
+reg               stored_br_addr_mode;
+reg               stored_valid;
+reg               stored_br_mark;  // store the branch decision
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -109,7 +120,31 @@ always @(posedge clk or negedge rstn) begin
         br_ctrl_r        <= 1'b0;
         br_addr_r        <= 32'd0;
         br_tid_r         <= 1'b0;
+        br_complete_r    <= 1'b0;
+        stored_pc        <= 32'd0;
+        stored_imm       <= 32'd0;
+        stored_op_a      <= 32'd0;
+        stored_br        <= 1'b0;
+        stored_br_addr_mode <= 1'b0;
+        stored_valid     <= 1'b0;
+        stored_br_mark   <= 1'b0;
     end else begin
+        // Store issue-time values (including br_mark computed from current inputs)
+        stored_pc        <= in_pc;
+        stored_imm       <= in_imm;
+        stored_op_a      <= op_A_pre;   // for JALR (rs1 value)
+        stored_br        <= in_br;
+        stored_br_addr_mode <= in_br_addr_mode;
+        stored_valid     <= in_valid;
+        stored_br_mark   <= br_mark;    // store branch decision computed this cycle
+        
+        `ifndef SYNTHESIS
+        if (in_valid) begin
+            $display("EXEC0: PC=%h, in_br=%b, br_mark=%b", in_pc, in_br, br_mark);
+        end
+        `endif
+        
+        // Output registers (1 cycle delay)
         out_valid_r      <= in_valid;
         out_tag_r        <= in_tag;
         out_result_r     <= alu_out;
@@ -117,9 +152,12 @@ always @(posedge clk or negedge rstn) begin
         out_regs_write_r <= in_regs_write;
         out_fu_r         <= in_fu;
         out_tid_r        <= in_tid;
-        br_ctrl_r        <= in_valid && in_br && br_mark;
-        br_addr_r        <= br_addr_op_A + in_imm;
-        br_tid_r         <= in_tid;
+        
+        // Branch resolution uses stored values from previous cycle
+        br_ctrl_r        <= stored_valid && stored_br && stored_br_mark;
+        br_addr_r        <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+        br_tid_r         <= out_tid_r;  // use output register's tid
+        br_complete_r    <= stored_valid && stored_br;  // branch completed (taken or not)
     end
 end
 
@@ -134,5 +172,6 @@ assign out_tid        = out_tid_r;
 assign br_ctrl = br_ctrl_r;
 assign br_addr = br_addr_r;
 assign br_tid  = br_tid_r;
+assign br_complete = br_complete_r;
 
 endmodule

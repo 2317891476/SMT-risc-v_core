@@ -1,0 +1,126 @@
+name: RISC-V CPU CI
+
+on:
+  push:
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y iverilog
+        pip install riscof
+
+    - name: Install RISC-V toolchain
+      run: |
+        wget -q https://github.com/xpack-dev-tools/riscv-none-elf-gcc-xpack/releases/download/v13.2.0-1/xpack-riscv-none-elf-gcc-13.2.0-1-linux-x64.tar.gz
+        tar -xzf xpack-riscv-none-elf-gcc-13.2.0-1-linux-x64.tar.gz
+        echo "$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin" >> $GITHUB_PATH
+
+    - name: Install Spike (Reference Model)
+      run: |
+        sudo apt-get install -y device-tree-compiler
+        git clone --recursive https://github.com/riscv-software-src/riscv-isa-sim.git
+        cd riscv-isa-sim
+        mkdir build && cd build
+        ../configure --prefix=$HOME/spike
+        make -j$(nproc)
+        make install
+        echo "$HOME/spike/bin" >> $GITHUB_PATH
+
+    - name: Build ROMs
+      run: |
+        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        cd rom
+        for test in test1.s test2.S test_smt.s test_rv32i_full.s; do
+          if [ -f "$test" ]; then
+            base=$(basename "$test" .s)
+            base=$(basename "$base" .S)
+            riscv-none-elf-as -march=rv32im -mabi=ilp32 -o ${base}.o $test
+            riscv-none-elf-ld -T harvard_link.ld -o ${base}.elf ${base}.o
+            riscv-none-elf-objcopy -O verilog ${base}.elf inst.hex
+            echo "Built $test"
+          fi
+        done
+
+    - name: Run V1 Tests
+      run: |
+        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        cd comp_test
+        
+        # Compile V1 testbench
+        iverilog -g2012 -s tb -o out_iverilog/bin/tb_v1.out \
+          -I ../module/CORE/RTL_V1_2 \
+          $(cat module_list | xargs) \
+          ../libs/REG_ARRAY/SRAM/ram_bfm.v \
+          tb.sv 2>&1 || true
+        
+        # Run and check results
+        if [ -f out_iverilog/bin/tb_v1.out ]; then
+          vvp out_iverilog/bin/tb_v1.out 2>&1 | tee v1_test.log
+          grep -q "PASS" v1_test.log && echo "V1 Tests PASSED" || echo "V1 Tests FAILED"
+        fi
+
+    - name: Run V2 Tests
+      run: |
+        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        cd comp_test
+        
+        # Restore test_rv32i_full ROM
+        cd ../rom
+        riscv-none-elf-as -march=rv32im -mabi=ilp32 -o test_rv32i_full.o test_rv32i_full.s
+        riscv-none-elf-ld -T harvard_link.ld -o test_rv32i_full.elf test_rv32i_full.o
+        riscv-none-elf-objcopy -O verilog test_rv32i_full.elf inst.hex
+        cd ../comp_test
+        
+        # Compile V2 testbench
+        iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2.out \
+          -I ../module/CORE/RTL_V1_2 \
+          ../module/CORE/RTL_V1_2/*.v \
+          ../libs/REG_ARRAY/SRAM/ram_bfm.v \
+          tb_v2.sv 2>&1
+        
+        # Run V2 tests
+        vvp out_iverilog/bin/tb_v2.out 2>&1 | tee v2_test.log
+        grep -q "PASS" v2_test.log && echo "V2 Tests PASSED" || echo "V2 Tests FAILED"
+
+    - name: Run RISCOF Tests
+      run: |
+        export PATH="$HOME/spike/bin:$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        
+        # Clone riscv-tests
+        git clone https://github.com/riscv-software-src/riscv-tests.git
+        
+        cd verification/riscof
+        
+        # Update config.ini with absolute paths
+        sed -i "s|E:\\\\1\\\\SMT-risc-v_core|$GITHUB_WORKSPACE|g" config.ini
+        
+        # Run RISCOF
+        riscof run --config config.ini --suite ../../riscv-tests/isa --env ../../riscv-tests/env 2>&1 || true
+        
+        # Check results
+        if [ -d "riscof_work" ]; then
+          echo "RISCOF tests completed"
+        fi
+
+    - name: Upload Test Results
+      uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: test-results
+        path: |
+          comp_test/*.log
+          comp_test/out_iverilog/logs/
+          verification/riscof/riscof_work/

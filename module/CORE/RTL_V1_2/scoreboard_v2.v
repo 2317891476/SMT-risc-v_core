@@ -150,7 +150,10 @@ module scoreboard_v2 #(
     input  wire [4:0]              wb1_rd,
     input  wire                    wb1_regs_write,
     input  wire [2:0]              wb1_fu,
-    input  wire [0:0]              wb1_tid
+    input  wire [0:0]              wb1_tid,
+
+    // ─── Branch completion signal ───────────────────────────────
+    input  wire                    br_complete     // branch execution complete (taken or not)
 );
 
 // ═══════════════ RS Entry Storage ═══════════════════════════════════════════
@@ -233,9 +236,24 @@ assign alloc1_tag = win_tag[free1_idx];
 wire can_accept_1, can_accept_2;
 assign can_accept_1 = free0_found;
 assign can_accept_2 = free0_found && free1_found;
+
+// ═══════════════ Pending Branch Detection ══════════════════════════════════
+// When a branch is pending (dispatched but not yet issued), we must stall
+// subsequent dispatches to prevent speculative execution issues.
+// This is a conservative approach - the branch must be issued before we
+// can dispatch more instructions for the same thread.
+
+// Branch stall for dispatch: stop dispatch when branch is pending for the same thread
+wire branch_stall;
+assign branch_stall = (disp0_valid && pending_branch_t0 && disp0_tid == 1'b0) ||
+                      (disp0_valid && pending_branch_t1 && disp0_tid == 1'b1) ||
+                      (disp1_valid && pending_branch_t0 && disp1_tid == 1'b0) ||
+                      (disp1_valid && pending_branch_t1 && disp1_tid == 1'b1);
+
 assign disp_stall   = (disp0_valid && disp1_valid && !can_accept_2) ||
                       (disp0_valid && !disp1_valid && !can_accept_1) ||
-                      (!disp0_valid && disp1_valid && !can_accept_1);
+                      (!disp0_valid && disp1_valid && !can_accept_1) ||
+                      branch_stall;
 
 // ═══════════════ Dependency Lookup (combinational) ═════════════════════════
 // For dispatch port 0:
@@ -311,7 +329,67 @@ end
 reg                     sel0_found, sel1_found;
 reg  [RS_IDX_W-1:0]     sel0_idx,   sel1_idx;
 reg  [15:0]             sel0_seq,   sel1_seq;
-reg                     war_block_0, war_block_1;
+reg                     sel0_is_br, sel1_is_br;  // Track if selected instruction is a branch
+
+// Captured issue info (for use in sequential logic)
+reg                     sel0_issued_br_r, sel1_issued_br_r;  // Registered versions
+reg  [RS_IDX_W-1:0]     sel0_issued_idx_r, sel1_issued_idx_r;
+reg  [0:0]              sel0_issued_tid_r, sel1_issued_tid_r;
+
+// ═══════════════ Branch Priority Issue ═════════════════════════════════════
+// When a branch is pending, we must issue it before any other instruction.
+// This prevents speculative execution of instructions after the branch.
+// Find the oldest pending branch for each thread (even if not ready).
+
+reg  [RS_IDX_W-1:0]     br_idx_t0,  br_idx_t1;
+reg  [15:0]             br_seq_t0,  br_seq_t1;  // Min seq of pending branch
+reg                     br_found_t0, br_found_t1;
+
+always @(*) begin
+    br_found_t0 = 1'b0;
+    br_found_t1 = 1'b0;
+    br_idx_t0   = {RS_IDX_W{1'b0}};
+    br_idx_t1   = {RS_IDX_W{1'b0}};
+    br_seq_t0   = 16'hffff;
+    br_seq_t1   = 16'hffff;
+
+    // Find the oldest pending branch (even if not ready yet)
+    for (i = 0; i < RS_DEPTH; i = i + 1) begin
+        if (win_valid[i] && !win_issued[i] && win_br[i]) begin
+            if (win_tid[i] == 1'b0) begin
+                if (!br_found_t0 || (win_seq[i] < br_seq_t0)) begin
+                    br_found_t0 = 1'b1;
+                    br_idx_t0   = i[RS_IDX_W-1:0];
+                    br_seq_t0   = win_seq[i];
+                end
+            end else begin
+                if (!br_found_t1 || (win_seq[i] < br_seq_t1)) begin
+                    br_found_t1 = 1'b1;
+                    br_idx_t1   = i[RS_IDX_W-1:0];
+                    br_seq_t1   = win_seq[i];
+                end
+            end
+        end
+    end
+end
+
+// A thread has a pending branch if there's any valid unissued branch OR branch in flight
+// "Branch in flight" means branch has been issued but result not yet determined (1 cycle delay)
+reg  branch_in_flight_t0, branch_in_flight_t1;
+// Track if we just issued a branch this cycle (to block same-cycle dual-issue)
+reg  branch_issued_t0, branch_issued_t1;
+// Save the seq of the last issued branch (used when branch_in_flight but br_found=0)
+reg  [15:0]            last_br_seq_t0, last_br_seq_t1;
+
+wire pending_branch_t0 = br_found_t0 || branch_in_flight_t0;
+wire pending_branch_t1 = br_found_t1 || branch_in_flight_t1;
+// Effective branch seq: use the branch being selected this cycle (if any), otherwise use saved seq
+wire [15:0] effective_br_seq_t0 = (sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b0) ? win_seq[sel0_idx] :
+                                  (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b0) ? win_seq[sel1_idx] :
+                                  branch_in_flight_t0 ? last_br_seq_t0 : br_seq_t0;
+wire [15:0] effective_br_seq_t1 = (sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b1) ? win_seq[sel0_idx] :
+                                  (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b1) ? win_seq[sel1_idx] :
+                                  branch_in_flight_t1 ? last_br_seq_t1 : br_seq_t1;
 
 always @(*) begin
     sel0_found  = 1'b0;
@@ -320,6 +398,8 @@ always @(*) begin
     sel1_idx    = {RS_IDX_W{1'b0}};
     sel0_seq    = 16'hffff;
     sel1_seq    = 16'hffff;
+    sel0_is_br  = 1'b0;
+    sel1_is_br  = 1'b0;
 
     // ── Default issue outputs ───────────────────────────────────
     iss0_valid = 1'b0; iss0_tag = 0; iss0_pc = 0; iss0_imm = 0;
@@ -343,29 +423,65 @@ always @(*) begin
     // ── Pass 1: select oldest ready instruction for Port 0 ─────
     // Port 0 (exec_pipe0) handles: FU_INT0 (Branch/LUI/AUIPC), and can also take FU_INT1
     // Note: FU_INT0 and FU_INT1 don't use fu_busy since they can dual-issue
+    // IMPORTANT: If a branch is pending, only issue instructions with seq <= branch seq
+    `ifndef SYNTHESIS
+    if (branch_in_flight_t0 || branch_in_flight_t1) begin
+        $display("SB PASS1: branch_in_flight t0=%b t1=%b at start", branch_in_flight_t0, branch_in_flight_t1);
+    end
+    `endif
+    `ifndef SYNTHESIS
+    // Debug: show PASS1 selection status
+    if (branch_in_flight_t0 || branch_in_flight_t1) begin
+        $display("SB PASS1 START: branch_in_flight t0=%b t1=%b, sel0_is_br=%b", branch_in_flight_t0, branch_in_flight_t1, sel0_is_br);
+        // Show all valid, not issued entries that could be candidates
+        for (i = 0; i < RS_DEPTH; i = i + 1) begin
+            if (win_valid[i] && !win_issued[i] && win_ready[i] &&
+                (win_fu[i] == `FU_INT0 || win_fu[i] == `FU_INT1)) begin
+                $display("  RS[%0d]: PC=%h fu=%0d br=%b tid=%0d seq=%0d will_check_bif=%b", 
+                         i, win_pc[i], win_fu[i], win_br[i], win_tid[i], win_seq[i],
+                         (win_tid[i] == 1'b0) ? branch_in_flight_t0 : branch_in_flight_t1);
+            end
+        end
+    end
+    `endif
     for (i = 0; i < RS_DEPTH; i = i + 1) begin
         if (win_valid[i] && !win_issued[i] && win_ready[i] &&
             (win_fu[i] != `FU_NOP) && 
             (win_fu[i] == `FU_INT0 || win_fu[i] == `FU_INT1)) begin
 
-            // WAR check (same as original)
-            war_block_0 = 1'b0;
-            if (win_regs_write[i] && (win_rd[i] != 5'd0)) begin
-                for (j = 0; j < RS_DEPTH; j = j + 1) begin
-                    if (!war_block_0 && win_valid[j] && !win_issued[j] &&
-                        (win_tid[j] == win_tid[i]) &&
-                        (win_seq[j] < win_seq[i]) &&
-                        ((win_rs1_used[j] && (win_rs1[j] == win_rd[i])) ||
-                         (win_rs2_used[j] && (win_rs2[j] == win_rd[i])))) begin
-                        war_block_0 = 1'b1;
-                    end
-                end
+            // Branch serialization: if pending branch or branch in flight, only issue:
+            // 1. The pending branch itself (if pending), or
+            // 2. Instructions older than the branch (seq < branch seq)
+            // Note: when branch_in_flight, don't issue ANY instruction (including other branches)
+            // Also: if we already selected a branch in this pass, don't select anything else
+            if ((win_tid[i] == 1'b0 && branch_in_flight_t0) ||
+                (win_tid[i] == 1'b1 && branch_in_flight_t1)) begin
+                // Skip - a branch is in flight
+                `ifndef SYNTHESIS
+                $display("SB: SKIP PC=%h tid=%0d seq=%0d due to branch_in_flight t0=%b", 
+                         win_pc[i], win_tid[i], win_seq[i], branch_in_flight_t0);
+                `endif
             end
-
-            if (!war_block_0 && (!sel0_found || (win_seq[i] < sel0_seq))) begin
+            else if (sel0_is_br) begin
+                // Skip - already selected a branch this pass
+                `ifndef SYNTHESIS
+                $display("SB: SKIP PC=%h tid=%0d seq=%0d due to sel0_is_br=1 (branch already selected)", 
+                         win_pc[i], win_tid[i], win_seq[i]);
+                `endif
+            end
+            else if ((win_tid[i] == 1'b0 && pending_branch_t0 && !win_br[i] && win_seq[i] >= effective_br_seq_t0) ||
+                (win_tid[i] == 1'b1 && pending_branch_t1 && !win_br[i] && win_seq[i] >= effective_br_seq_t1)) begin
+                // Skip - this instruction is after the pending branch
+            end
+            else if (!sel0_found || (win_seq[i] < sel0_seq)) begin
                 sel0_found = 1'b1;
                 sel0_idx   = i[RS_IDX_W-1:0];
                 sel0_seq   = win_seq[i];
+                sel0_is_br = win_br[i];  // Track if this is a branch
+                `ifndef SYNTHESIS
+                $display("SB SELECT: idx=%0d PC=%h br=%b seq=%0d bif_t0=%b", 
+                         i, win_pc[i], win_br[i], win_seq[i], branch_in_flight_t0);
+                `endif
             end
         end
     end
@@ -373,6 +489,12 @@ always @(*) begin
     // ── Pass 2: select second instruction for Port 1 ───────────
     // Port 1 (exec_pipe1) handles: FU_INT1, FU_MUL, FU_LOAD, FU_STORE
     // Note: FU_INT0 and FU_INT1 don't use fu_busy since they can dual-issue
+    // IMPORTANT: Don't issue instructions if:
+    // 1. A branch is in flight (from previous cycle)
+    // 2. Port 0 is issuing a branch this cycle (it will be in flight next cycle)
+    // port0_issuing_branch is computed as: sel0_found && win_br[sel0_idx]
+    // We inline this check in the conditions below
+    
     for (i = 0; i < RS_DEPTH; i = i + 1) begin
         if (win_valid[i] && !win_issued[i] && win_ready[i] &&
             (win_fu[i] == `FU_INT1 || win_fu[i] == `FU_MUL || 
@@ -381,24 +503,21 @@ always @(*) begin
             !(win_fu[i] == `FU_LOAD && fu_busy[win_fu[i]]) &&
             !(win_fu[i] == `FU_STORE && fu_busy[win_fu[i]]) &&
             !(sel0_found && (i[RS_IDX_W-1:0] == sel0_idx)) &&                 // not same entry
-            !(sel0_found && win_br[sel0_idx] && win_br[i]) &&                // at most 1 branch
+            !(sel0_is_br && win_br[i]) &&                                     // at most 1 branch
             !(sel0_found && (win_mem_read[sel0_idx]||win_mem_write[sel0_idx])  // at most 1 mem
                          && (win_mem_read[i]||win_mem_write[i]))) begin
 
-            war_block_1 = 1'b0;
-            if (win_regs_write[i] && (win_rd[i] != 5'd0)) begin
-                for (j = 0; j < RS_DEPTH; j = j + 1) begin
-                    if (!war_block_1 && win_valid[j] && !win_issued[j] &&
-                        (win_tid[j] == win_tid[i]) &&
-                        (win_seq[j] < win_seq[i]) &&
-                        ((win_rs1_used[j] && (win_rs1[j] == win_rd[i])) ||
-                         (win_rs2_used[j] && (win_rs2[j] == win_rd[i])))) begin
-                        war_block_1 = 1'b1;
-                    end
-                end
+            // Branch serialization: don't issue if branch is in flight or port 0 is issuing branch
+            if ((win_tid[i] == 1'b0 && branch_in_flight_t0) ||
+                (win_tid[i] == 1'b1 && branch_in_flight_t1) ||
+                sel0_is_br) begin
+                // Skip - a branch is in flight or will be in flight next cycle
             end
-
-            if (!war_block_1 && (!sel1_found || (win_seq[i] < sel1_seq))) begin
+            else if ((win_tid[i] == 1'b0 && pending_branch_t0 && win_seq[i] >= effective_br_seq_t0) ||
+                (win_tid[i] == 1'b1 && pending_branch_t1 && win_seq[i] >= effective_br_seq_t1)) begin
+                // Skip - this instruction is after the pending branch
+            end
+            else if (!sel1_found || (win_seq[i] < sel1_seq)) begin
                 sel1_found = 1'b1;
                 sel1_idx   = i[RS_IDX_W-1:0];
                 sel1_seq   = win_seq[i];
@@ -463,6 +582,18 @@ end
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         alloc_seq <= 16'd0;
+        branch_in_flight_t0 <= 1'b0;
+        branch_in_flight_t1 <= 1'b0;
+        branch_issued_t0 <= 1'b0;
+        branch_issued_t1 <= 1'b0;
+        sel0_issued_br_r <= 1'b0;
+        sel1_issued_br_r <= 1'b0;
+        sel0_issued_idx_r <= {RS_IDX_W{1'b0}};
+        sel1_issued_idx_r <= {RS_IDX_W{1'b0}};
+        sel0_issued_tid_r <= 1'b0;
+        sel1_issued_tid_r <= 1'b0;
+        last_br_seq_t0 <= 16'hffff;
+        last_br_seq_t1 <= 16'hffff;
         for (i = 1; i < NUM_FU; i = i + 1)
             fu_busy[i] <= 1'b0;
         for (i = 0; i < 32; i = i + 1) begin
@@ -492,6 +623,54 @@ always @(posedge clk or negedge rstn) begin
         end
     end
     else begin
+        // ── Capture issue info for branch tracking ─────────────────────────────
+        // These capture the selection state at the clock edge before combinational logic changes
+        sel0_issued_br_r  <= sel0_is_br;
+        sel1_issued_br_r  <= sel1_is_br;
+        sel0_issued_idx_r <= sel0_idx;
+        sel1_issued_idx_r <= sel1_idx;
+        sel0_issued_tid_r <= win_tid[sel0_idx];
+        sel1_issued_tid_r <= win_tid[sel1_idx];
+        
+        // ── Branch in flight tracking ───────────────────────────────────
+        // branch_in_flight should be 1 from branch issue until branch result is known
+        // This blocks subsequent instructions from issuing until branch result is known
+        // Set when a branch is issued, clear when br_complete is received
+        branch_in_flight_t0 <= ((sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b0) ||
+                               (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b0)) ||
+                              (branch_in_flight_t0 && !br_complete);
+        branch_in_flight_t1 <= ((sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b1) ||
+                               (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b1)) ||
+                              (branch_in_flight_t1 && !br_complete);
+        
+        // Save the seq of the branch being issued (for use in next cycle when branch is in flight)
+        if (sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b0)
+            last_br_seq_t0 <= win_seq[sel0_idx];
+        if (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b0)
+            last_br_seq_t0 <= win_seq[sel1_idx];
+        if (sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b1)
+            last_br_seq_t1 <= win_seq[sel0_idx];
+        if (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b1)
+            last_br_seq_t1 <= win_seq[sel1_idx];
+        
+        // No longer need branch_issued - we use the direct assignment above
+        // branch_issued_t0 and branch_issued_t1 are kept for debug only
+        
+        `ifndef SYNTHESIS
+        // Debug: show branch_in_flight status at each clock
+        if (branch_in_flight_t0 || branch_in_flight_t1) begin
+            $display("SB[%0t]: branch_in_flight t0=%b t1=%b, br_complete=%b", $time, branch_in_flight_t0, branch_in_flight_t1, br_complete);
+        end
+        // Debug: show what's being selected this cycle
+        if (sel0_found) begin
+            $display("SB ISSUE: sel0_idx=%0d, is_br=%b, tid=%0d, PC=%h, seq=%0d", 
+                     sel0_idx, sel0_is_br, win_tid[sel0_idx], win_pc[sel0_idx], win_seq[sel0_idx]);
+        end
+        if (sel1_found) begin
+            $display("SB ISSUE1: sel1_idx=%0d, is_br=%b, tid=%0d, PC=%h, seq=%0d", 
+                     sel1_idx, sel1_is_br, win_tid[sel1_idx], win_pc[sel1_idx], win_seq[sel1_idx]);
+        end
+        `endif
         // ── CDB Wakeup + FU release (WB port 0) ────────────────
         if (wb0_valid && (wb0_fu != 3'd0))
             fu_busy[wb0_fu] <= 1'b0;
@@ -528,9 +707,9 @@ always @(posedge clk or negedge rstn) begin
                 win_qj[i]    <= nqj;
                 win_qk[i]    <= nqk;
                 win_qd[i]    <= nqd;
+                // Only source operand dependencies determine readiness
                 win_ready[i] <= (nqj == {RS_TAG_W{1'b0}}) &&
-                                (nqk == {RS_TAG_W{1'b0}}) &&
-                                (nqd == {RS_TAG_W{1'b0}});
+                                (nqk == {RS_TAG_W{1'b0}});
             end
         end
 
@@ -603,9 +782,10 @@ always @(posedge clk or negedge rstn) begin
                 win_qj[free0_idx]           <= d0_src1_tag;
                 win_qk[free0_idx]           <= d0_src2_tag;
                 win_qd[free0_idx]           <= d0_dst_tag;
+                // Note: win_qd is for WAW tracking, NOT a readiness condition
+                // Only source operand dependencies (qj, qk) determine readiness
                 win_ready[free0_idx]        <= (d0_src1_tag == {RS_TAG_W{1'b0}}) &&
-                                               (d0_src2_tag == {RS_TAG_W{1'b0}}) &&
-                                               (d0_dst_tag  == {RS_TAG_W{1'b0}});
+                                               (d0_src2_tag == {RS_TAG_W{1'b0}});
                 if (disp0_regs_write && (disp0_rd != 5'd0))
                     reg_result[disp0_tid][disp0_rd] <= alloc0_tag;
                 alloc_seq <= alloc_seq + 16'd1;
@@ -639,9 +819,10 @@ always @(posedge clk or negedge rstn) begin
                 win_qj[free1_idx]           <= d1_src1_tag;
                 win_qk[free1_idx]           <= d1_src2_tag;
                 win_qd[free1_idx]           <= d1_dst_tag;
+                // Note: win_qd is for WAW tracking, NOT a readiness condition
+                // Only source operand dependencies (qj, qk) determine readiness
                 win_ready[free1_idx]        <= (d1_src1_tag == {RS_TAG_W{1'b0}}) &&
-                                               (d1_src2_tag == {RS_TAG_W{1'b0}}) &&
-                                               (d1_dst_tag  == {RS_TAG_W{1'b0}});
+                                               (d1_src2_tag == {RS_TAG_W{1'b0}});
                 if (disp1_regs_write && (disp1_rd != 5'd0))
                     reg_result[disp1_tid][disp1_rd] <= alloc1_tag;
                 alloc_seq <= alloc_seq + (disp0_valid ? 16'd2 : 16'd1);
