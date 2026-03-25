@@ -1,25 +1,48 @@
 // =============================================================================
 // Module : rocc_ai_accelerator
-// Description: RoCC-style AI Co-Processor with three functional sub-engines:
-//   1) GEMM Engine  — 8×8 INT8 output-stationary systolic array
-//   2) Vector Unit  — 128-bit SIMD (4× INT32) for activation functions
-//   3) Context Compressor — KV-Cache INT4 quantization + Top-K selection
+// Description: RoCC-style AI Co-Processor - P3 Contract Implementation
+//   P3 Scope: RAM-only deterministic single-beat DMA for fixed 8x8 GEMM
 //
 //   Instruction encoding via RISC-V custom-0 (opcode 0x0B):
 //     funct7[6:0] selects the operation:
-//       0 = GEMM.START    : Start matrix multiply (base addrs in rs1, rs2)
+//       0 = GEMM.START    : Start 8x8 GEMM (rs1=A_base, rs2=B_base, rd=C_base)
 //       1 = VEC.OP        : Vector operation (funct3 selects sub-op)
-//       2 = CTX.COMPRESS  : KV-Cache compress (rs1=src, rs2=dst, rd=count)
-//       3 = SCRATCH.LOAD  : Load data into scratchpad
-//       4 = SCRATCH.STORE : Store data from scratchpad
+//       2 = CTX.COMPRESS  : KV-Cache compress (P3: placeholder/unimplemented)
+//       3 = SCRATCH.LOAD  : Load data to scratchpad via DMA (rs1=src, rs2=len)
+//       4 = SCRATCH.STORE : Store data from scratchpad via DMA (rs1=dst, rs2=len)
 //       5 = STATUS.READ   : Read accelerator status into rd
 //
-//   VEC.OP funct3 sub-operations:
+//   P3 GEMM Contract (GEMM.START):
+//     - Fixed 8x8 INT8 input / INT32 output matrix multiply
+//     - rs1: base address of matrix A (8x8 INT8, row-major, 64 bytes)
+//     - rs2: base address of matrix B (8x8 INT8, row-major, 64 bytes)
+//     - rd:  base address for result C (8x8 INT32, row-major, 256 bytes)
+//     - A, B, C must be in RAM region 0x0000_0000 - 0x0000_3FFF
+//     - DMA is single-beat deterministic, blocking until completion
+//     - Status bit 0 (busy) set during operation, bit 1 (done) after storeback
+//
+//   P3 DMA Contract (SCRATCH.LOAD/STORE):
+//     - RAM-only access (0x0000_0000 - 0x0000_3FFF)
+//     - Illegal addresses (MMIO, out-of-range) return error in status
+//     - Single-outstanding: new commands rejected while busy
+//
+//   P3 Completion Semantics:
+//     - Instruction completes only after DMA storeback finishes
+//     - Response flows through existing WB/ROB machinery
+//     - Flush/kill protection: stale completions suppressed architecturally
+//
+//   VEC.OP funct3 sub-operations (P3: fully implemented):
 //       000 = VADD    (vector add)
 //       001 = VMUL    (vector element-wise multiply)
 //       010 = VRELU   (vector ReLU)
 //       011 = VSCALE  (vector scale / shift for quantization)
 //       100 = VREDUCE (vector reduction sum)
+//
+//   STATUS.READ format (32-bit):
+//       bit[0]: busy  - accelerator has work in flight
+//       bit[1]: done  - last operation completed successfully
+//       bit[2]: error - illegal address or unsupported operation
+//       bits[31:3]: reserved (read as 0)
 // =============================================================================
 module rocc_ai_accelerator #(
     parameter SA_SIZE     = 8,        // Systolic array dimension (8×8)

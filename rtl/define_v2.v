@@ -38,12 +38,25 @@
 `define OPC_CUSTOM1  7'b0101011  // custom-1 (opcode 0x2B)
 
 // ─── RoCC funct7 encodings ──────────────────────────────────────────────────
-`define ROCC_GEMM_START    7'd0
-`define ROCC_VEC_OP        7'd1
-`define ROCC_CTX_COMPRESS  7'd2
-`define ROCC_LOAD_SCRATCH  7'd3
-`define ROCC_STORE_SCRATCH 7'd4
-`define ROCC_STATUS_READ   7'd5
+// P3 Contract: Fixed 8x8 INT8/INT32 GEMM with deterministic single-beat DMA
+`define ROCC_GEMM_START    7'd0   // Start 8x8 GEMM: rs1=A base, rs2=B base, rd=C base
+`define ROCC_VEC_OP        7'd1   // Vector operation (funct3 selects sub-op)
+`define ROCC_CTX_COMPRESS  7'd2   // KV-Cache compress (P3: placeholder only)
+`define ROCC_LOAD_SCRATCH  7'd3   // Load data to scratchpad via DMA
+`define ROCC_STORE_SCRATCH 7'd4   // Store data from scratchpad via DMA  
+`define ROCC_STATUS_READ   7'd5   // Read accelerator status into rd
+
+// ─── P3 RoCC DMA/GEMM Contract Constants ─────────────────────────────────────
+`define ROCC_GEMM_SIZE     8      // Fixed 8x8 matrix dimension
+`define ROCC_GEMM_TILE_BYTES  256  // 8x8 INT32 = 256 bytes per tile
+`define ROCC_STATUS_BUSY   0      // Status bit 0: accelerator busy
+`define ROCC_STATUS_DONE   1      // Status bit 1: operation complete
+`define ROCC_STATUS_ERROR  2      // Status bit 2: error (illegal address, etc.)
+
+// ─── RoCC DMA Address Constraints ────────────────────────────────────────────
+// P3: DMA is RAM-only, no MMIO access allowed
+`define ROCC_DMA_ADDR_MIN  32'h0000_0000  // Minimum valid DMA address
+`define ROCC_DMA_ADDR_MAX  32'h0000_3FFF  // Maximum valid DMA address (16KB RAM)
 
 // ─── Cache / Memory Constants ───────────────────────────────────────────────
 `define CACHE_LINE_BYTES   64
