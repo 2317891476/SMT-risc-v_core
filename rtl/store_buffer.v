@@ -279,12 +279,20 @@ always @(*) begin
                     end
                     // else: different address - no forwarding, no hazard
 
-                    // Check for unresolved older store (any older store not committed)
-                    // This creates a hazard because we don't know if the store
-                    // will actually happen (could be on wrong path)
-                    if (!sb_committed[load_query_tid][fwd_i]) begin
-                        hazard_r = 1'b1;
+                    // Check for unresolved older store that cannot be forwarded.
+                    // For same address: allow forwarding from uncommitted store (found_match_r handles this)
+                    // For different address: only hazard if uncommitted AND older than any matching store
+                    if (!sb_committed[load_query_tid][fwd_i] &&
+                        (sb_addr[load_query_tid][fwd_i] != load_query_addr)) begin
+                        // Different address: hazard only if this store is older than
+                        // the youngest matching store we found (if any)
+                        if (!found_match_r ||
+                            (sb_order_id[load_query_tid][fwd_i] < match_order_id_r)) begin
+                            hazard_r = 1'b1;
+                        end
                     end
+                    // Note: Same-address uncommitted stores are handled by found_match_r logic above.
+                    // If store_covers_load is true, found_match_r is set and forwarding is allowed.
                 end
                 // else: store is younger than load - ignore for forwarding
             end

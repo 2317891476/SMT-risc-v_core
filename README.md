@@ -457,9 +457,9 @@ w_regs_en, w_regs_addr, w_regs_data
 
 | 优先级 | 任务 | 说明 |
 |--------|------|------|
-| ~~P0~~ | ~~V2 管线仿真调试~~ | ✅ 已完成 (test1/test2/test_smt/test_rv32i_full 全部通过) |
-| P1 | Store Buffer | 内存顺序约束，消除投机 store 问题 |
-| P1 | L1 ICache | 替换 inst_memory 为非阻塞指令缓存 |
+| ~~P0~~ | ~~V2 管线仿真调试~~ | ✅ 已完成 (test1/test2/smt/rv32i_full 全部通过) |
+| ~~P1~~ | ~~Store Buffer~~ | ✅ 已完成 (5个专用测试 + riscv-tests ld_st/st_ld 全部通过) |
+| ~~P1~~ | ~~L1 ICache~~ | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory) |
 | P2 | L2 Cache | 统一二级缓存 + 仲裁器 |
 | P2 | 中断控制器 (PLIC/CLINT) | 支持外部中断 + 定时器中断 |
 | P3 | RoCC DMA 完善 | 完整 GEMM 数据搬运流水 |
