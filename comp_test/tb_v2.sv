@@ -128,24 +128,23 @@ always @(posedge clk) begin
         rocc_cmd_count <= 32'd0;
     end
     // Check if RoCC instance exists and command is valid
-    // Hierarchical reference to be enabled when RoCC is integrated:
-    // if (`ROCC_INST_PATH.cmd_valid && `ROCC_INST_PATH.cmd_ready) begin
-    //     rocc_cmd_count <= rocc_cmd_count + 32'd1;
-    //     $display("[RoCC MON] CMD: funct7=%0d funct3=%0d rs1=0x%08h rs2=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
-    //              `ROCC_INST_PATH.cmd_funct7, `ROCC_INST_PATH.cmd_funct3,
-    //              `ROCC_INST_PATH.cmd_rs1_data, `ROCC_INST_PATH.cmd_rs2_data,
-    //              `ROCC_INST_PATH.cmd_rd, `ROCC_INST_PATH.cmd_tag,
-    //              `ROCC_INST_PATH.cmd_tid, $time);
-    //     // Track operation start for timeout detection
-    //     if (`ROCC_INST_PATH.cmd_funct7 == 7'd0 || // GEMM.START
-    //         `ROCC_INST_PATH.cmd_funct7 == 7'd3 || // SCRATCH.LOAD
-    //         `ROCC_INST_PATH.cmd_funct7 == 7'd4)   // SCRATCH.STORE
-    //     begin
-    //         rocc_operation_active <= 1'b1;
-    //         rocc_start_cycle <= $time / 50; // Convert to cycle count (20MHz = 50ns)
-    //         rocc_active_cmd_funct7 <= `ROCC_INST_PATH.cmd_funct7;
-    //     end
-    // end
+    if (`ROCC_INST_PATH.cmd_valid && `ROCC_INST_PATH.cmd_ready) begin
+        rocc_cmd_count <= rocc_cmd_count + 32'd1;
+        $display("[RoCC MON] CMD: funct7=%0d funct3=%0d rs1=0x%08h rs2=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
+                 `ROCC_INST_PATH.cmd_funct7, `ROCC_INST_PATH.cmd_funct3,
+                 `ROCC_INST_PATH.cmd_rs1_data, `ROCC_INST_PATH.cmd_rs2_data,
+                 `ROCC_INST_PATH.cmd_rd, `ROCC_INST_PATH.cmd_tag,
+                 `ROCC_INST_PATH.cmd_tid, $time);
+        // Track operation start for timeout detection
+        if (`ROCC_INST_PATH.cmd_funct7 == 7'd0 || // GEMM.START
+            `ROCC_INST_PATH.cmd_funct7 == 7'd3 || // SCRATCH.LOAD
+            `ROCC_INST_PATH.cmd_funct7 == 7'd4)   // SCRATCH.STORE
+        begin
+            rocc_operation_active <= 1'b1;
+            rocc_start_cycle <= $time / 50; // Convert to cycle count (20MHz = 50ns)
+            rocc_active_cmd_funct7 <= `ROCC_INST_PATH.cmd_funct7;
+        end
+    end
 end
 
 // RoCC response monitoring
@@ -153,15 +152,14 @@ always @(posedge clk) begin
     if (rst) begin
         rocc_resp_count <= 32'd0;
     end
-    // Hierarchical reference to be enabled when RoCC is integrated:
-    // if (`ROCC_INST_PATH.resp_valid && `ROCC_INST_PATH.resp_ready) begin
-    //     rocc_resp_count <= rocc_resp_count + 32'd1;
-    //     $display("[RoCC MON] RESP: data=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
-    //              `ROCC_INST_PATH.resp_data, `ROCC_INST_PATH.resp_rd,
-    //              `ROCC_INST_PATH.resp_tag, `ROCC_INST_PATH.resp_tid, $time);
-    //     // Clear operation active flag on response
-    //     rocc_operation_active <= 1'b0;
-    // end
+    if (`ROCC_INST_PATH.resp_valid && `ROCC_INST_PATH.resp_ready) begin
+        rocc_resp_count <= rocc_resp_count + 32'd1;
+        $display("[RoCC MON] RESP: data=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
+                 `ROCC_INST_PATH.resp_data, `ROCC_INST_PATH.resp_rd,
+                 `ROCC_INST_PATH.resp_tag, `ROCC_INST_PATH.resp_tid, $time);
+        // Clear operation active flag on response
+        rocc_operation_active <= 1'b0;
+    end
 end
 
 // RoCC DMA transaction monitoring
