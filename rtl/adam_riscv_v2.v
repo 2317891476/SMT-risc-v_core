@@ -24,7 +24,8 @@ module adam_riscv_v2(
 `ifdef FPGA_MODE
     output wire[2:0] led,
 `endif
-    input wire sys_rstn
+    input wire sys_rstn,
+    output wire [7:0] tube_status  // Task 4: Export for testbench observation
 );
 
 // SMT mode parameter (0=single-thread, 1=SMT)
@@ -150,7 +151,17 @@ stage_if_v2 u_stage_if_v2(
     .if_inst          (if_inst          ),
     .if_pc            (if_pc            ),
     .if_tid           (if_tid           ),
-    .if_pred_taken    (if_pred_taken    )
+    .if_pred_taken    (if_pred_taken    ),
+
+    // Task 5: External refill interface to mem_subsys M0
+    .ext_mem_req_valid  (m0_req_valid),
+    .ext_mem_req_ready  (m0_req_ready),
+    .ext_mem_req_addr   (m0_req_addr),
+    .ext_mem_resp_valid (m0_resp_valid),
+    .ext_mem_resp_data  (m0_resp_data),
+    .ext_mem_resp_last  (m0_resp_last),
+    .ext_mem_resp_ready (m0_resp_ready),
+    .use_external_refill(use_mem_subsys)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -928,7 +939,18 @@ lsu_shell #(
     .sb_mem_write_ready (sb_mem_write_ready   ),
 
     // Load hazard output
-    .load_hazard        (lsu_load_hazard      )
+    .load_hazard        (lsu_load_hazard      ),
+
+    // Task 6: Mem_subsys M1 interface
+    .use_mem_subsys     (use_mem_subsys       ),
+    .m1_req_valid       (m1_req_valid         ),
+    .m1_req_ready       (m1_req_ready         ),
+    .m1_req_addr        (m1_req_addr          ),
+    .m1_req_write       (m1_req_write         ),
+    .m1_req_wdata       (m1_req_wdata         ),
+    .m1_req_wen         (m1_req_wen           ),
+    .m1_resp_valid      (m1_resp_valid        ),
+    .m1_resp_data       (m1_resp_data         )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1113,5 +1135,71 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .instr_retired   (rob_instr_retired[0] ),
     .instr_retired_1 (rob_instr_retired[1] )
 );
+
+// ════════════════════════════════════════════════════════════════════════════
+// Task 4: Memory Subsystem Integration
+// ════════════════════════════════════════════════════════════════════════════
+
+// Control signal: Use mem_subsys (can be parameter or define for test modes)
+// For now, enable by default for P2 integration testing
+// When 0: legacy direct connection mode (backward compatible)
+// When 1: use mem_subsys with variable-latency responses
+wire use_mem_subsys = 1'b0;  // Set to 1'b0 for now to maintain backward compatibility
+
+// M0 (I-side) interface signals
+wire        m0_req_valid;
+wire        m0_req_ready;
+wire [31:0] m0_req_addr;
+wire        m0_resp_valid;
+wire [31:0] m0_resp_data;
+wire        m0_resp_last;
+wire        m0_resp_ready;
+
+// M1 (D-side) interface signals
+wire        m1_req_valid;
+wire        m1_req_ready;
+wire [31:0] m1_req_addr;
+wire        m1_req_write;
+wire [31:0] m1_req_wdata;
+wire [3:0]  m1_req_wen;
+wire        m1_resp_valid;
+wire [31:0] m1_resp_data;
+
+// Internal tube status from mem_subsys
+wire [7:0]  mem_subsys_tube_status;
+
+// Mem_subsys instantiation
+mem_subsys u_mem_subsys (
+    .clk               (clk),
+    .rstn              (rstn),
+
+    // M0: I-side (inst_memory refill)
+    .m0_req_valid      (m0_req_valid),
+    .m0_req_ready      (m0_req_ready),
+    .m0_req_addr       (m0_req_addr),
+    .m0_resp_valid     (m0_resp_valid),
+    .m0_resp_data      (m0_resp_data),
+    .m0_resp_last      (m0_resp_last),
+    .m0_resp_ready     (m0_resp_ready),
+
+    // M1: D-side (LSU/store buffer)
+    .m1_req_valid      (m1_req_valid),
+    .m1_req_ready      (m1_req_ready),
+    .m1_req_addr       (m1_req_addr),
+    .m1_req_write      (m1_req_write),
+    .m1_req_wdata      (m1_req_wdata),
+    .m1_req_wen        (m1_req_wen),
+    .m1_resp_valid     (m1_resp_valid),
+    .m1_resp_data      (m1_resp_data),
+
+    // Testbench observation
+    .tube_status       (mem_subsys_tube_status),
+
+    // External interrupt (unused in basic tests)
+    .ext_irq_pending   ( )
+);
+
+// Export tube_status (from mem_subsys when enabled, otherwise 0)
+assign tube_status = use_mem_subsys ? mem_subsys_tube_status : 8'd0;
 
 endmodule

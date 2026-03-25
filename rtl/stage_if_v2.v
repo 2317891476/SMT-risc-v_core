@@ -41,7 +41,17 @@ module stage_if_v2 (
     output wire [31:0] if_inst,        // instruction word
     output wire [31:0] if_pc,          // instruction PC
     output wire [0:0]  if_tid,         // thread ID
-    output wire        if_pred_taken   // BPU prediction for this instruction
+    output wire        if_pred_taken,  // BPU prediction for this instruction
+
+    // ─── External refill interface to mem_subsys (Task 5) ───────
+    output wire        ext_mem_req_valid,
+    input  wire        ext_mem_req_ready,
+    output wire [31:0] ext_mem_req_addr,
+    input  wire        ext_mem_resp_valid,
+    input  wire [31:0] ext_mem_resp_data,
+    input  wire        ext_mem_resp_last,
+    output wire        ext_mem_resp_ready,
+    input  wire        use_external_refill
 );
 
 // ─── PC management ──────────────────────────────────────────────────────────
@@ -105,7 +115,17 @@ inst_memory #(
     .resp_epoch     (resp_epoch_from_mem),
     .resp_valid     (resp_valid_from_mem),
     .current_epoch  (current_epoch     ),
-    .flush          (|if_flush         )
+    .flush          (|if_flush         ),
+
+    // Task 5: External refill interface to mem_subsys M0
+    .ext_mem_req_valid  (ext_mem_req_valid),
+    .ext_mem_req_ready  (ext_mem_req_ready),
+    .ext_mem_req_addr   (ext_mem_req_addr),
+    .ext_mem_resp_valid (ext_mem_resp_valid),
+    .ext_mem_resp_data  (ext_mem_resp_data),
+    .ext_mem_resp_last  (ext_mem_resp_last),
+    .ext_mem_resp_ready (ext_mem_resp_ready),
+    .use_external_refill(use_external_refill)
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────
