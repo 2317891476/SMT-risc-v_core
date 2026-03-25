@@ -37,6 +37,18 @@ module mem_subsys (
     output wire [31:0] m1_resp_data,
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Master 2: RoCC DMA interface (AI accelerator memory access)
+    // ═══════════════════════════════════════════════════════════════════════════
+    input  wire        m2_req_valid,
+    output wire        m2_req_ready,
+    input  wire [31:0] m2_req_addr,
+    input  wire        m2_req_write,      // 0=read, 1=write
+    input  wire [31:0] m2_req_wdata,
+    input  wire [3:0]  m2_req_wen,        // Byte-wise write enable
+    output wire        m2_resp_valid,
+    output wire [31:0] m2_resp_data,
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // Testbench observation interface
     // ═══════════════════════════════════════════════════════════════════════════
     output reg [7:0]   tube_status,       // TUBE MMIO register (observable by tb)
@@ -73,18 +85,27 @@ wire        l2_resp_last;
 // Arbiter status
 wire        grant_m0;
 wire        grant_m1;
-wire [1:0]  grant_count;
+wire        grant_m2;
+wire [2:0]  grant_count;
 
 // Cache status
 wire [2:0]  cache_state;
 wire        cache_hit;
 wire        cache_miss;
 
+// M1 cached response wires (internal, before MMIO mux)
+wire        m1_resp_valid_int;
+wire [31:0] m1_resp_data_int;
+
 // Address decode for MMIO (used by arbiter and MMIO handling)
 wire addr_is_tube_m1    = (m1_req_addr == `TUBE_ADDR);
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
 wire addr_is_uncached_m1 = addr_is_tube_m1 || addr_is_clint_m1 || addr_is_plic_m1;
+
+// M2 (RoCC DMA) address decode - RAM-only access (0x0000_0000 - 0x0000_3FFF)
+wire addr_is_ram_m2     = (m2_req_addr >= `RAM_CACHEABLE_BASE) && (m2_req_addr <= `RAM_CACHEABLE_TOP);
+wire m2_cached_req      = m2_req_valid && addr_is_ram_m2;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // L2 Arbiter Instance (only for cacheable traffic)
@@ -119,6 +140,16 @@ l2_arbiter u_l2_arbiter (
     .m1_resp_valid  (m1_resp_valid_int),
     .m1_resp_data   (m1_resp_data_int),
     
+    // Master 2: RoCC DMA (RAM-only cacheable access)
+    .m2_req_valid   (m2_cached_req),
+    .m2_req_ready   (m2_req_ready),
+    .m2_req_addr    (m2_req_addr),
+    .m2_req_write   (m2_req_write),
+    .m2_req_wdata   (m2_req_wdata),
+    .m2_req_wen     (m2_req_wen),
+    .m2_resp_valid  (m2_resp_valid),
+    .m2_resp_data   (m2_resp_data),
+    
     // L2 Cache interface
     .l2_req_valid   (l2_req_valid),
     .l2_req_ready   (l2_req_ready),
@@ -134,6 +165,7 @@ l2_arbiter u_l2_arbiter (
     // Status
     .grant_m0       (grant_m0),
     .grant_m1       (grant_m1),
+    .grant_m2       (grant_m2),
     .grant_count    (grant_count)
 );
 
