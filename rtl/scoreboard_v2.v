@@ -159,6 +159,12 @@ module scoreboard_v2 #(
     // ─── Branch completion signal ───────────────────────────────
     input  wire                    br_complete,     // branch execution complete (taken or not)
 
+    // ─── RoCC Backpressure ──────────────────────────────────────
+    input  wire                    rocc_ready,      // RoCC is ready to accept command
+
+    // ─── RoCC Identification ────────────────────────────────────
+    input  wire                    iss0_is_rocc,    // Issue port 0 is RoCC command
+
     // ─── Dispatch Metadata ──────────────────────────────────────
     input  wire [`METADATA_ORDER_ID_W-1:0] disp0_order_id,
     input  wire [`METADATA_EPOCH_W-1:0]    disp0_epoch,
@@ -773,7 +779,8 @@ always @(posedge clk or negedge rstn) begin
         else begin
             // ── Issue: mark selected entries as issued ───────────
             // Note: Only set fu_busy for MUL/LOAD/STORE, not for INT operations
-            if (sel0_found) begin
+            // For RoCC commands, only mark issued if RoCC is ready (backpressure)
+            if (sel0_found && (!iss0_is_rocc || rocc_ready)) begin
                 win_issued[sel0_idx] <= 1'b1;
                 win_ready[sel0_idx]  <= 1'b0;
                 if (win_fu[sel0_idx] != `FU_NOP && win_fu[sel0_idx] != `FU_INT0 && win_fu[sel0_idx] != `FU_INT1)

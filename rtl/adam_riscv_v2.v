@@ -555,7 +555,11 @@ scoreboard_v2 #(
     .wb1_tid         (wb1_tid         ),
 
     // Branch completion
-    .br_complete     (pipe0_br_complete)
+    .br_complete     (pipe0_br_complete),
+
+    // RoCC backpressure
+    .rocc_ready      (rocc_cmd_ready),
+    .iss0_is_rocc    (iss0_is_rocc)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -898,26 +902,23 @@ bypass_network u_bypass1(
     .fwd_src_b       (byp1_fwd_b     )
 );
 
-// ════════════════════════════════════════════════════════════════════════════
-// RoCC AI Accelerator Integration
-// ════════════════════════════════════════════════════════════════════════════
+    // ════════════════════════════════════════════════════════════════════════════
+    // RoCC AI Accelerator Integration
+    // ════════════════════════════════════════════════════════════════════════════
 
-// RoCC Command Interface: When iss0_is_rocc, bypass exec_pipe0 and send to RoCC
-assign rocc_cmd_valid    = iss0_valid && iss0_is_rocc;
-assign rocc_cmd_funct7   = iss0_rocc_funct7;
-assign rocc_cmd_funct3   = iss0_func3;
-assign rocc_cmd_rd       = iss0_rd;
-assign rocc_cmd_rs1_data = byp0_op_a;  // RS1 data from bypass network
-assign rocc_cmd_rs2_data = byp0_op_b;  // RS2 data from bypass network
-assign rocc_cmd_tag      = iss0_tag;
-assign rocc_cmd_tid      = iss0_tid;
+    // RoCC Command Interface: When iss0_is_rocc, bypass exec_pipe0 and send to RoCC
+    // Backpressure: only assert valid if RoCC is ready, and only mark RS issued when accepted
+    assign rocc_cmd_valid    = iss0_valid && iss0_is_rocc && rocc_cmd_ready;
+    assign rocc_cmd_funct7   = iss0_rocc_funct7;
+    assign rocc_cmd_funct3   = iss0_func3;
+    assign rocc_cmd_rd       = iss0_rd;
+    assign rocc_cmd_rs1_data = byp0_op_a;  // RS1 data from bypass network
+    assign rocc_cmd_rs2_data = byp0_op_b;  // RS2 data from bypass network
+    assign rocc_cmd_tag      = iss0_tag;
+    assign rocc_cmd_tid      = iss0_tid;
 
-// RoCC is always ready to accept when not busy
-assign rocc_resp_ready   = 1'b1;
-
-// RoCC memory response mapping (from M2 port)
-assign rocc_mem_resp_valid = m2_resp_valid;
-assign rocc_mem_resp_rdata = m2_resp_data;
+    // RoCC is always ready to accept response
+    assign rocc_resp_ready   = 1'b1;
 
 // ════════════════════════════════════════════════════════════════════════════
 // RoCC Flush-Safe Completion Handling

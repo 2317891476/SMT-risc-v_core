@@ -223,24 +223,35 @@ always @(posedge clk or negedge rstn) begin
 
                     case (cmd_funct7)
                         7'd0: begin // GEMM.START
-                            // Initialize for 4-phase GEMM: Load A -> Load B -> Compute -> Store C
-                            // Address encoding (all in 0x0000-0x3FFF RAM range):
-                            //   rs1 = Matrix A base address (full 32-bit)
-                            //   rs2[15:0] = Matrix B base address
-                            //   rs2[31:16] = Matrix C base address
-                            for (gi = 0; gi < SA_SIZE; gi = gi + 1)
-                                for (gj = 0; gj < SA_SIZE; gj = gj + 1)
-                                    gemm_acc[gi][gj] <= 32'd0;
-                            dma_addr    <= cmd_rs1_data;         // Matrix A base address
-                            result_reg  <= cmd_rs2_data[31:16];  // Save C address in result_reg
-                            op_rs2      <= {16'd0, cmd_rs2_data[15:0]}; // Save B address in op_rs2
-                            dma_cnt     <= 16'd0;
-                            gemm_row    <= 4'd0;
-                            gemm_col    <= 4'd0;
-                            gemm_k      <= 4'd0;
-                            status_done <= 1'b0;  // Clear status for new operation
-                            status_error<= 1'b0;
-                            state       <= ST_GEMM_LOAD_A;
+                            // Validate all addresses are in RAM range (0x0000-0x3FFF)
+                            // A address in rs1, B address in rs2[15:0], C address in rs2[31:16]
+                            if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) || (cmd_rs1_data > `ROCC_DMA_ADDR_MAX) ||
+                                ({16'd0, cmd_rs2_data[15:0]} < `ROCC_DMA_ADDR_MIN) || ({16'd0, cmd_rs2_data[15:0]} > `ROCC_DMA_ADDR_MAX) ||
+                                ({16'd0, cmd_rs2_data[31:16]} < `ROCC_DMA_ADDR_MIN) || ({16'd0, cmd_rs2_data[31:16]} > `ROCC_DMA_ADDR_MAX)) begin
+                                // Invalid address - set error and complete
+                                status_error <= 1'b1;
+                                status_done  <= 1'b1;
+                                resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0}; // error=1, done=1, busy=0
+                                resp_valid   <= 1'b1;
+                                resp_rd      <= cmd_rd;
+                                resp_tag     <= cmd_tag;
+                                resp_tid     <= cmd_tid;
+                            end else begin
+                                // Initialize for 4-phase GEMM: Load A -> Load B -> Compute -> Store C
+                                for (gi = 0; gi < SA_SIZE; gi = gi + 1)
+                                    for (gj = 0; gj < SA_SIZE; gj = gj + 1)
+                                        gemm_acc[gi][gj] <= 32'd0;
+                                dma_addr    <= cmd_rs1_data;         // Matrix A base address
+                                result_reg  <= cmd_rs2_data[31:16];  // Save C address in result_reg
+                                op_rs2      <= {16'd0, cmd_rs2_data[15:0]}; // Save B address in op_rs2
+                                dma_cnt     <= 16'd0;
+                                gemm_row    <= 4'd0;
+                                gemm_col    <= 4'd0;
+                                gemm_k      <= 4'd0;
+                                status_done <= 1'b0;  // Clear status for new operation
+                                status_error<= 1'b0;
+                                state       <= ST_GEMM_LOAD_A;
+                            end
                         end
 
                         7'd1: begin // VEC.OP
