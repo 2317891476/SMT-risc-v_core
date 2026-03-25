@@ -939,9 +939,9 @@ always @(posedge clk or negedge rstn) begin
         end
     end else begin
         // Clear in-flight entries for flushed thread when flush occurs
-        if (flush) begin
+        if (combined_flush_any) begin
             for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
-                if (rocc_cmd_in_flight[rocc_epoch_idx] && rocc_cmd_tid_per_tag[rocc_epoch_idx] == flush_tid) begin
+                if (rocc_cmd_in_flight[rocc_epoch_idx] && rocc_cmd_tid_per_tag[rocc_epoch_idx] == (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid)) begin
                     rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
                 end
             end

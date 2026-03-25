@@ -226,12 +226,13 @@ always @(posedge clk or negedge rstn) begin
                             // Validate all addresses AND their full transfer ranges
                             // A: 64 bytes, B: 64 bytes, C: 256 bytes
                             // A address in rs1, B address in rs2[15:0], C address in rs2[31:16]
+                            // Use (base + size - 1) to check inclusive end address
                             if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) || 
-                                ((cmd_rs1_data + 16'd64) > `ROCC_DMA_ADDR_MAX) ||
+                                ((cmd_rs1_data + 16'd63) > `ROCC_DMA_ADDR_MAX) ||
                                 ({16'd0, cmd_rs2_data[15:0]} < `ROCC_DMA_ADDR_MIN) || 
-                                (({16'd0, cmd_rs2_data[15:0]} + 16'd64) > `ROCC_DMA_ADDR_MAX) ||
+                                (({16'd0, cmd_rs2_data[15:0]} + 16'd63) > `ROCC_DMA_ADDR_MAX) ||
                                 ({16'd0, cmd_rs2_data[31:16]} < `ROCC_DMA_ADDR_MIN) || 
-                                (({16'd0, cmd_rs2_data[31:16]} + 16'd256) > `ROCC_DMA_ADDR_MAX)) begin
+                                (({16'd0, cmd_rs2_data[31:16]} + 16'd255) > `ROCC_DMA_ADDR_MAX)) begin
                                 // Invalid address or range - set error and complete
                                 status_error <= 1'b1;
                                 status_done  <= 1'b1;
@@ -274,9 +275,10 @@ always @(posedge clk or negedge rstn) begin
                         7'd3: begin // SCRATCH.LOAD: rs1=ext_mem_addr, rs2=scratch_addr+len
                             // Validate RAM range for external address (including full transfer)
                             // Validate scratchpad bounds (0-1023 words)
+                            // Use wider arithmetic to prevent overflow in bounds check
                             if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) ||
-                                ((cmd_rs1_data + (cmd_rs2_data[15:0] << 2)) > `ROCC_DMA_ADDR_MAX) ||
-                                (cmd_rs2_data[31:16] + cmd_rs2_data[15:0] > SCRATCH_WORDS)) begin
+                                ((cmd_rs1_data + ((cmd_rs2_data[15:0] - 16'd1) << 2)) > `ROCC_DMA_ADDR_MAX) ||
+                                ({16'd0, cmd_rs2_data[31:16]} + {16'd0, cmd_rs2_data[15:0]} > SCRATCH_WORDS)) begin
                                 status_error <= 1'b1;
                                 status_done  <= 1'b1;
                                 resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0};
@@ -298,9 +300,10 @@ always @(posedge clk or negedge rstn) begin
                         7'd4: begin // SCRATCH.STORE: rs1=scratch_addr, rs2=ext_mem_addr+len
                             // Validate RAM range for external address (including full transfer)
                             // Validate scratchpad bounds (0-1023 words)
+                            // Use wider arithmetic to prevent overflow in bounds check
                             if ((cmd_rs2_data[31:16] < `ROCC_DMA_ADDR_MIN) ||
-                                (({16'd0, cmd_rs2_data[31:16]} + (cmd_rs2_data[15:0] << 2)) > `ROCC_DMA_ADDR_MAX) ||
-                                (cmd_rs1_data + cmd_rs2_data[15:0] > SCRATCH_WORDS)) begin
+                                (({16'd0, cmd_rs2_data[31:16]} + ((cmd_rs2_data[15:0] - 16'd1) << 2)) > `ROCC_DMA_ADDR_MAX) ||
+                                (cmd_rs1_data + {16'd0, cmd_rs2_data[15:0]} > SCRATCH_WORDS)) begin
                                 status_error <= 1'b1;
                                 status_done  <= 1'b1;
                                 resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0};
