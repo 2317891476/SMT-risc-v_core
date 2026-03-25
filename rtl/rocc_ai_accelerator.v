@@ -181,7 +181,7 @@ always @(posedge clk or negedge rstn) begin
 
         // STATUS.READ can execute in any state - just return current status
         if (cmd_valid && cmd_ready && cmd_funct7 == 7'd5) begin
-            result_reg <= {29'd0, status_error, status_done, accel_busy};
+            resp_data  <= {29'd0, status_error, status_done, accel_busy};
             resp_valid <= 1'b1;
             resp_rd    <= cmd_rd;
             resp_tag   <= cmd_tag;
@@ -201,17 +201,22 @@ always @(posedge clk or negedge rstn) begin
 
                     case (cmd_funct7)
                         7'd0: begin // GEMM.START
-                            // Initialize for 3-phase GEMM: Load A -> Load B -> Store C
+                            // Initialize for 4-phase GEMM: Load A -> Load B -> Compute -> Store C
+                            // Address encoding (all in 0x0000-0x3FFF RAM range):
+                            //   rs1 = Matrix A base address (full 32-bit)
+                            //   rs2[15:0] = Matrix B base address
+                            //   rs2[31:16] = Matrix C base address
                             for (gi = 0; gi < SA_SIZE; gi = gi + 1)
                                 for (gj = 0; gj < SA_SIZE; gj = gj + 1)
                                     gemm_acc[gi][gj] <= 32'd0;
-                            dma_addr  <= cmd_rs1_data;  // Matrix A base address
-                            dma_cnt   <= 16'd0;
-                            dma_total <= (SA_SIZE * SA_SIZE) >> 2;  // 16 words for 64 bytes of INT8
-                            gemm_row  <= 4'd0;
-                            gemm_col  <= 4'd0;
-                            gemm_k    <= 4'd0;
-                            state     <= ST_GEMM_LOAD_A;
+                            dma_addr    <= cmd_rs1_data;         // Matrix A base address
+                            result_reg  <= cmd_rs2_data[31:16];  // Save C address in result_reg
+                            op_rs2      <= {16'd0, cmd_rs2_data[15:0]}; // Save B address in op_rs2
+                            dma_cnt     <= 16'd0;
+                            gemm_row    <= 4'd0;
+                            gemm_col    <= 4'd0;
+                            gemm_k      <= 4'd0;
+                            state       <= ST_GEMM_LOAD_A;
                         end
 
                         7'd1: begin // VEC.OP
@@ -340,11 +345,11 @@ always @(posedge clk or negedge rstn) begin
 
             // Phase 4: DMA Store result C (8x8 INT32 = 256 bytes = 64 words)
             ST_GEMM_STORE_C: begin
-                // op_rd = matrix C base address in RAM
+                // result_reg = matrix C base address in RAM (saved from rs2[31:16])
                 // Store from gemm_acc[0:7][0:7] flattened
                 if (dma_cnt < 64) begin
                     mem_req_valid <= 1'b1;
-                    mem_req_addr  <= op_rd + (dma_cnt << 2);
+                    mem_req_addr  <= result_reg + (dma_cnt << 2);
                     mem_req_wdata <= gemm_acc[dma_cnt >> 3][dma_cnt & 4'd7];
                     mem_req_wen   <= 1'b1;  // Write
                     if (mem_req_ready) begin
@@ -352,7 +357,7 @@ always @(posedge clk or negedge rstn) begin
                     end
                 end
                 else begin
-                    result_reg  <= 32'd0;  // GEMM returns 0 in rd
+                    resp_data   <= 32'd0;  // GEMM returns 0 in rd
                     status_done <= 1'b1;
                     state       <= ST_RESP;
                 end

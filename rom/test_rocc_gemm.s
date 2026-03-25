@@ -87,15 +87,15 @@ clear_b:
     sw x11, 24(x10)
     
     # Test 1: Call GEMM.START (funct7=0)
-    # rs1 = matrix A address (0x100)
-    # rs2 = matrix B address (0x140)
-    # rd = matrix C address (0x200)
-    li x14, 0x00000100      # A address
-    li x15, 0x00000140      # B address
-    li x16, 0x00000200      # C address (in x3 for rd field)
+    # Address encoding:
+    #   rs1 = matrix A base address (0x100)
+    #   rs2[15:0] = matrix B base address (0x140)
+    #   rs2[31:16] = matrix C base address (0x200)
+    li x14, 0x00000100      # A address (rs1)
+    li x15, 0x02000140      # C addr[31:16]=0x0200, B addr[15:0]=0x0140
     
     # GEMM.START: .insn r opcode, funct3, funct7, rd, rs1, rs2
-    .insn r 0x0B, 0, 0, x17, x14, x15
+    .insn r 0x0B, 0, 0, x3, x14, x15
     
     # Test 2: Poll STATUS.READ until operation completes
     li x18, 0               # Retry counter
