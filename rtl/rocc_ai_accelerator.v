@@ -137,8 +137,8 @@ reg [3:0]  gemm_row, gemm_col, gemm_k;
 reg [31:0] result_reg;
 
 // ─── Status Registers ──────────────────────────────────────────────────────
-reg status_done;
-reg status_error;
+reg status_done = 1'b0;
+reg status_error = 1'b0;
 
 // ─── GEMM Byte Extraction ──────────────────────────────────────────────────
 // Extract INT8 bytes from packed scratchpad words

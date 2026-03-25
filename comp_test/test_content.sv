@@ -57,7 +57,7 @@ initial begin
         test_id = 12;  // RoCC GEMM/Vector test
     else if (`TB_IROM.mem[0] === 32'h00d00193)   // addi x3, x0, 13 (RoCC DMA test marker)
         test_id = 13;  // RoCC DMA test
-    else if (`TB_IROM.mem[0] === 32'h00b00193)   // addi x3, x0, 11 (RoCC status test marker)
+    else if (`TB_IROM.mem[0] === 32'h00e00193)   // addi x3, x0, 14 (RoCC status test marker)
         test_id = 14;  // RoCC STATUS.READ test
     else
         test_id = 0;
