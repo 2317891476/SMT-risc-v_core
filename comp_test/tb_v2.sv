@@ -1,5 +1,5 @@
 `timescale 1ns/1ns
-`define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_ram_data
+`define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
 `define TB_DRAM tb_v2.u_adam_riscv_v2.u_stage_mem.u_data_memory.u_ram_data
 
