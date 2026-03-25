@@ -40,7 +40,7 @@ _start:
 arith_loop:
     # Arithmetic operations (I-side pressure)
     addi x10, x10, 1
-    mul x12, x10, x10
+    add x12, x10, x10      # Use add instead of mul (rv32i only)
     
     # Memory operation (D-side pressure)
     sw x12, 16(x1)
