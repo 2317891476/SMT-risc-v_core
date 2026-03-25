@@ -78,6 +78,35 @@ wire       pipe0_mret_valid;
 // CSR read data from csr_unit
 wire [31:0] csr_rdata;
 
+// RoCC AI Accelerator interface
+wire        rocc_cmd_valid;
+wire        rocc_cmd_ready;
+wire [6:0]  rocc_cmd_funct7;
+wire [2:0]  rocc_cmd_funct3;
+wire [4:0]  rocc_cmd_rd;
+wire [31:0] rocc_cmd_rs1_data;
+wire [31:0] rocc_cmd_rs2_data;
+wire [4:0]  rocc_cmd_tag;
+wire [0:0]  rocc_cmd_tid;
+
+wire        rocc_resp_valid;
+wire        rocc_resp_ready;
+wire [4:0]  rocc_resp_rd;
+wire [31:0] rocc_resp_data;
+wire [4:0]  rocc_resp_tag;
+wire [0:0]  rocc_resp_tid;
+
+wire        rocc_mem_req_valid;
+wire        rocc_mem_req_ready;
+wire [31:0] rocc_mem_req_addr;
+wire [31:0] rocc_mem_req_wdata;
+wire        rocc_mem_req_wen;
+wire        rocc_mem_resp_valid;
+wire [31:0] rocc_mem_resp_rdata;
+
+wire        rocc_busy;
+wire        rocc_interrupt;
+
 // Trap signals
 wire        trap_enter;
 wire [31:0] trap_target;
@@ -262,6 +291,8 @@ wire [0:0]  dec0_tid,   dec1_tid;
 wire        dec0_is_csr, dec1_is_csr;
 wire        dec0_is_mret, dec1_is_mret;
 wire [11:0] dec0_csr_addr, dec1_csr_addr;
+wire        dec0_is_rocc, dec1_is_rocc;
+wire [6:0]  dec0_rocc_funct7, dec1_rocc_funct7;
 
 decoder_dual u_decoder_dual(
     .inst0_valid     (fb_pop0_valid    ),
@@ -317,11 +348,15 @@ decoder_dual u_decoder_dual(
     .dec1_rs2_used   (dec1_rs2_used    ),
     .dec1_fu         (dec1_fu          ),
     .dec1_tid        (dec1_tid         ),
-    .dec1_is_csr     (dec1_is_csr      ),
-    .dec1_is_mret    (dec1_is_mret     ),
-    .dec1_csr_addr   (dec1_csr_addr    ),
-    .consume_0       (fb_consume_0     ),
-    .consume_1       (fb_consume_1     )
+    .dec1_is_csr     (dec1_is_csr     ),
+    .dec1_is_mret    (dec1_is_mret    ),
+    .dec1_csr_addr   (dec1_csr_addr   ),
+    .dec0_is_rocc    (dec0_is_rocc    ),
+    .dec0_rocc_funct7(dec0_rocc_funct7),
+    .dec1_is_rocc    (dec1_is_rocc    ),
+    .dec1_rocc_funct7(dec1_rocc_funct7),
+    .consume_0       (fb_consume_0    ),
+    .consume_1       (fb_consume_1    )
 );
 
 // Squash dispatches if flush active
@@ -549,6 +584,11 @@ reg        rs_is_mret [0:31];
 reg [11:0] rs_csr_addr[0:31];
 integer    sys_meta_idx;
 
+// Per-tag RoCC metadata (decoder → scoreboard issue sideband)
+reg        rs_is_rocc    [0:31];
+reg [6:0]  rs_rocc_funct7[0:31];
+integer    rocc_meta_idx;
+
 rob_lite #(
     .ROB_DEPTH      (8),
     .ROB_IDX_W      (3),
@@ -706,16 +746,24 @@ always @(posedge clk or negedge rstn) begin
             rs_is_mret[sys_meta_idx]  <= 1'b0;
             rs_csr_addr[sys_meta_idx] <= 12'd0;
         end
+        for (rocc_meta_idx = 0; rocc_meta_idx < 32; rocc_meta_idx = rocc_meta_idx + 1) begin
+            rs_is_rocc[rocc_meta_idx]     <= 1'b0;
+            rs_rocc_funct7[rocc_meta_idx] <= 7'd0;
+        end
     end else begin
         if (disp0_accepted) begin
             rs_is_csr[sb_disp0_tag]   <= dec0_is_csr;
             rs_is_mret[sb_disp0_tag]  <= dec0_is_mret;
             rs_csr_addr[sb_disp0_tag] <= dec0_csr_addr;
+            rs_is_rocc[sb_disp0_tag]     <= dec0_is_rocc;
+            rs_rocc_funct7[sb_disp0_tag] <= dec0_rocc_funct7;
         end
         if (disp1_accepted) begin
             rs_is_csr[sb_disp1_tag]   <= dec1_is_csr;
             rs_is_mret[sb_disp1_tag]  <= dec1_is_mret;
             rs_csr_addr[sb_disp1_tag] <= dec1_csr_addr;
+            rs_is_rocc[sb_disp1_tag]     <= dec1_is_rocc;
+            rs_rocc_funct7[sb_disp1_tag] <= dec1_rocc_funct7;
         end
     end
 end
@@ -731,6 +779,12 @@ wire        iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
                            iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
 wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                             iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
+
+// Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
+wire        iss0_is_rocc     = iss0_tag_hits_disp0 ? dec0_is_rocc :
+                               iss0_tag_hits_disp1 ? dec1_is_rocc : rs_is_rocc[iss0_tag];
+wire [6:0]  iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
+                               iss0_tag_hits_disp1 ? dec1_rocc_funct7 : rs_rocc_funct7[iss0_tag];
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -844,11 +898,80 @@ bypass_network u_bypass1(
     .fwd_src_b       (byp1_fwd_b     )
 );
 
+// ════════════════════════════════════════════════════════════════════════════
+// RoCC AI Accelerator Integration
+// ════════════════════════════════════════════════════════════════════════════
+
+// RoCC Command Interface: When iss0_is_rocc, bypass exec_pipe0 and send to RoCC
+assign rocc_cmd_valid    = iss0_valid && iss0_is_rocc;
+assign rocc_cmd_funct7   = iss0_rocc_funct7;
+assign rocc_cmd_funct3   = iss0_func3;
+assign rocc_cmd_rd       = iss0_rd;
+assign rocc_cmd_rs1_data = byp0_op_a;  // RS1 data from bypass network
+assign rocc_cmd_rs2_data = byp0_op_b;  // RS2 data from bypass network
+assign rocc_cmd_tag      = iss0_tag;
+assign rocc_cmd_tid      = iss0_tid;
+
+// RoCC is always ready to accept when not busy
+assign rocc_resp_ready   = 1'b1;
+
+// RoCC memory response mapping (from M2 port)
+assign rocc_mem_resp_valid = m2_resp_valid;
+assign rocc_mem_resp_rdata = m2_resp_data;
+
+// ════════════════════════════════════════════════════════════════════════════
+// RoCC Flush-Safe Completion Handling
+// ════════════════════════════════════════════════════════════════════════════
+// Track the epoch of each in-flight RoCC command by tag
+reg [`METADATA_EPOCH_W-1:0] rocc_cmd_epoch [0:31];
+reg                         rocc_cmd_in_flight [0:31];
+integer                     rocc_epoch_idx;
+
+// Capture epoch when RoCC command is issued
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
+            rocc_cmd_epoch[rocc_epoch_idx] <= {`METADATA_EPOCH_W{1'b0}};
+            rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
+        end
+    end else begin
+        // Clear in-flight on flush per thread
+        if (combined_flush_any) begin
+            for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
+                // Note: We don't clear here because we need tag-based flush
+                // The epoch check below will suppress stale responses
+            end
+        end
+
+        // Mark in-flight when RoCC command is accepted
+        if (rocc_cmd_valid && rocc_cmd_ready) begin
+            rocc_cmd_epoch[rocc_cmd_tag] <= iss0_epoch;
+            rocc_cmd_in_flight[rocc_cmd_tag] <= 1'b1;
+        end
+
+        // Clear in-flight when response is accepted
+        if (rocc_resp_valid && rocc_resp_ready) begin
+            rocc_cmd_in_flight[rocc_resp_tag] <= 1'b0;
+        end
+    end
+end
+
+// Get current epoch for each thread
+wire [`METADATA_EPOCH_W-1:0] current_epoch_for_rocc_resp = (rocc_resp_tid == 1'b0) ? epoch_t0 : epoch_t1;
+
+// Check if RoCC response is valid (not flushed)
+// Response is valid if: epoch matches current epoch for that thread AND was in-flight
+wire rocc_resp_epoch_match = (rocc_cmd_epoch[rocc_resp_tag] == current_epoch_for_rocc_resp);
+wire rocc_resp_not_flushed = rocc_resp_epoch_match && rocc_cmd_in_flight[rocc_resp_tag];
+
 // ─── Execution Pipe 0 (INT + Branch) ───────────────────────────────────────
+// When iss0_is_rocc, don't send to exec_pipe0 (RoCC bypasses it)
+wire iss0_to_pipe0_valid = iss0_valid && !iss0_is_rocc;
+
 exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .clk              (clk              ),
     .rstn             (rstn             ),
-    .in_valid         (iss0_valid       ),
+    .in_valid         (iss0_to_pipe0_valid),
     .in_tag           (iss0_tag         ),
     .in_pc            (iss0_pc          ),
     .in_op_a          (byp0_op_a        ),
@@ -1095,14 +1218,19 @@ assign mem_wb_data   = mem_wb_data_sel;
 wire [0:0] mem_wb_tid_r;
 assign mem_wb_tid_r = lsu_resp_tid;
 
-// ─── WB Port 0: from Pipe 0 (INT + Branch, single-cycle) ──────────────────
+// ─── WB Port 0: from Pipe 0 (INT + Branch) OR RoCC Response ──────────────────
 // WB0 outputs (for CDB/scoreboard/bypass)
-assign wb0_valid      = p0_ex_valid;
-assign wb0_tag        = p0_ex_tag;
-assign wb0_rd         = p0_ex_rd;
-assign wb0_regs_write = p0_ex_rd_wen;
-assign wb0_fu         = p0_ex_fu;
-assign wb0_tid        = p0_ex_tid;
+// RoCC instructions bypass exec_pipe0 and send response directly to WB0
+// Flush-safe: Only accept RoCC response if epoch matches (rocc_resp_not_flushed)
+wire wb0_from_rocc = rocc_resp_valid && rocc_resp_not_flushed;
+wire wb0_from_pipe0 = p0_ex_valid && !wb0_from_rocc;  // RoCC takes priority if valid
+
+assign wb0_valid      = wb0_from_rocc ? rocc_resp_valid   : p0_ex_valid;
+assign wb0_tag        = wb0_from_rocc ? rocc_resp_tag     : p0_ex_tag;
+assign wb0_rd         = wb0_from_rocc ? rocc_resp_rd      : p0_ex_rd;
+assign wb0_regs_write = wb0_from_rocc ? (rocc_resp_rd != 5'd0) : p0_ex_rd_wen;
+assign wb0_fu         = wb0_from_rocc ? `FU_INT0          : p0_ex_fu;
+assign wb0_tid        = wb0_from_rocc ? rocc_resp_tid     : p0_ex_tid;
 
 // ─── WB Port 1: from MEM or MUL (whichever is valid) ──────────────────────
 // MUL takes priority if both valid simultaneously (edge case)
@@ -1135,7 +1263,7 @@ reg [31:0] result_buffer [0:31];
 reg        result_valid  [0:31];
 
 // WB data sources for result buffer
-wire [31:0] wb0_result_data = p0_ex_result;
+wire [31:0] wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
 wire [31:0] wb1_result_data = wb1_from_mul ? p1_mul_result :
                               wb1_from_mem ? mem_wb_data_sel :
                               wb1_from_alu ? p1_alu_result : 32'd0;
@@ -1217,6 +1345,52 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
 );
 
 // ════════════════════════════════════════════════════════════════════════════
+// RoCC AI Accelerator Instantiation
+// ════════════════════════════════════════════════════════════════════════════
+
+rocc_ai_accelerator #(
+    .SA_SIZE   (8),
+    .VEC_WIDTH (128),
+    .SCRATCH_KB(4),
+    .TAG_W     (5)
+) u_rocc_ai_accelerator (
+    .clk              (clk),
+    .rstn             (rstn),
+
+    // Command interface (from scoreboard issue port 0)
+    .cmd_valid        (rocc_cmd_valid),
+    .cmd_ready        (rocc_cmd_ready),
+    .cmd_funct7       (rocc_cmd_funct7),
+    .cmd_funct3       (rocc_cmd_funct3),
+    .cmd_rd           (rocc_cmd_rd),
+    .cmd_rs1_data     (rocc_cmd_rs1_data),
+    .cmd_rs2_data     (rocc_cmd_rs2_data),
+    .cmd_tag          (rocc_cmd_tag),
+    .cmd_tid          (rocc_cmd_tid),
+
+    // Response interface (to WB0)
+    .resp_valid       (rocc_resp_valid),
+    .resp_ready       (rocc_resp_ready),
+    .resp_rd          (rocc_resp_rd),
+    .resp_data        (rocc_resp_data),
+    .resp_tag         (rocc_resp_tag),
+    .resp_tid         (rocc_resp_tid),
+
+    // DMA memory interface (to M2 port)
+    .mem_req_valid    (rocc_mem_req_valid),
+    .mem_req_ready    (rocc_mem_req_ready),
+    .mem_req_addr     (rocc_mem_req_addr),
+    .mem_req_wdata    (rocc_mem_req_wdata),
+    .mem_req_wen      (rocc_mem_req_wen),
+    .mem_resp_valid   (rocc_mem_resp_valid),
+    .mem_resp_rdata   (rocc_mem_resp_rdata),
+
+    // Status
+    .accel_busy       (rocc_busy),
+    .accel_interrupt  (rocc_interrupt)
+);
+
+// ════════════════════════════════════════════════════════════════════════════
 // Task 4: Memory Subsystem Integration
 // ════════════════════════════════════════════════════════════════════════════
 
@@ -1241,11 +1415,31 @@ wire [3:0]  m1_req_wen;
 wire        m1_resp_valid;
 wire [31:0] m1_resp_data;
 
+// M2 (RoCC DMA) interface signals
+wire        m2_req_valid;
+wire        m2_req_ready;
+wire [31:0] m2_req_addr;
+wire        m2_req_write;
+wire [31:0] m2_req_wdata;
+wire [3:0]  m2_req_wen;
+wire        m2_resp_valid;
+wire [31:0] m2_resp_data;
+
 // Internal tube status from mem_subsys
 wire [7:0]  mem_subsys_tube_status;
 wire        ext_timer_irq;     // CLINT timer interrupt (MTIP)
 wire        ext_external_irq;  // PLIC external interrupt (MEIP)
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
+
+// RoCC DMA to M2 port connections
+assign m2_req_valid  = rocc_mem_req_valid;
+assign m2_req_addr   = rocc_mem_req_addr;
+assign m2_req_write  = rocc_mem_req_wen;
+assign m2_req_wdata  = rocc_mem_req_wdata;
+assign m2_req_wen    = rocc_mem_req_wen ? 4'b1111 : 4'b0000;  // Word-wide writes
+assign rocc_mem_req_ready = m2_req_ready;
+assign rocc_mem_resp_valid = m2_resp_valid;
+assign rocc_mem_resp_rdata = m2_resp_data;
 
 // Mem_subsys instantiation
 mem_subsys u_mem_subsys (
@@ -1272,6 +1466,16 @@ mem_subsys u_mem_subsys (
     .m1_req_wen        (m1_req_wen),
     .m1_resp_valid     (m1_resp_valid),
     .m1_resp_data      (m1_resp_data),
+
+    // M2: RoCC DMA interface
+    .m2_req_valid      (m2_req_valid),
+    .m2_req_ready      (m2_req_ready),
+    .m2_req_addr       (m2_req_addr),
+    .m2_req_write      (m2_req_write),
+    .m2_req_wdata      (m2_req_wdata),
+    .m2_req_wen        (m2_req_wen),
+    .m2_resp_valid     (m2_resp_valid),
+    .m2_resp_data      (m2_resp_data),
 
     // Testbench observation
     .tube_status       (mem_subsys_tube_status),
