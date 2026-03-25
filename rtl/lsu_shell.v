@@ -144,6 +144,8 @@ wire [31:0]              sb_mem_write_data_int;
 wire [2:0]               sb_mem_write_func3_int;
 wire [3:0]               sb_mem_write_wen_int;
 
+wire                     sb_mem_write_ready_mux;
+
 // Store Buffer forwarding signals
 wire [31:0]              sb_forward_data;
 wire                     sb_forward_valid;
@@ -179,15 +181,6 @@ assign req_accept = is_store ? store_accept : load_accept;
 
 // Export load hazard signal for scoreboard stalling
 assign load_hazard = is_load && sb_load_hazard;
-
-// =============================================================================
-// Memory Interface for Loads
-// =============================================================================
-
-// Load requests go directly to memory (bypass Store Buffer for now)
-// In future: check Store Buffer for store-to-load forwarding
-assign mem_addr = req_addr;
-assign mem_read = (is_load && !sb_load_hazard) ? 4'b1111 : 4'b0000;  // Full word read, let stage_wb handle extraction
 
 // =============================================================================
 // Store Buffer Instance
@@ -233,7 +226,7 @@ store_buffer #(
     .mem_write_data         (sb_mem_write_data_int),
     .mem_write_func3        (sb_mem_write_func3_int),
     .mem_write_wen          (sb_mem_write_wen_int),
-    .mem_write_ready        (sb_mem_write_ready),
+    .mem_write_ready        (sb_mem_write_ready_mux),
 
     // Load query interface (for store-to-load forwarding)
     .load_query_valid       (is_load),
@@ -283,6 +276,11 @@ reg [31:0]        pending_forward_data;   // Forwarded data
 
 // Raw memory data register (for mem_subsys mode)
 reg [31:0]        raw_mem_rdata;
+reg               m1_txn_is_drain;
+
+assign sb_mem_write_ready_mux = use_mem_subsys ?
+                                ((lsu_state == LSU_IDLE) && !req_valid) :
+                                sb_mem_write_ready;
 
 // State machine
 always @(posedge clk or negedge rstn) begin
@@ -291,12 +289,15 @@ always @(posedge clk or negedge rstn) begin
         pending_valid     <= 1'b0;
         m1_req_valid      <= 1'b0;
         raw_mem_rdata     <= 32'd0;
+        m1_txn_is_drain   <= 1'b0;
     end else if (flush) begin
-        // On flush, abort pending operations for the flushed thread
-        if (pending_tid == flush_tid || !pending_valid) begin
-            lsu_state     <= LSU_IDLE;
-            pending_valid <= 1'b0;
-            m1_req_valid  <= 1'b0;
+        // On flush, abort speculative load requests, but never discard a
+        // committed store-buffer drain that has already been handed off.
+        if (!m1_txn_is_drain && (pending_tid == flush_tid || !pending_valid)) begin
+            lsu_state       <= LSU_IDLE;
+            pending_valid   <= 1'b0;
+            m1_req_valid    <= 1'b0;
+            m1_txn_is_drain <= 1'b0;
         end
     end else begin
         case (lsu_state)
@@ -318,6 +319,7 @@ always @(posedge clk or negedge rstn) begin
                     pending_addr          <= req_addr;
                     pending_forward_valid <= is_load && sb_forward_valid;
                     pending_forward_data  <= sb_forward_data;
+                    m1_txn_is_drain       <= 1'b0;
 
                     if (use_mem_subsys && is_load && !sb_forward_valid) begin
                         // Load with mem_subsys: need to send request
@@ -334,6 +336,16 @@ always @(posedge clk or negedge rstn) begin
                         // Load with forwarding or legacy mode: single cycle
                         lsu_state     <= LSU_RESP;
                     end
+                end else if (use_mem_subsys && sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
+                    // Drain one committed store-buffer entry through mem_subsys M1.
+                    pending_valid       <= 1'b0;
+                    m1_txn_is_drain     <= 1'b1;
+                    lsu_state           <= LSU_REQ;
+                    m1_req_valid        <= 1'b1;
+                    m1_req_addr         <= sb_mem_write_addr_int;
+                    m1_req_write        <= 1'b1;
+                    m1_req_wdata        <= sb_mem_write_data_int;
+                    m1_req_wen          <= sb_mem_write_wen_int;
                 end
             end
 
@@ -348,15 +360,21 @@ always @(posedge clk or negedge rstn) begin
             LSU_WAIT_RESP: begin
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
-                    raw_mem_rdata <= m1_resp_data;
-                    lsu_state     <= LSU_RESP;
+                    if (m1_txn_is_drain) begin
+                        lsu_state       <= LSU_IDLE;
+                        m1_txn_is_drain <= 1'b0;
+                    end else begin
+                        raw_mem_rdata <= m1_resp_data;
+                        lsu_state     <= LSU_RESP;
+                    end
                 end
             end
 
             LSU_RESP: begin
                 // Response ready, will be consumed by writeback
-                lsu_state     <= LSU_IDLE;
-                pending_valid <= 1'b0;
+                lsu_state       <= LSU_IDLE;
+                pending_valid   <= 1'b0;
+                m1_txn_is_drain <= 1'b0;
             end
 
             default: begin

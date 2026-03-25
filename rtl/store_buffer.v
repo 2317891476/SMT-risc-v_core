@@ -125,8 +125,10 @@ wire t0_can_drain = !sb_empty_t0 && sb_valid[0][sb_head[0]] &&
 wire t1_can_drain = !sb_empty_t1 && sb_valid[1][sb_head[1]] && 
                      sb_committed[1][sb_head[1]];
 
-wire drain_t0 = t0_can_drain && mem_write_ready;
-wire drain_t1 = t1_can_drain && mem_write_ready && !t0_can_drain;
+wire drain_sel_t0  = t0_can_drain;
+wire drain_sel_t1  = !t0_can_drain && t1_can_drain;
+wire drain_fire_t0 = drain_sel_t0 && mem_write_ready;
+wire drain_fire_t1 = drain_sel_t1 && mem_write_ready;
 
 // Generate byte-wise write enable from func3
 reg [3:0] wen_from_func3_t0;
@@ -157,13 +159,13 @@ end
 // ═════════════════════════════════════════════════════════════════════════════
 
 always @(*) begin
-    if (drain_t0) begin
+    if (drain_sel_t0) begin
         mem_write_valid = 1'b1;
         mem_write_addr  = sb_addr[0][sb_head[0]];
         mem_write_data  = sb_data[0][sb_head[0]];
         mem_write_func3 = sb_func3[0][sb_head[0]];
         mem_write_wen   = wen_from_func3_t0;
-    end else if (drain_t1) begin
+    end else if (drain_sel_t1) begin
         mem_write_valid = 1'b1;
         mem_write_addr  = sb_addr[1][sb_head[1]];
         mem_write_data  = sb_data[1][sb_head[1]];
@@ -429,12 +431,12 @@ always @(posedge clk or negedge rstn) begin
 
         // ── Store Drain ─────────────────────────────────────────
         // Remove drained stores from buffer (T0 has priority)
-        if (drain_t0) begin
+        if (drain_fire_t0) begin
             sb_valid_next[0][sb_head_next[0]] = 1'b0;  // Deallocate
             sb_committed_next[0][sb_head_next[0]] = 1'b0;
             sb_head_next[0] = sb_head_next[0] + 1;
             sb_count_next[0] = sb_count_next[0] - 1;
-        end else if (drain_t1) begin
+        end else if (drain_fire_t1) begin
             sb_valid_next[1][sb_head_next[1]] = 1'b0;  // Deallocate
             sb_committed_next[1][sb_head_next[1]] = 1'b0;
             sb_head_next[1] = sb_head_next[1] + 1;

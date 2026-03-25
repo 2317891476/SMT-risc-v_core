@@ -25,6 +25,7 @@ module adam_riscv_v2(
     output wire[2:0] led,
 `endif
     input wire sys_rstn,
+    input wire ext_irq_src,
     output wire [7:0] tube_status  // Task 4: Export for testbench observation
 );
 
@@ -71,6 +72,8 @@ wire       pipe0_br_complete;  // branch execution complete (taken or not)
 wire       pipe0_csr_valid;
 wire [31:0] pipe0_csr_wdata;
 wire [2:0] pipe0_csr_op;
+wire [11:0] pipe0_csr_addr_unused;
+wire       pipe0_mret_valid;
 
 // CSR read data from csr_unit
 wire [31:0] csr_rdata;
@@ -134,6 +137,10 @@ end
 // Order ID update logic moved below after scoreboard is defined
 // Order ID and epoch assignments will be defined after decoder signals
 
+// Memory subsystem mode: keep mem_subsys as the only lower-memory path.
+localparam USE_MEM_SUBSYS = 1'b1;
+wire use_mem_subsys = USE_MEM_SUBSYS;
+
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 1: Instruction Fetch (stage_if_v2 with BPU)
 // ════════════════════════════════════════════════════════════════════════════
@@ -193,6 +200,8 @@ stage_if_v2 u_stage_if_v2(
     .ext_mem_resp_data  (m0_resp_data),
     .ext_mem_resp_last  (m0_resp_last),
     .ext_mem_resp_ready (m0_resp_ready),
+    .ext_mem_bypass_addr(m0_bypass_addr),
+    .ext_mem_bypass_data(m0_bypass_data),
     .use_external_refill(use_mem_subsys)
 );
 
@@ -250,6 +259,9 @@ wire        dec0_rs1_used, dec1_rs1_used;
 wire        dec0_rs2_used, dec1_rs2_used;
 wire [2:0]  dec0_fu,    dec1_fu;
 wire [0:0]  dec0_tid,   dec1_tid;
+wire        dec0_is_csr, dec1_is_csr;
+wire        dec0_is_mret, dec1_is_mret;
+wire [11:0] dec0_csr_addr, dec1_csr_addr;
 
 decoder_dual u_decoder_dual(
     .inst0_valid     (fb_pop0_valid    ),
@@ -281,6 +293,9 @@ decoder_dual u_decoder_dual(
     .dec0_rs2_used   (dec0_rs2_used    ),
     .dec0_fu         (dec0_fu          ),
     .dec0_tid        (dec0_tid         ),
+    .dec0_is_csr     (dec0_is_csr      ),
+    .dec0_is_mret    (dec0_is_mret     ),
+    .dec0_csr_addr   (dec0_csr_addr    ),
     .dec1_valid      (dec1_valid       ),
     .dec1_pc         (dec1_pc          ),
     .dec1_imm        (dec1_imm         ),
@@ -302,6 +317,9 @@ decoder_dual u_decoder_dual(
     .dec1_rs2_used   (dec1_rs2_used    ),
     .dec1_fu         (dec1_fu          ),
     .dec1_tid        (dec1_tid         ),
+    .dec1_is_csr     (dec1_is_csr      ),
+    .dec1_is_mret    (dec1_is_mret     ),
+    .dec1_csr_addr   (dec1_csr_addr    ),
     .consume_0       (fb_consume_0     ),
     .consume_1       (fb_consume_1     )
 );
@@ -525,6 +543,12 @@ wire disp1_is_store = (dec1_fu == `FU_STORE);
 // Dispatch tag wires from scoreboard
 wire [4:0] sb_disp0_tag, sb_disp1_tag;
 
+// Per-tag SYSTEM metadata (decoder → scoreboard issue sideband)
+reg        rs_is_csr  [0:31];
+reg        rs_is_mret [0:31];
+reg [11:0] rs_csr_addr[0:31];
+integer    sys_meta_idx;
+
 rob_lite #(
     .ROB_DEPTH      (8),
     .ROB_IDX_W      (3),
@@ -656,6 +680,57 @@ regs_mt #(.N_T(2)) u_regs_mt_p1(
 // Dispatch is accepted when valid is asserted and stall is not asserted
 wire disp0_accepted = disp0_valid_gated && !sb_disp_stall;
 wire disp1_accepted = disp1_valid_gated && !sb_disp_stall;
+
+// Best-effort trap resume PC for interrupt entry.
+// Prefer the oldest visible in-flight PC over the current fetch PC.
+reg [31:0] trap_pc_r;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        trap_pc_r <= 32'd0;
+    end else if (iss0_valid) begin
+        trap_pc_r <= iss0_pc;
+    end else if (dec0_valid) begin
+        trap_pc_r <= dec0_pc;
+    end else if (fb_pop0_valid) begin
+        trap_pc_r <= fb_pop0_pc;
+    end else if (if_valid) begin
+        trap_pc_r <= if_pc;
+    end
+end
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (sys_meta_idx = 0; sys_meta_idx < 32; sys_meta_idx = sys_meta_idx + 1) begin
+            rs_is_csr[sys_meta_idx]   <= 1'b0;
+            rs_is_mret[sys_meta_idx]  <= 1'b0;
+            rs_csr_addr[sys_meta_idx] <= 12'd0;
+        end
+    end else begin
+        if (disp0_accepted) begin
+            rs_is_csr[sb_disp0_tag]   <= dec0_is_csr;
+            rs_is_mret[sb_disp0_tag]  <= dec0_is_mret;
+            rs_csr_addr[sb_disp0_tag] <= dec0_csr_addr;
+        end
+        if (disp1_accepted) begin
+            rs_is_csr[sb_disp1_tag]   <= dec1_is_csr;
+            rs_is_mret[sb_disp1_tag]  <= dec1_is_mret;
+            rs_csr_addr[sb_disp1_tag] <= dec1_csr_addr;
+        end
+    end
+end
+
+// Issue-time SYSTEM metadata reconstructed from the dispatched tag.
+// Pipe 0 can issue a freshly-dispatched SYSTEM op in the same cycle, so bypass
+// decoder metadata around the tag RAM when the issue tag matches a new dispatch.
+wire iss0_tag_hits_disp0 = disp0_accepted && (iss0_tag == sb_disp0_tag) && (iss0_tid == dec0_tid);
+wire iss0_tag_hits_disp1 = disp1_accepted && (iss0_tag == sb_disp1_tag) && (iss0_tid == dec1_tid);
+wire        iss0_is_csr  = iss0_tag_hits_disp0 ? dec0_is_csr  :
+                           iss0_tag_hits_disp1 ? dec1_is_csr  : rs_is_csr[iss0_tag];
+wire        iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
+                           iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
+wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
+                            iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -790,6 +865,10 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .in_regs_write    (iss0_regs_write  ),
     .in_fu            (iss0_fu          ),
     .in_tid           (iss0_tid         ),
+    .in_is_csr        (iss0_is_csr      ),
+    .in_is_mret       (iss0_is_mret     ),
+    .in_csr_addr      (iss0_csr_addr    ),
+    .csr_rdata        (csr_rdata        ),
     .out_valid        (p0_ex_valid      ),
     .out_tag          (p0_ex_tag        ),
     .out_result       (p0_ex_result     ),
@@ -797,6 +876,11 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .out_regs_write   (p0_ex_rd_wen     ),
     .out_fu           (p0_ex_fu         ),
     .out_tid          (p0_ex_tid        ),
+    .csr_valid        (pipe0_csr_valid  ),
+    .csr_wdata        (pipe0_csr_wdata  ),
+    .csr_op           (pipe0_csr_op     ),
+    .csr_addr         (pipe0_csr_addr_unused),
+    .mret_valid       (pipe0_mret_valid ),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
     .br_tid           (pipe0_br_tid     ),
@@ -986,50 +1070,12 @@ lsu_shell #(
 );
 
 // ════════════════════════════════════════════════════════════════════════════
-// Memory Stage (using existing data_memory / stage_mem for simulation)
+// Legacy stage_mem path is disabled in mem_subsys mode.
+// mem_subsys is now the only lower-memory endpoint for both LSU loads and
+// committed store-buffer drains.
 // ════════════════════════════════════════════════════════════════════════════
-wire        forward_data_dummy = 1'b0;
-
-`ifdef FPGA_MODE
-stage_mem u_stage_mem(
-    .clk            (clk                ),
-    .rstn           (rstn               ),
-    .me_regs_data2  (p1_mem_req_wdata   ),
-    .me_alu_o       (lsu_mem_addr        ),
-    .me_mem_read    (lsu_mem_read[0]    ),
-    .me_mem_write   (1'b0              ),
-    .me_func3_code  (p1_mem_req_func3   ),
-    .forward_data   (forward_data_dummy ),
-    .w_regs_data    (32'd0              ),
-    .me_led         (led                ),
-    .me_mem_data    (lsu_mem_rdata      ),
-    .sb_write_valid (sb_mem_write_valid ),
-    .sb_write_addr  (sb_mem_write_addr  ),
-    .sb_write_data  (sb_mem_write_data  ),
-    .sb_write_func3 (3'b010             ),
-    .sb_write_wen   (sb_mem_write_wen   ),
-    .sb_write_ready (sb_mem_write_ready )
-);
-`else
-stage_mem u_stage_mem(
-    .clk            (clk                ),
-    .rstn           (rstn               ),
-    .me_regs_data2  (p1_mem_req_wdata   ),
-    .me_alu_o       (lsu_mem_addr        ),
-    .me_mem_read    (lsu_mem_read[0]    ),
-    .me_mem_write   (1'b0              ),
-    .me_func3_code  (p1_mem_req_func3   ),
-    .forward_data   (forward_data_dummy ),
-    .w_regs_data    (32'd0              ),
-    .me_mem_data    (lsu_mem_rdata      ),
-    .sb_write_valid (sb_mem_write_valid ),
-    .sb_write_addr  (sb_mem_write_addr  ),
-    .sb_write_data  (sb_mem_write_data  ),
-    .sb_write_func3 (3'b010             ),
-    .sb_write_wen   (sb_mem_write_wen   ),
-    .sb_write_ready (sb_mem_write_ready )
-);
-`endif
+assign lsu_mem_rdata      = 32'd0;
+assign sb_mem_write_ready = 1'b0;
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 8: Write-Back (select between ALU result and MEM load data)
@@ -1143,42 +1189,36 @@ assign w_regs_tid_1  = 1'b1;  // Thread 1
 // CSR Unit (Live connection for CSR/MRET support)
 // ════════════════════════════════════════════════════════════════════════════
 csr_unit #(.HART_ID(0)) u_csr_unit(
-    .clk             (clk           ),
-    .rstn            (rstn          ),
-    .csr_valid       (pipe0_csr_valid ),  // CSR instruction executed
-    .csr_addr        (iss0_csr_addr   ),  // CSR address from issue
-    .csr_op          (pipe0_csr_op    ),  // CSR operation
-    .csr_wdata       (pipe0_csr_wdata ),  // CSR write data
-    .csr_rdata       (csr_rdata       ),  // CSR read data
-    .exc_valid       (1'b0          ),  // TODO: Exception handling
-    .exc_cause       (32'd0         ),
-    .exc_pc          (32'd0         ),
-    .exc_tval        (32'd0         ),
-    .mret_valid      (trap_return   ),  // MRET executed
-    .trap_enter      (trap_enter    ),
-    .trap_target     (trap_target   ),
-    .trap_return     (trap_return   ),
-    .mepc_out        (mepc_out      ),
-    .satp_out        (              ),
-    .priv_mode_out   (              ),
-    .mstatus_mxr     (              ),
-    .mstatus_sum     (              ),
-    .global_int_en   (global_int_en ),
-    .instr_retired   (rob_instr_retired[0] ),
-    .instr_retired_1 (rob_instr_retired[1] ),
-    .ext_timer_irq   (ext_timer_irq ),  // CLINT timer interrupt
-    .ext_external_irq(ext_external_irq)  // PLIC external interrupt
+    .clk             (clk               ),
+    .rstn            (rstn              ),
+    .csr_valid       (pipe0_csr_valid   ),
+    .csr_addr        (iss0_csr_addr     ),
+    .csr_op          (pipe0_csr_op      ),
+    .csr_wdata       (pipe0_csr_wdata   ),
+    .csr_rdata       (csr_rdata         ),
+    .exc_valid       (1'b0              ),
+    .exc_cause       (32'd0             ),
+    .exc_pc          (trap_pc_r         ),
+    .exc_tval        (32'd0             ),
+    .mret_valid      (pipe0_mret_valid  ),
+    .trap_enter      (trap_enter        ),
+    .trap_target     (trap_target       ),
+    .trap_return     (trap_return       ),
+    .mepc_out        (mepc_out          ),
+    .satp_out        (                  ),
+    .priv_mode_out   (                  ),
+    .mstatus_mxr     (                  ),
+    .mstatus_sum     (                  ),
+    .global_int_en   (global_int_en     ),
+    .instr_retired   (rob_instr_retired[0]),
+    .instr_retired_1 (rob_instr_retired[1]),
+    .ext_timer_irq   (ext_timer_irq     ),
+    .ext_external_irq(ext_external_irq  )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
 // Task 4: Memory Subsystem Integration
 // ════════════════════════════════════════════════════════════════════════════
-
-// Control signal: Use mem_subsys (can be parameter or define for test modes)
-// For now, enable by default for P2 integration testing
-// When 0: legacy direct connection mode (backward compatible)
-// When 1: use mem_subsys with variable-latency responses
-wire use_mem_subsys = 1'b1;  // Enable L2 cache and mem_subsys for P2 testing
 
 // M0 (I-side) interface signals
 wire        m0_req_valid;
@@ -1188,6 +1228,8 @@ wire        m0_resp_valid;
 wire [31:0] m0_resp_data;
 wire        m0_resp_last;
 wire        m0_resp_ready;
+wire [31:0] m0_bypass_addr;
+wire [31:0] m0_bypass_data;
 
 // M1 (D-side) interface signals
 wire        m1_req_valid;
@@ -1201,6 +1243,9 @@ wire [31:0] m1_resp_data;
 
 // Internal tube status from mem_subsys
 wire [7:0]  mem_subsys_tube_status;
+wire        ext_timer_irq;     // CLINT timer interrupt (MTIP)
+wire        ext_external_irq;  // PLIC external interrupt (MEIP)
+wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
 
 // Mem_subsys instantiation
 mem_subsys u_mem_subsys (
@@ -1215,6 +1260,8 @@ mem_subsys u_mem_subsys (
     .m0_resp_data      (m0_resp_data),
     .m0_resp_last      (m0_resp_last),
     .m0_resp_ready     (m0_resp_ready),
+    .m0_bypass_addr    (m0_bypass_addr),
+    .m0_bypass_data    (m0_bypass_data),
 
     // M1: D-side (LSU/store buffer)
     .m1_req_valid      (m1_req_valid),
@@ -1229,18 +1276,11 @@ mem_subsys u_mem_subsys (
     // Testbench observation
     .tube_status       (mem_subsys_tube_status),
 
-    // External interrupt outputs to csr_unit
-    .ext_irq_pending   (ext_irq_pending)
+    // External interrupt wiring
+    .ext_irq_src       (ext_irq_src_clean),
+    .ext_timer_irq     (ext_timer_irq),
+    .ext_external_irq  (ext_external_irq)
 );
-
-// External interrupt signals from mem_subsys (CLINT/PLIC)
-wire ext_irq_pending;
-wire ext_timer_irq;     // CLINT timer interrupt (MTIP)
-wire ext_external_irq;  // PLIC external interrupt (MEIP)
-
-// Assign interrupt signals from mem_subsys output
-assign ext_timer_irq    = ext_irq_pending;  // Combined for now
-assign ext_external_irq = 1'b0;  // TODO: Separate PLIC interrupt
 
 // Export tube_status (from mem_subsys when enabled, otherwise 0)
 assign tube_status = use_mem_subsys ? mem_subsys_tube_status : 8'd0;

@@ -21,6 +21,8 @@ module mem_subsys (
     output wire [31:0] m0_resp_data,
     output wire        m0_resp_last,
     input  wire        m0_resp_ready,
+    input  wire [31:0] m0_bypass_addr,
+    output wire [31:0] m0_bypass_data,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Master 1: D-side LSU/store buffer interface
@@ -40,9 +42,11 @@ module mem_subsys (
     output reg [7:0]   tube_status,       // TUBE MMIO register (observable by tb)
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // External interrupt inputs (from PLIC)
+    // External interrupt wiring
     // ═══════════════════════════════════════════════════════════════════════════
-    output wire        ext_irq_pending    // External interrupt pending to csr_unit
+    input  wire        ext_irq_src,       // Raw PLIC source input (optional TB/device drive)
+    output wire        ext_timer_irq,     // CLINT timer interrupt pending (MTIP)
+    output wire        ext_external_irq   // PLIC external interrupt pending (MEIP)
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -139,6 +143,10 @@ wire [2:0]  ram_word_idx;
 
 // RAM read data assignment
 assign ram_rdata = ram[ram_addr[13:2]];
+// I-side miss fast path: source the requested instruction word from the
+// shared mem_subsys RAM instead of a separate inst_backing_store image.
+assign m0_bypass_data = ram[m0_bypass_addr[13:2]];
+
 
 l2_cache u_l2_cache (
     .clk            (clk),
@@ -215,12 +223,12 @@ plic u_plic (
     .req_wdata   (m1_req_wdata),
     .resp_rdata  (plic_resp_rdata),
     .resp_valid  (plic_resp_valid),
-    .ext_irq_src (1'b0),  // External interrupt source (would come from tb)
+    .ext_irq_src (ext_irq_src),
     .external_irq(plic_ext_irq)
 );
 
-// External interrupt pending (OR of timer and external IRQs)
-assign ext_irq_pending = clint_timer_irq || plic_ext_irq;
+assign ext_timer_irq    = clint_timer_irq;
+assign ext_external_irq = plic_ext_irq;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // M1 Response Mux (L2 vs CLINT vs PLIC vs TUBE)

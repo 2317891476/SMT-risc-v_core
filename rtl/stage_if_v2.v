@@ -51,6 +51,8 @@ module stage_if_v2 (
     input  wire [31:0] ext_mem_resp_data,
     input  wire        ext_mem_resp_last,
     output wire        ext_mem_resp_ready,
+    output wire [31:0] ext_mem_bypass_addr,
+    input  wire [31:0] ext_mem_bypass_data,
     input  wire        use_external_refill
 );
 
@@ -125,6 +127,7 @@ inst_memory #(
     .ext_mem_resp_data  (ext_mem_resp_data),
     .ext_mem_resp_last  (ext_mem_resp_last),
     .ext_mem_resp_ready (ext_mem_resp_ready),
+    .ext_mem_bypass_data(ext_mem_bypass_data),
     .use_external_refill(use_external_refill)
 );
 
@@ -148,6 +151,8 @@ bpu_bimodal #(
     .update_taken  (bpu_update_taken  ),
     .update_target (bpu_update_target )
 );
+
+assign ext_mem_bypass_addr = pc_out;
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
 // CRITICAL FIX: Synchronous RAM has 1-cycle latency

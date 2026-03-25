@@ -130,8 +130,10 @@ class TestRunner:
             self.log(f"Testing {test_name}...")
             
             # Build ROM
+            # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
+            march_flag = "rv32i_zicsr" if "csr" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32i"
             build_cmd = f'''
-riscv-none-elf-gcc -nostdlib -nostartfiles -Wl,--build-id=none -Wl,-T,harvard_link.ld -march=rv32i -mabi=ilp32 {test} -o {test_name}.elf
+riscv-none-elf-gcc -nostdlib -nostartfiles -Wl,--build-id=none -Wl,-T,harvard_link.ld -march={march_flag} -mabi=ilp32 {test} -o {test_name}.elf
 riscv-none-elf-objcopy -j .text -O verilog {test_name}.elf inst.hex
 riscv-none-elf-objcopy -j .data -O verilog {test_name}.elf data.hex
 '''

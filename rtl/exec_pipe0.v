@@ -52,7 +52,9 @@ module exec_pipe0 #(
     // ─── CSR outputs ────────────────────────────────────────────
     output wire               csr_valid,     // CSR instruction executed
     output wire [31:0]        csr_wdata,     // CSR write data
-    output wire [2:0]        csr_op,        // CSR operation
+    output wire [2:0]         csr_op,        // CSR operation
+    output wire [11:0]        csr_addr,      // CSR address
+    output wire               mret_valid,    // MRET executed
 
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
@@ -93,10 +95,6 @@ alu u_alu (
     .br_mark  (br_mark )
 );
 
-// ─── Branch target ──────────────────────────────────────────────────────────
-wire [31:0] br_addr_op_A;
-assign br_addr_op_A = (in_br_addr_mode == `J_REG) ? op_A_pre : in_pc;
-
 // ─── Output: single-cycle, with output registers for proper timing ─────────
 reg               out_valid_r;
 reg [TAG_W-1:0]   out_tag_r;
@@ -109,9 +107,6 @@ reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
 reg               br_complete_r;   // branch execution complete
-reg               csr_valid_r;     // CSR instruction executed
-reg [31:0]        csr_wdata_r;     // CSR write data
-reg [2:0]         csr_op_r;        // CSR operation
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
@@ -124,64 +119,54 @@ reg               stored_br_mark;  // store the branch decision
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        out_valid_r      <= 1'b0;
-        out_tag_r        <= {TAG_W{1'b0}};
-        out_result_r     <= 32'd0;
-        out_rd_r         <= 5'd0;
-        out_regs_write_r <= 1'b0;
-        out_fu_r         <= 3'd0;
-        out_tid_r        <= 1'b0;
-        br_ctrl_r        <= 1'b0;
-        br_addr_r        <= 32'd0;
-        br_tid_r         <= 1'b0;
-        br_complete_r    <= 1'b0;
-        csr_valid_r      <= 1'b0;
-        csr_wdata_r      <= 32'd0;
-        csr_op_r         <= 3'd0;
-        stored_pc        <= 32'd0;
-        stored_imm       <= 32'd0;
-        stored_op_a      <= 32'd0;
-        stored_br        <= 1'b0;
+        out_valid_r         <= 1'b0;
+        out_tag_r           <= {TAG_W{1'b0}};
+        out_result_r        <= 32'd0;
+        out_rd_r            <= 5'd0;
+        out_regs_write_r    <= 1'b0;
+        out_fu_r            <= 3'd0;
+        out_tid_r           <= 1'b0;
+        br_ctrl_r           <= 1'b0;
+        br_addr_r           <= 32'd0;
+        br_tid_r            <= 1'b0;
+        br_complete_r       <= 1'b0;
+        stored_pc           <= 32'd0;
+        stored_imm          <= 32'd0;
+        stored_op_a         <= 32'd0;
+        stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
-        stored_valid     <= 1'b0;
-        stored_br_mark   <= 1'b0;
+        stored_valid        <= 1'b0;
+        stored_br_mark      <= 1'b0;
     end else begin
         // Store issue-time values (including br_mark computed from current inputs)
-        stored_pc        <= in_pc;
-        stored_imm       <= in_imm;
-        stored_op_a      <= op_A_pre;   // for JALR (rs1 value)
-        stored_br        <= in_br;
+        stored_pc           <= in_pc;
+        stored_imm          <= in_imm;
+        stored_op_a         <= op_A_pre;   // for JALR (rs1 value)
+        stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
-        stored_valid     <= in_valid;
-        stored_br_mark   <= br_mark;    // store branch decision computed this cycle
-        
+        stored_valid        <= in_valid;
+        stored_br_mark      <= br_mark;
+
         `ifndef SYNTHESIS
         if (in_valid) begin
             $display("EXEC0: PC=%h, in_br=%b, br_mark=%b", in_pc, in_br, br_mark);
         end
         `endif
-        
+
         // Output registers (1 cycle delay)
         out_valid_r      <= in_valid;
         out_tag_r        <= in_tag;
-        // For CSR instructions, result comes from csr_unit (available 1 cycle later)
-        // For other instructions, use ALU result
         out_result_r     <= in_is_csr ? csr_rdata : alu_out;
         out_rd_r         <= in_rd;
         out_regs_write_r <= in_regs_write;
         out_fu_r         <= in_fu;
         out_tid_r        <= in_tid;
-        
-        // CSR execution signals
-        csr_valid_r      <= in_valid && in_is_csr;
-        csr_wdata_r      <= in_op_a;  // rs1 value for CSR ops
-        csr_op_r         <= in_func3; // funct3 encodes CSR operation
-        
+
         // Branch resolution uses stored values from previous cycle
-        br_ctrl_r        <= stored_valid && stored_br && stored_br_mark;
-        br_addr_r        <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
-        br_tid_r         <= out_tid_r;  // use output register's tid
-        br_complete_r    <= stored_valid && stored_br;  // branch completed (taken or not)
+        br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
+        br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+        br_tid_r      <= out_tid_r;  // use output register's tid
+        br_complete_r <= stored_valid && stored_br;
     end
 end
 
@@ -193,13 +178,15 @@ assign out_regs_write = out_regs_write_r;
 assign out_fu         = out_fu_r;
 assign out_tid        = out_tid_r;
 
-assign csr_valid      = csr_valid_r;
-assign csr_wdata      = csr_wdata_r;
-assign csr_op         = csr_op_r;
+assign csr_valid  = in_valid && in_is_csr;
+assign csr_wdata  = in_op_a;     // rs1 value for CSR ops
+assign csr_op     = in_func3;    // funct3 encodes CSR operation
+assign csr_addr   = in_csr_addr;
+assign mret_valid = in_valid && in_is_mret;
 
-assign br_ctrl = br_ctrl_r;
-assign br_addr = br_addr_r;
-assign br_tid  = br_tid_r;
+assign br_ctrl     = br_ctrl_r;
+assign br_addr     = br_addr_r;
+assign br_tid      = br_tid_r;
 assign br_complete = br_complete_r;
 
 endmodule

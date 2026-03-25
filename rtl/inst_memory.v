@@ -35,6 +35,7 @@ module inst_memory #(
     input  wire [31:0] ext_mem_resp_data,
     input  wire        ext_mem_resp_last,
     output wire        ext_mem_resp_ready,
+    input  wire [31:0] ext_mem_bypass_data,
     input  wire        use_external_refill  // 1=use external refill, 0=internal
 );
 
@@ -43,7 +44,8 @@ wire [31:0] icache_resp_data;
 wire [0:0]  icache_resp_tid;
 wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
-wire [31:0] backing_store_data;  // Direct read for bypass on miss
+wire [31:0] backing_store_data;
+wire [31:0] miss_bypass_data = use_external_refill ? ext_mem_bypass_data : backing_store_data;
 
 // ICache memory interface signals
 wire        icache_mem_req_valid;
@@ -99,7 +101,7 @@ icache #(
     .mem_resp_ready   (icache_mem_resp_ready),
 
     // Bypass from direct backing store read
-    .bypass_data      (backing_store_data)
+    .bypass_data      (miss_bypass_data)
 );
 
 // External refill interface assignments

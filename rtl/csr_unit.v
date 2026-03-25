@@ -111,7 +111,14 @@ assign global_int_en = mstatus_MIE;
 assign mepc_out      = mepc;
 
 // ─── Trap logic ─────────────────────────────────────────────────────────────
-assign trap_enter  = exc_valid;
+wire mtip_pending = mip[7]  | ext_timer_irq;
+wire meip_pending = mip[11] | ext_external_irq;
+wire take_meip    = mstatus_MIE && mie[11] && meip_pending;
+wire take_mtip    = mstatus_MIE && !take_meip && mie[7] && mtip_pending;
+wire irq_valid    = take_meip || take_mtip;
+wire [31:0] irq_cause = take_meip ? 32'h8000000B : 32'h80000007;
+
+assign trap_enter  = exc_valid || irq_valid;
 assign trap_target = {mtvec[31:2], 2'b00};  // Direct mode (MODE=0)
 assign trap_return = mret_valid;
 
@@ -192,6 +199,16 @@ always @(posedge clk or negedge rstn) begin
             mcause    <= exc_cause;
             mtval     <= exc_tval;
             // Save MIE to MPIE, clear MIE, save current mode to MPP
+            mstatus[7]     <= mstatus[3];    // MPIE = MIE
+            mstatus[3]     <= 1'b0;          // MIE = 0
+            mstatus[12:11] <= priv_mode;     // MPP = current mode
+            priv_mode      <= 2'b11;         // Enter M-mode
+        end
+        // ── Interrupt entry ─────────────────────────────────────
+        else if (irq_valid) begin
+            mepc      <= exc_pc;
+            mcause    <= irq_cause;
+            mtval     <= 32'd0;
             mstatus[7]     <= mstatus[3];    // MPIE = MIE
             mstatus[3]     <= 1'b0;          // MIE = 0
             mstatus[12:11] <= priv_mode;     // MPP = current mode

@@ -1,10 +1,8 @@
 `timescale 1ns/1ns
 `define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
-`define TB_DRAM tb_v2.u_adam_riscv_v2.u_stage_mem.u_data_memory.u_ram_data
-// tube_status: explicit TUBE MMIO observation point (0x1300_0000 writes land here)
-// Will be migrated to mem_subsys.tube_status when mem_subsys is introduced
-`define TUBE_STATUS `TB_DRAM.mem[0][7:0]
+`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_mem_subsys
+`define TUBE_STATUS tb_v2.u_adam_riscv_v2.tube_status
 
 `define RAM_DEEP 4096
 
@@ -34,32 +32,25 @@ initial begin
 end
 
 //------------------------------------------------------------------------------------------------
-// initial Instruction ROM
+// Initialize instruction backing store + shared mem_subsys RAM
 //------------------------------------------------------------------------------------------------
-initial begin : init_irom
+initial begin : init_memories
     integer i;
+    reg [31:0] inst_word;
+    reg [31:0] data_word;
+
     for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
         inst_bytes[i] = 8'd0;
-    end
-    $readmemh("../rom/inst.hex", inst_bytes);
-
-    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
-        `TB_IROM.mem[i] = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
-    end
-end
-
-//------------------------------------------------------------------------------------------------
-// initial Data RAM
-//------------------------------------------------------------------------------------------------
-initial begin : init_dram
-    integer i;
-    for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
         data_bytes[i] = 8'd0;
     end
+    $readmemh("../rom/inst.hex", inst_bytes);
     $readmemh("../rom/data.hex", data_bytes);
 
     for (i = 0; i < `RAM_DEEP; i = i + 1) begin
-        `TB_DRAM.mem[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
+        inst_word = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
+        data_word = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
+        `TB_IROM.mem[i]       = inst_word;
+        `TB_MEM_SUBSYS.ram[i] = inst_word | data_word;
     end
 end
 
