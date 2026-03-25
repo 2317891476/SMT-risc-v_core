@@ -93,10 +93,6 @@ wire [2:0]  cache_state;
 wire        cache_hit;
 wire        cache_miss;
 
-// M1 cached response wires (internal, before MMIO mux)
-wire        m1_resp_valid_int;
-wire [31:0] m1_resp_data_int;
-
 // Address decode for MMIO (used by arbiter and MMIO handling)
 wire addr_is_tube_m1    = (m1_req_addr == `TUBE_ADDR);
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);

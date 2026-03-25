@@ -9,7 +9,7 @@ reg pass;
 `define ROCC_STATUS_ERROR_BIT 2
 
 // Helper function to extract RoCC status from x3 value
-function automatic rocc_check_status;
+function rocc_check_status;
     input [31:0] status_val;
     input expected_done;
     begin
