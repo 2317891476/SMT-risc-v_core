@@ -2,6 +2,8 @@
 // Module : rocc_ai_accelerator
 // Description: RoCC-style AI Co-Processor - P3 Contract Implementation
 //   P3 Scope: RAM-only deterministic single-beat DMA for fixed 8x8 GEMM
+
+`include "define_v2.v"
 //
 //   Instruction encoding via RISC-V custom-0 (opcode 0x0B):
 //     funct7[6:0] selects the operation:
