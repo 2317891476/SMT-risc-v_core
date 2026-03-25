@@ -83,7 +83,13 @@ module decoder_dual (
     output wire [11:0] dec0_csr_addr,
     output wire        dec1_is_csr,
     output wire        dec1_is_mret,
-    output wire [11:0] dec1_csr_addr
+    output wire [11:0] dec1_csr_addr,
+
+    // ─── RoCC outputs ────────────────────────────────────────────
+    output wire        dec0_is_rocc,
+    output wire [6:0]  dec0_rocc_funct7,
+    output wire        dec1_is_rocc,
+    output wire [6:0]  dec1_rocc_funct7
 );
 
 // ─── Internal decoded signals for instruction 0 ─────────────────────────────
@@ -136,6 +142,10 @@ wire        d0_is_csr, d1_is_csr;
 wire        d0_is_mret, d1_is_mret;
 wire [11:0] d0_csr_addr, d1_csr_addr;
 
+// ─── Internal RoCC signals ──────────────────────────────────────────────────
+wire        d0_is_rocc, d1_is_rocc;
+wire [6:0]  d0_rocc_funct7, d1_rocc_funct7;
+
 // ─── Decoder 0 (reuses existing stage_is logic) ─────────────────────────────
 stage_is u_dec0 (
     .is_inst         (inst0_word      ),
@@ -163,7 +173,9 @@ stage_is u_dec0 (
     .is_system       (d0_is_system    ),
     .is_csr          (d0_is_csr       ),
     .is_mret         (d0_is_mret      ),
-    .csr_addr        (d0_csr_addr     )
+    .csr_addr        (d0_csr_addr     ),
+    .is_rocc         (d0_is_rocc      ),
+    .rocc_funct7     (d0_rocc_funct7  )
 );
 
 // ─── Decoder 1 (second copy) ────────────────────────────────────────────────
@@ -193,7 +205,9 @@ stage_is u_dec1 (
     .is_system       (d1_is_system    ),
     .is_csr          (d1_is_csr       ),
     .is_mret         (d1_is_mret      ),
-    .csr_addr        (d1_csr_addr     )
+    .csr_addr        (d1_csr_addr     ),
+    .is_rocc         (d1_is_rocc      ),
+    .rocc_funct7     (d1_rocc_funct7  )
 );
 
 // ─── Dual-issue structural hazard check ─────────────────────────────────────
@@ -205,6 +219,7 @@ stage_is u_dec1 (
 //   5) inst1 thread differs from inst0 (fetch_buffer already guarantees same-thread,
 //      but double-check for safety)
 //   6) Any SYSTEM instruction (CSR/MRET) - must serialize, no dual-issue
+//   7) Any RoCC instruction - must serialize, no dual-issue
 
 wire structural_conflict;
 wire both_branch;
@@ -212,13 +227,15 @@ wire both_mem;
 wire waw_conflict;
 wire thread_mismatch;
 wire any_system;        // NEW: any SYSTEM instruction blocks dual-issue
+wire any_rocc;          // NEW: any RoCC instruction blocks dual-issue
 
 assign both_branch     = d0_br && d1_br;
 assign both_mem        = (d0_mem_read || d0_mem_write) && (d1_mem_read || d1_mem_write);
 assign waw_conflict    = d0_regs_write && d1_regs_write && (d0_rd == d1_rd) && (d0_rd != 5'd0);
 assign thread_mismatch = (inst0_tid != inst1_tid);
 assign any_system      = d0_is_system || d1_is_system;  // Serialize SYSTEM ops
-assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch || any_system;
+assign any_rocc        = d0_is_rocc || d1_is_rocc;      // Serialize RoCC ops
+assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch || any_system || any_rocc;
 
 // ─── Final valid signals ────────────────────────────────────────────────────
 // Important: We always consume from fetch_buffer (consume_0 always asserted if inst0_valid)
@@ -291,5 +308,11 @@ assign dec0_csr_addr  = d0_csr_addr;
 assign dec1_is_csr    = d1_is_csr;
 assign dec1_is_mret   = d1_is_mret;
 assign dec1_csr_addr  = d1_csr_addr;
+
+// ─── RoCC outputs ───────────────────────────────────────────────────────────
+assign dec0_is_rocc    = d0_is_rocc;
+assign dec0_rocc_funct7 = d0_rocc_funct7;
+assign dec1_is_rocc    = d1_is_rocc;
+assign dec1_rocc_funct7 = d1_rocc_funct7;
 
 endmodule

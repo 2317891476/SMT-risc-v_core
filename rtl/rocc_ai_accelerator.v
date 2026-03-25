@@ -130,6 +130,10 @@ reg [15:0] dma_total;
 reg [3:0]  gemm_row, gemm_col, gemm_k;
 reg [31:0] result_reg;
 
+// ─── Status Registers ──────────────────────────────────────────────────────
+reg status_done;
+reg status_error;
+
 integer gi, gj, gk;
 
 // ─── Main FSM ───────────────────────────────────────────────────────────────
@@ -159,6 +163,8 @@ always @(posedge clk or negedge rstn) begin
         op_rs2        <= 32'd0;
         op_tag        <= {TAG_W{1'b0}};
         op_tid        <= 1'b0;
+        status_done   <= 1'b0;
+        status_error  <= 1'b0;
         for (gi = 0; gi < SA_SIZE; gi = gi + 1)
             for (gj = 0; gj < SA_SIZE; gj = gj + 1)
                 gemm_acc[gi][gj] <= 32'd0;
@@ -203,8 +209,28 @@ always @(posedge clk or negedge rstn) begin
                             state    <= ST_VEC_EXEC;
                         end
 
+                        7'd3: begin // SCRATCH.LOAD: rs1=ext_mem_addr, rs2=scratch_addr+len
+                            dma_addr   <= cmd_rs1_data;                    // External RAM source address
+                            dma_cnt    <= 16'd0;
+                            dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
+                            result_reg <= cmd_rs2_data[31:16];             // Scratchpad destination address (upper 16 bits)
+                            status_done <= 1'b0;
+                            status_error <= 1'b0;
+                            state      <= ST_SCRATCH_LD;
+                        end
+
+                        7'd4: begin // SCRATCH.STORE: rs1=scratch_addr, rs2=ext_mem_addr+len
+                            dma_addr   <= cmd_rs2_data[31:16];             // External RAM destination address
+                            dma_cnt    <= 16'd0;
+                            dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
+                            result_reg <= cmd_rs1_data;                    // Scratchpad source address
+                            status_done <= 1'b0;
+                            status_error <= 1'b0;
+                            state      <= ST_SCRATCH_ST;
+                        end
+
                         7'd5: begin // STATUS.READ
-                            result_reg <= {31'd0, accel_busy};
+                            result_reg <= {29'd0, status_error, status_done, accel_busy};
                             state      <= ST_RESP;
                         end
 
@@ -232,6 +258,59 @@ always @(posedge clk or negedge rstn) begin
                 // In a full implementation this would iterate over K dimension
                 result_reg <= gemm_acc[0][0]; // return top-left element
                 state      <= ST_RESP;
+            end
+
+            // ── SCRATCH.LOAD: DMA from RAM to scratchpad ────────────────
+            ST_SCRATCH_LD: begin
+                // Check if address is within valid RAM range (0x0000_0000 to 0x0000_3FFF)
+                if ((dma_addr < `ROCC_DMA_ADDR_MIN) || (dma_addr > `ROCC_DMA_ADDR_MAX)) begin
+                    // Invalid address - set error and complete
+                    status_error <= 1'b1;
+                    status_done  <= 1'b1;
+                    state        <= ST_RESP;
+                end
+                else if (dma_cnt < dma_total) begin
+                    // Issue read request to external memory
+                    mem_req_valid <= 1'b1;
+                    mem_req_addr  <= dma_addr + (dma_cnt << 2);  // Word-aligned address
+                    mem_req_wen   <= 1'b0;  // Read operation
+                    // Wait for response and store to scratchpad
+                    if (mem_resp_valid) begin
+                        scratchpad[result_reg[9:0] + dma_cnt] <= mem_resp_rdata;
+                        dma_cnt <= dma_cnt + 16'd1;
+                    end
+                end
+                else begin
+                    // DMA complete
+                    status_done <= 1'b1;
+                    state       <= ST_RESP;
+                end
+            end
+
+            // ── SCRATCH.STORE: DMA from scratchpad to RAM ───────────────
+            ST_SCRATCH_ST: begin
+                // Check if address is within valid RAM range (0x0000_0000 to 0x0000_3FFF)
+                if ((dma_addr < `ROCC_DMA_ADDR_MIN) || (dma_addr > `ROCC_DMA_ADDR_MAX)) begin
+                    // Invalid address - set error and complete
+                    status_error <= 1'b1;
+                    status_done  <= 1'b1;
+                    state        <= ST_RESP;
+                end
+                else if (dma_cnt < dma_total) begin
+                    // Issue write request to external memory
+                    mem_req_valid <= 1'b1;
+                    mem_req_addr  <= dma_addr + (dma_cnt << 2);  // Word-aligned address
+                    mem_req_wdata <= scratchpad[result_reg[9:0] + dma_cnt];
+                    mem_req_wen   <= 1'b1;  // Write operation
+                    if (mem_req_ready) begin
+                        dma_cnt <= dma_cnt + 16'd1;
+                    end
+                end
+                else begin
+                    // DMA complete
+                    status_done <= 1'b1;
+                    state       <= ST_RESP;
+                end
             end
 
             // ── Vector execution ────────────────────────────────

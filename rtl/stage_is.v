@@ -27,7 +27,10 @@ module stage_is(
     output wire         is_system,       // SYSTEM opcode detected
     output wire         is_csr,          // CSR instruction (CSRRW/S/C/WI/SI/CI)
     output wire         is_mret,         // MRET instruction
-    output wire [11:0]  csr_addr         // CSR address from instruction
+    output wire [11:0]  csr_addr,        // CSR address from instruction
+    // RoCC extension outputs
+    output wire         is_rocc,         // RoCC CUSTOM0 instruction detected
+    output wire [6:0]   rocc_funct7      // RoCC funct7 for command decoding
 );
 
 wire[6:0] opcode;
@@ -50,6 +53,10 @@ assign is_system = (opcode == `SYSTEM);
 assign is_csr    = is_system && (func3 != 3'b000);
 assign is_mret   = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h302);
 assign csr_addr  = is_inst[31:20];
+
+// RoCC decode
+assign is_rocc    = (opcode == `OPC_CUSTOM0);
+assign rocc_funct7 = is_inst[31:25];
 
 ctrl u_ctrl(
     .inst_op      (opcode         ),
@@ -95,6 +102,7 @@ always @(*) begin
         `ItypeJ: is_fu = `FU_INT0;  // JALR -> Pipe 0
         `Jtype : is_fu = `FU_INT0;  // JAL -> Pipe 0
         `SYSTEM: is_fu = `FU_INT0;  // SYSTEM (CSR/MRET) -> Pipe 0 for serialization
+        `OPC_CUSTOM0: is_fu = `FU_INT0;  // RoCC -> Pipe 0 for serialization
         default: is_fu = `FU_NOP;
     endcase
 end
@@ -123,6 +131,11 @@ always @(*) begin
             // funct3[2] = 0 means CSR reg (uses rs1), funct3[2] = 1 means CSR imm
             is_rs1_used = is_csr && !func3[2];  // CSRRW/S/C use rs1, CSRRWI/SI/CI don't
             is_rs2_used = 1'b0;
+        end
+        `OPC_CUSTOM0: begin
+            // RoCC instructions: rs1 and rs2 used as operands
+            is_rs1_used = 1'b1;
+            is_rs2_used = 1'b1;
         end
         default: begin
             is_rs1_used = 1'b0;
