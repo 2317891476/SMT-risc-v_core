@@ -1,0 +1,17 @@
+{
+  "$schema": "https://raw.githubusercontent.com/code-yeongyu/oh-my-opencode/master/assets/oh-my-opencode.schema.json",
+  "agents": {
+    "sisyphus": {
+      "model": "Kimi K2.5"
+    },
+    "prometheus": {
+      "model": "GPT-5.4"
+    },
+    "atlas": {
+      "model": "GPT-5.4	"
+    },
+    "hephaestus": {
+      "model": "MiMo V2 Pro Free"
+    }
+  }
+} 

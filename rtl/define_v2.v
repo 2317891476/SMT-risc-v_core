@@ -61,3 +61,29 @@
 // ─── ROB Lite Metadata Constants ────────────────────────────────────────────
 `define METADATA_EPOCH_W   8   // Epoch width for flush detection (8 bits)
 `define METADATA_ORDER_ID_W 16  // Order ID width for in-order commit tracking (16 bits)
+
+// ════════════════════════════════════════════════════════════════════════════
+// P2 MMIO Address Map Constants (for unified L2 + interrupt controller bring-up)
+// ════════════════════════════════════════════════════════════════════════════
+
+// Cacheable RAM window (first 16KB)
+`define RAM_CACHEABLE_BASE  32'h0000_0000
+`define RAM_CACHEABLE_TOP   32'h0000_3FFF
+
+// TUBE MMIO (test completion marker)
+`define TUBE_ADDR           32'h1300_0000
+
+// CLINT (Core Local Interruptor) - Machine Timer
+`define CLINT_BASE          32'h0200_0000
+`define CLINT_MTIMECMP_LO   32'h02004000  // mtimecmp low 32 bits
+`define CLINT_MTIMECMP_HI   32'h02004004  // mtimecmp high 32 bits
+`define CLINT_MTIME_LO      32'h0200BFF8  // mtime low 32 bits
+`define CLINT_MTIME_HI      32'h0200BFFC  // mtime high 32 bits
+
+// PLIC (Platform Level Interrupt Controller) - Single source, single context
+`define PLIC_BASE           32'h0C00_0000
+`define PLIC_PRIORITY1      32'h0C000004  // Priority for source 1
+`define PLIC_PENDING        32'h0C001000  // Pending bits
+`define PLIC_ENABLE         32'h0C002000  // Enable bits for context 0
+`define PLIC_THRESHOLD      32'h0C200000  // Priority threshold for context 0
+`define PLIC_CLAIM_COMPLETE 32'h0C200004  // Claim/complete for context 0

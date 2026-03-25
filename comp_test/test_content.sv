@@ -21,7 +21,7 @@ initial begin
 end
 
 initial begin
-    wait (`TB_DRAM.mem[0][7:0] === 8'h04);
+    wait (`TUBE_STATUS === 8'h04);
     #200ns;
     pass = 1'b1;
 
@@ -38,7 +38,7 @@ initial begin
             && (`TB_REGS.reg_bank[0][7] === 32'h3)
             && (`TB_REGS.reg_bank[0][8] === 32'h3)
             && (`TB_REGS.reg_bank[0][9] === 32'hf3f2f1f0)
-            && (`TB_DRAM.mem[0][7:0] === 8'h04)
+            && (`TUBE_STATUS === 8'h04)
             && (`TB_DRAM.mem[1024] === 32'h00000001)
             && (`TB_DRAM.mem[1025] === 32'hf7f6f5f4)
             && (`TB_DRAM.mem[1026] === 32'hfbfaf9f8)
@@ -57,7 +57,7 @@ initial begin
             && (`TB_REGS.reg_bank[0][7] === 32'h3f)
             && (`TB_REGS.reg_bank[0][8] === 32'h3f)
             && (`TB_REGS.reg_bank[0][9] === 32'hf3f2f21a)
-            && (`TB_DRAM.mem[0][7:0] === 8'h04)
+            && (`TUBE_STATUS === 8'h04)
             && (`TB_DRAM.mem[1024] === 32'hf3f2f21a)
             && (`TB_DRAM.mem[1025] === 32'hf7f6f5f4)
             && (`TB_DRAM.mem[1026] === 32'hfbfaf9f8)
@@ -70,7 +70,7 @@ initial begin
         pass = pass
             && (`TB_DRAM.mem[1152]     === 32'h00000037)  // T0 sum = 55
             && (`TB_DRAM.mem[1153]     === 32'h0000001E)  // T1 product = 30
-            && (`TB_DRAM.mem[0][7:0]   === 8'h04);        // TUBE end marker
+            && (`TUBE_STATUS           === 8'h04);        // TUBE end marker
     end
     else if (test_id == 4) begin
         // test_rv32i_full.s — comprehensive RV32I instruction test
@@ -87,7 +87,7 @@ initial begin
         $display("DRAM[1037] LUI  = %h, expected 0xDEADB000", `TB_DRAM.mem[1037]);
         // Check branch-pass markers stored to DRAM by the test
         pass = pass
-            && (`TB_DRAM.mem[0][7:0]   === 8'h04)        // TUBE end marker
+            && (`TUBE_STATUS   === 8'h04)        // TUBE end marker
             && (`TB_DRAM.mem[1029]      === 32'h00000001)  // BEQ  passed
             && (`TB_DRAM.mem[1030]      === 32'h00000002)  // BNE  passed
             && (`TB_DRAM.mem[1031]      === 32'h00000003)  // BLT  passed
@@ -101,7 +101,7 @@ initial begin
     else begin
         // Generic test: just check DRAM[0] == 0x04 (pass marker)
         $display("Unknown ROM signature, TB_IROM.mem[0]=%h - treating as generic test", `TB_IROM.mem[0]);
-        pass = pass && (`TB_DRAM.mem[0][7:0] === 8'h04);
+        pass = pass && (`TUBE_STATUS === 8'h04);
     end
 
     if (pass)

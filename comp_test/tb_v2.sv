@@ -2,6 +2,9 @@
 `define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
 `define TB_DRAM tb_v2.u_adam_riscv_v2.u_stage_mem.u_data_memory.u_ram_data
+// tube_status: explicit TUBE MMIO observation point (0x1300_0000 writes land here)
+// Will be migrated to mem_subsys.tube_status when mem_subsys is introduced
+`define TUBE_STATUS `TB_DRAM.mem[0][7:0]
 
 `define RAM_DEEP 4096
 

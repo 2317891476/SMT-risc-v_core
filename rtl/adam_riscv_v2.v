@@ -90,8 +90,9 @@ thread_scheduler u_thread_scheduler(
 // ════════════════════════════════════════════════════════════════════════════
 // Epoch counters: increment on flush per thread, 8-bit wide
 reg [7:0] epoch_t0, epoch_t1;
-wire [7:0] flush_new_epoch_t0 = epoch_t0;
-wire [7:0] flush_new_epoch_t1 = epoch_t1;
+// Flush new epoch = next epoch value (current + 1) for correct flush semantics
+wire [7:0] flush_new_epoch_t0 = epoch_t0 + 8'd1;
+wire [7:0] flush_new_epoch_t1 = epoch_t1 + 8'd1;
 
 // Order ID counters: increment on dispatch accept per thread, 16-bit wide
 // These will be updated in the always block after scoreboard signals are defined
@@ -267,8 +268,12 @@ wire disp0_valid_gated = dec0_valid && !smt_flush[dec0_tid];
 wire disp1_valid_gated = dec1_valid && !smt_flush[dec1_tid];
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
+// disp0 gets current order_id for its thread
 wire [15:0] disp0_order_id = (dec0_tid == 1'b0) ? order_id_t0 : order_id_t1;
-wire [15:0] disp1_order_id = (dec1_tid == 1'b0) ? order_id_t0 : order_id_t1;
+// disp1 gets current+1 if same thread as disp0, otherwise current for its thread
+wire [15:0] disp1_order_id = (dec1_tid == 1'b0) ? 
+    ((dec0_tid == 1'b0 && disp0_accepted) ? order_id_t0 + 16'd1 : order_id_t0) :
+    ((dec0_tid == 1'b1 && disp0_accepted) ? order_id_t1 + 16'd1 : order_id_t1);
 wire [7:0] disp0_epoch = (dec0_tid == 1'b0) ? epoch_t0 : epoch_t1;
 wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
 
@@ -615,17 +620,19 @@ always @(posedge clk or negedge rstn) begin
         order_id_t1 <= 16'd0;
     end else begin
         // Increment order_id on dispatch accept per thread
-        // Handle disp0
-        if (disp0_accepted && dec0_tid == 1'b0)
-            order_id_t0 <= order_id_t0 + 16'd1;
-        else if (disp0_accepted && dec0_tid == 1'b1)
-            order_id_t1 <= order_id_t1 + 16'd1;
-
-        // Handle disp1 (can be same cycle as disp0)
-        if (disp1_accepted && dec1_tid == 1'b0)
-            order_id_t0 <= order_id_t0 + 16'd1;
-        else if (disp1_accepted && dec1_tid == 1'b1)
-            order_id_t1 <= order_id_t1 + 16'd1;
+        // When dual-dispatch to same thread, increment by 2; otherwise by 1
+        
+        // Thread 0: count accepts from disp0 and disp1
+        if ((disp0_accepted && dec0_tid == 1'b0) && (disp1_accepted && dec1_tid == 1'b0))
+            order_id_t0 <= order_id_t0 + 16'd2;  // Dual-dispatch to T0
+        else if ((disp0_accepted && dec0_tid == 1'b0) || (disp1_accepted && dec1_tid == 1'b0))
+            order_id_t0 <= order_id_t0 + 16'd1;  // Single dispatch to T0
+            
+        // Thread 1: count accepts from disp0 and disp1
+        if ((disp0_accepted && dec0_tid == 1'b1) && (disp1_accepted && dec1_tid == 1'b1))
+            order_id_t1 <= order_id_t1 + 16'd2;  // Dual-dispatch to T1
+        else if ((disp0_accepted && dec0_tid == 1'b1) || (disp1_accepted && dec1_tid == 1'b1))
+            order_id_t1 <= order_id_t1 + 16'd1;  // Single dispatch to T1
     end
 end
 
