@@ -122,6 +122,10 @@ class TestRunner:
                 "test_clint_timer_interrupt.s",
                 "test_plic_external_interrupt.s",
                 "test_interrupt_mask_mret.s",
+                # P3 RoCC tests
+                "test_rocc_dma.s",
+                "test_rocc_status.s",
+                "test_rocc_gemm.s",
                 # Branch Prediction tests (included in test_rv32i_full with 17 branch instructions)
             ]
         
