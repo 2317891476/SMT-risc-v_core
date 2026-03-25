@@ -4,11 +4,14 @@ Unified test runner for AdamRiscv.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
-  --basic           : Core tests + Store Buffer tests (8 tests)
+  --basic           : Core tests + Store Buffer tests + P2 L2/Interrupt tests (14 tests)
                       - test1, test2, test_rv32i_full (core functionality)
                       - test_store_buffer_simple, test_store_buffer_commit,
                         test_store_buffer_forwarding, test_store_buffer_hazard,
                         test_commit_flush_store (Store Buffer dedicated)
+                      - test_l2_icache_refill, test_l2_i_d_arbiter, test_l2_mmio_bypass (P2 L2)
+                      - test_csr_mret_smoke, test_clint_timer_interrupt,
+                        test_plic_external_interrupt, test_interrupt_mask_mret (P2 Interrupts)
   --riscv-tests     : Classic riscv-tests RV32I/M (~50 tests, auto-download)
   --riscv-arch-test : Official architecture tests (500+ tests, auto-download)
   --riscof          : RISCOF framework (requires Spike)
@@ -110,6 +113,15 @@ class TestRunner:
                 "test_store_buffer_forwarding.s",
                 "test_store_buffer_hazard.s",
                 "test_commit_flush_store.s",
+                # P2 L2 Cache tests
+                "test_l2_icache_refill.s",
+                "test_l2_i_d_arbiter.s",
+                "test_l2_mmio_bypass.s",
+                # P2 Interrupt tests
+                "test_csr_mret_smoke.s",
+                "test_clint_timer_interrupt.s",
+                "test_plic_external_interrupt.s",
+                "test_interrupt_mask_mret.s",
                 # Branch Prediction tests (included in test_rv32i_full with 17 branch instructions)
             ]
         
