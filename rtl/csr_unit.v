@@ -122,9 +122,31 @@ assign trap_enter  = exc_valid || irq_valid;
 assign trap_target = {mtvec[31:2], 2'b00};  // Direct mode (MODE=0)
 assign trap_return = mret_valid;
 
-// ─── CSR Read (combinational) ───────────────────────────────────────────────
+// ─── CSR Write-Read Bypass (for back-to-back CSR ops) ───────────────────────
+// When a CSR write is in progress, subsequent reads should see the new value
+reg        csr_write_pending;
+reg [11:0] csr_write_addr;
+reg [31:0] csr_write_value;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        csr_write_pending <= 1'b0;
+        csr_write_addr    <= 12'd0;
+        csr_write_value   <= 32'd0;
+    end else begin
+        csr_write_pending <= csr_valid;
+        csr_write_addr    <= csr_addr;
+        csr_write_value   <= csr_wval;
+    end
+end
+
+// ─── CSR Read (combinational with bypass) ───────────────────────────────────
 always @(*) begin
     csr_rdata = 32'd0;
+    // Bypass: if there's a pending write to this CSR, return the write value
+    if (csr_write_pending && (csr_addr == csr_write_addr)) begin
+        csr_rdata = csr_write_value;
+    end else begin
     case (csr_addr)
         12'hF11: csr_rdata = 32'd0;              // mvendorid
         12'hF12: csr_rdata = 32'd0;              // marchid
@@ -145,7 +167,8 @@ always @(*) begin
         12'hB82: csr_rdata = minstret[63:32];    // minstreth
         12'h180: csr_rdata = satp;               // satp
         default: csr_rdata = 32'd0;
-    endcase
+        endcase
+    end
 end
 
 // ─── CSR Write Logic ────────────────────────────────────────────────────────
