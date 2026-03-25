@@ -1,6 +1,8 @@
 .section .text
 .globl _start
 
+.include "p2_mmio.inc"
+
 # Test: L2 MMIO Bypass Test
 # Verifies:
 # - MMIO accesses bypass the L2 cache
@@ -10,9 +12,9 @@
 
 _start:
     # Initialize
-    li x1, 0x13000000   # TUBE address
-    li x2, 0x0200BFF8   # CLINT mtime_lo address
-    li x3, 0x02004000   # CLINT mtimecmp_lo address
+    li x1, TUBE_ADDR
+    li x2, CLINT_MTIME_LO
+    li x3, CLINT_MTIMECMP_LO
     
     # Test 1: Write to TUBE (should bypass cache)
     li x4, 0xAA
@@ -54,7 +56,7 @@ test_pass:
 
 test_fail:
     li x13, 0xFF        # FAIL marker
-    li x14, 0x13000000
+    li x14, TUBE_ADDR
     sw x13, 0(x14)
 fail_loop:
     j fail_loop

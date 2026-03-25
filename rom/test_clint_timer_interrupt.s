@@ -1,6 +1,8 @@
 .section .text
 .globl _start
 
+.include "p2_mmio.inc"
+
 # Test: CLINT Timer Interrupt Test
 # Verifies:
 # - CLINT timer interrupt setup and delivery
@@ -24,17 +26,17 @@ _start:
     beq x4, x0, test_fail
     
     # Test 3: Read current mtime
-    li x5, 0x0200BFF8   # mtime lo address
+    li x5, CLINT_MTIME_LO
     lw x6, 0(x5)        # Read mtime lo
     
     # Test 4: Set mtimecmp using RV32 split-write safe sequence
     # Write high word first with max value
-    li x7, 0x02004004   # mtimecmp hi address
+    li x7, CLINT_MTIMECMP_HI
     li x8, 0xFFFFFFFF
     sw x8, 0(x7)        # mtimecmp hi = 0xFFFFFFFF
     
     # Write low word
-    li x9, 0x02004000   # mtimecmp lo address
+    li x9, CLINT_MTIMECMP_LO
     addi x10, x6, 50    # mtime + 50
     sw x10, 0(x9)       # mtimecmp lo = mtime + 50
     
@@ -60,7 +62,7 @@ wait_loop:
     
     # All tests passed
     li x14, 0x04
-    li x15, 0x13000000  # TUBE address
+    li x15, TUBE_ADDR
     sw x14, 0(x15)      # Write PASS marker
 
 test_pass:
@@ -68,7 +70,7 @@ test_pass:
 
 test_fail:
     li x14, 0xFF        # FAIL marker
-    li x15, 0x13000000
+    li x15, TUBE_ADDR
     sw x14, 0(x15)
 fail_loop:
     j fail_loop
@@ -86,10 +88,10 @@ trap_handler:
     li x31, 1
     
     # Clear timer interrupt by setting mtimecmp to max
-    li x28, 0x02004004  # mtimecmp hi
+    li x28, CLINT_MTIMECMP_HI
     li x27, 0xFFFFFFFF
     sw x27, 0(x28)
-    li x28, 0x02004000  # mtimecmp lo
+    li x28, CLINT_MTIMECMP_LO
     sw x27, 0(x28)
     
 not_timer:

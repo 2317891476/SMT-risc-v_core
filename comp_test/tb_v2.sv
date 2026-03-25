@@ -63,6 +63,27 @@ initial begin
     #100 rst = 1'b1;
 end
 
+//------------------------------------------------------------------------------------------------
+// PLIC External Interrupt Stimulus
+// Drives ext_irq_src for deterministic external interrupt testing
+//------------------------------------------------------------------------------------------------
+initial begin : plic_stimulus
+    // Default: no external interrupt
+    force u_adam_riscv_v2.ext_irq_src = 1'b0;
+    
+    // Wait for reset release
+    @(posedge rst);
+    
+    // For PLIC tests, assert external interrupt after some cycles
+    // to allow test setup (enable interrupts, configure PLIC)
+    if (`TB_IROM.mem[0] === 32'h00000093) begin  // Detect PLIC test by first instruction
+        #5000;  // Wait 5us for test setup
+        force u_adam_riscv_v2.ext_irq_src = 1'b1;
+        #1000;  // Hold for 1us
+        force u_adam_riscv_v2.ext_irq_src = 1'b0;
+    end
+end
+
 //---------------------------------------------------------------------------------------------
 // TEST CONTENT (reuse test_content.sv)
 //---------------------------------------------------------------------------------------------

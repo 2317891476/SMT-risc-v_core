@@ -87,14 +87,21 @@ wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_C
 wire addr_is_uncached_m1 = addr_is_tube_m1 || addr_is_clint_m1 || addr_is_plic_m1;
 
 // ═════════════════════════════════════════════════════════════════════════════
-// L2 Arbiter Instance
+// L2 Arbiter Instance (only for cacheable traffic)
 // ═════════════════════════════════════════════════════════════════════════════
+
+// M1 cached request - filter out MMIO
+wire        m1_cached_req   = m1_req_valid && !addr_is_uncached_m1;
+wire        m1_cached_ready;
+
+// M1 ready: MMIO is immediate, cached goes through arbiter
+assign m1_req_ready = addr_is_uncached_m1 ? m1_mmio_req : m1_cached_ready;
 
 l2_arbiter u_l2_arbiter (
     .clk            (clk),
     .rstn           (rstn),
     
-    // Master 0: I-side
+    // Master 0: I-side (always cacheable)
     .m0_req_valid   (m0_req_valid),
     .m0_req_ready   (m0_req_ready),
     .m0_req_addr    (m0_req_addr),
@@ -102,9 +109,9 @@ l2_arbiter u_l2_arbiter (
     .m0_resp_data   (m0_resp_data),
     .m0_resp_last   (m0_resp_last),
     
-    // Master 1: D-side
-    .m1_req_valid   (m1_req_valid),
-    .m1_req_ready   (m1_req_ready),
+    // Master 1: D-side (cacheable only - MMIO filtered out)
+    .m1_req_valid   (m1_cached_req),
+    .m1_req_ready   (m1_cached_ready),
     .m1_req_addr    (m1_req_addr),
     .m1_req_write   (m1_req_write),
     .m1_req_wdata   (m1_req_wdata),
@@ -187,11 +194,14 @@ always @(posedge clk) begin
 end
 
 // ═════════════════════════════════════════════════════════════════════════════
-// MMIO Handling
+// MMIO Bypass Path (deterministic, bypasses L2 entirely)
 // ═════════════════════════════════════════════════════════════════════════════
 
-// CLINT wires
-wire        clint_req_valid = addr_is_clint_m1 && m1_req_valid && grant_m1;
+// Detect MMIO requests - these bypass the arbiter/L2 for deterministic access
+wire        m1_mmio_req = m1_req_valid && addr_is_uncached_m1;
+
+// CLINT wires - MMIO bypass (no grant needed)
+wire        clint_req_valid = addr_is_clint_m1 && m1_mmio_req;
 wire [31:0] clint_resp_rdata;
 wire        clint_resp_valid;
 wire        clint_timer_irq;
@@ -208,8 +218,8 @@ clint u_clint (
     .timer_irq   (clint_timer_irq)
 );
 
-// PLIC wires
-wire        plic_req_valid = addr_is_plic_m1 && m1_req_valid && grant_m1;
+// PLIC wires - MMIO bypass (no grant needed)
+wire        plic_req_valid = addr_is_plic_m1 && m1_mmio_req;
 wire [31:0] plic_resp_rdata;
 wire        plic_resp_valid;
 wire        plic_ext_irq;
@@ -231,28 +241,28 @@ assign ext_timer_irq    = clint_timer_irq;
 assign ext_external_irq = plic_ext_irq;
 
 // ═════════════════════════════════════════════════════════════════════════════
-// M1 Response Mux (L2 vs CLINT vs PLIC vs TUBE)
+// M1 Response Mux (MMIO bypass takes priority over cached L2 path)
 // ═════════════════════════════════════════════════════════════════════════════
 
 wire        m1_resp_valid_int;
 wire [31:0] m1_resp_data_int;
 
-// Handle TUBE MMIO
+// Handle TUBE MMIO - deterministic bypass
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         tube_status <= 8'd0;
     end else begin
-        if (addr_is_tube_m1 && m1_req_valid && m1_req_write && grant_m1) begin
+        if (addr_is_tube_m1 && m1_mmio_req && m1_req_write) begin
             tube_status <= m1_req_wdata[7:0];
         end
     end
 end
 
-// Response mux
-wire        tube_resp_valid = addr_is_tube_m1 && m1_req_valid && grant_m1;
+// Response mux - MMIO valid immediately (no L2 latency)
+wire        tube_resp_valid = addr_is_tube_m1 && m1_mmio_req;
 wire [31:0] tube_resp_data  = 32'd0;
 
-assign m1_resp_valid = m1_resp_valid_int || clint_resp_valid || plic_resp_valid || tube_resp_valid;
+assign m1_resp_valid = m1_mmio_req ? (clint_resp_valid || plic_resp_valid || tube_resp_valid) : m1_resp_valid_int;
 assign m1_resp_data  = clint_resp_valid ? clint_resp_rdata :
                        plic_resp_valid  ? plic_resp_rdata  :
                        tube_resp_valid  ? tube_resp_data   :

@@ -16,6 +16,22 @@ initial begin
         test_id = 3;
     else if (`TB_IROM.mem[0] === 32'h06400093)   // test_rv32i_full: addi x1, x0, 100 (0x064_000_93)
         test_id = 4;
+    // P2 L2 Cache tests
+    else if (`TB_IROM.mem[0] === 32'h00000093)   // test_l2_icache_refill: addi x1, x0, 0
+        test_id = 5;
+    else if (`TB_IROM.mem[0] === 32'h00001000)   // test_l2_i_d_arbiter: first instruction pattern
+        test_id = 6;
+    else if (`TB_IROM.mem[0] === 32'h130000b7)   // test_l2_mmio_bypass: lui x7, 0x13000
+        test_id = 7;
+    // P2 Interrupt tests
+    else if (`TB_IROM.mem[0] === 32'h00000013)   // test_csr_mret_smoke: nop
+        test_id = 8;
+    else if (`TB_IROM.mem[0] === 32'h00000093)   // test_clint_timer_interrupt: addi x1, x0, 0
+        test_id = 9;
+    else if (`TB_IROM.mem[0] === 32'h00000093)   // test_plic_external_interrupt
+        test_id = 10;
+    else if (`TB_IROM.mem[0] === 32'h00000093)   // test_interrupt_mask_mret
+        test_id = 11;
     else
         test_id = 0;
 end
@@ -98,8 +114,14 @@ initial begin
             && (`TB_MEM_SUBSYS.ram[1036]      === 32'h00000008)  // JALR passed
             && (`TB_MEM_SUBSYS.ram[1037]      === 32'hDEADB000); // LUI  result
     end
+    else if (test_id >= 5 && test_id <= 11) begin
+        // P2 tests: L2 cache and interrupt tests
+        // These tests write 0x04 to TUBE on pass, 0xFF on fail
+        $display("P2 test_id=%0d detected", test_id);
+        pass = pass && (`TUBE_STATUS === 8'h04);
+    end
     else begin
-        // Generic test: just check DRAM[0] == 0x04 (pass marker)
+        // Generic test: just check TUBE == 0x04 (pass marker)
         $display("Unknown ROM signature, TB_IROM.mem[0]=%h - treating as generic test", `TB_IROM.mem[0]);
         pass = pass && (`TUBE_STATUS === 8'h04);
     end

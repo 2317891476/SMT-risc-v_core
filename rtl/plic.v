@@ -149,9 +149,11 @@ always @(posedge clk or negedge rstn) begin
                     end
                     addr_claim: begin
                         // Claim: return highest priority pending interrupt ID
+                        // Per PLIC spec, claim clears the pending bit
                         if (source_active) begin
                             resp_rdata <= 32'd1;  // Source 1
                             claimed[0][1] <= 1'b1; // Mark as claimed
+                            pending[1] <= 1'b0;    // Clear pending on claim
                         end else begin
                             resp_rdata <= 32'd0;  // No interrupt
                         end
