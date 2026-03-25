@@ -200,13 +200,15 @@ always @(posedge clk or negedge rstn) begin
         mem_req_valid <= 1'b0;
 
         // STATUS.READ can execute in any state - just return current status
+        // This early response takes priority over ST_RESP
         if (cmd_valid && cmd_ready && cmd_funct7 == 7'd5) begin
             resp_data  <= {29'd0, status_error, status_done, accel_busy};
             resp_valid <= 1'b1;
             resp_rd    <= cmd_rd;
             resp_tag   <= cmd_tag;
             resp_tid   <= cmd_tid;
-        end
+            // Skip the case statement for STATUS.READ - response is done
+        end else begin  // Only execute case statement for non-STATUS.READ commands
 
         case (state)
             ST_IDLE: begin
@@ -378,7 +380,7 @@ always @(posedge clk or negedge rstn) begin
                     end
                 end
                 else begin
-                    resp_data   <= 32'd0;  // GEMM returns 0 in rd
+                    result_reg  <= 32'd0;  // GEMM returns 0 in rd
                     status_done <= 1'b1;
                     state       <= ST_RESP;
                 end
@@ -475,11 +477,17 @@ always @(posedge clk or negedge rstn) begin
             end
 
             // ── Response ────────────────────────────────────────
+            // Only set resp_data if not already set by the operation
+            // (STATUS.READ and GEMM set resp_data before entering ST_RESP)
             ST_RESP: begin
                 if (resp_ready || !resp_valid) begin
                     resp_valid <= 1'b1;
                     resp_rd    <= op_rd;
-                    resp_data  <= result_reg;
+                    // resp_data is already set by most operations
+                    // Only use result_reg for operations that don't set resp_data explicitly
+                    // (VEC.OP, SCRATCH.LOAD, SCRATCH.STORE)
+                    if (op_funct7 == 7'd1 || op_funct7 == 7'd3 || op_funct7 == 7'd4)
+                        resp_data <= result_reg;
                     resp_tag   <= op_tag;
                     resp_tid   <= op_tid;
                     state      <= ST_IDLE;
@@ -488,6 +496,7 @@ always @(posedge clk or negedge rstn) begin
 
             default: state <= ST_IDLE;
         endcase
+        end  // Close else begin from line 211
     end
 end
 
