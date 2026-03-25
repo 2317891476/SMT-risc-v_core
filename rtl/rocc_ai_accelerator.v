@@ -223,12 +223,16 @@ always @(posedge clk or negedge rstn) begin
 
                     case (cmd_funct7)
                         7'd0: begin // GEMM.START
-                            // Validate all addresses are in RAM range (0x0000-0x3FFF)
+                            // Validate all addresses AND their full transfer ranges
+                            // A: 64 bytes, B: 64 bytes, C: 256 bytes
                             // A address in rs1, B address in rs2[15:0], C address in rs2[31:16]
-                            if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) || (cmd_rs1_data > `ROCC_DMA_ADDR_MAX) ||
-                                ({16'd0, cmd_rs2_data[15:0]} < `ROCC_DMA_ADDR_MIN) || ({16'd0, cmd_rs2_data[15:0]} > `ROCC_DMA_ADDR_MAX) ||
-                                ({16'd0, cmd_rs2_data[31:16]} < `ROCC_DMA_ADDR_MIN) || ({16'd0, cmd_rs2_data[31:16]} > `ROCC_DMA_ADDR_MAX)) begin
-                                // Invalid address - set error and complete
+                            if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) || 
+                                ((cmd_rs1_data + 16'd64) > `ROCC_DMA_ADDR_MAX) ||
+                                ({16'd0, cmd_rs2_data[15:0]} < `ROCC_DMA_ADDR_MIN) || 
+                                (({16'd0, cmd_rs2_data[15:0]} + 16'd64) > `ROCC_DMA_ADDR_MAX) ||
+                                ({16'd0, cmd_rs2_data[31:16]} < `ROCC_DMA_ADDR_MIN) || 
+                                (({16'd0, cmd_rs2_data[31:16]} + 16'd256) > `ROCC_DMA_ADDR_MAX)) begin
+                                // Invalid address or range - set error and complete
                                 status_error <= 1'b1;
                                 status_done  <= 1'b1;
                                 resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0}; // error=1, done=1, busy=0
@@ -268,23 +272,51 @@ always @(posedge clk or negedge rstn) begin
                         end
 
                         7'd3: begin // SCRATCH.LOAD: rs1=ext_mem_addr, rs2=scratch_addr+len
-                            dma_addr   <= cmd_rs1_data;                    // External RAM source address
-                            dma_cnt    <= 16'd0;
-                            dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
-                            result_reg <= cmd_rs2_data[31:16];             // Scratchpad destination address (upper 16 bits)
-                            status_done <= 1'b0;
-                            status_error <= 1'b0;
-                            state      <= ST_SCRATCH_LD;
+                            // Validate RAM range for external address (including full transfer)
+                            // Validate scratchpad bounds (0-1023 words)
+                            if ((cmd_rs1_data < `ROCC_DMA_ADDR_MIN) ||
+                                ((cmd_rs1_data + (cmd_rs2_data[15:0] << 2)) > `ROCC_DMA_ADDR_MAX) ||
+                                (cmd_rs2_data[31:16] + cmd_rs2_data[15:0] > SCRATCH_WORDS)) begin
+                                status_error <= 1'b1;
+                                status_done  <= 1'b1;
+                                resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0};
+                                resp_valid   <= 1'b1;
+                                resp_rd      <= cmd_rd;
+                                resp_tag     <= cmd_tag;
+                                resp_tid     <= cmd_tid;
+                            end else begin
+                                dma_addr   <= cmd_rs1_data;                    // External RAM source address
+                                dma_cnt    <= 16'd0;
+                                dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
+                                result_reg <= cmd_rs2_data[31:16];             // Scratchpad destination address (upper 16 bits)
+                                status_done <= 1'b0;
+                                status_error <= 1'b0;
+                                state      <= ST_SCRATCH_LD;
+                            end
                         end
 
                         7'd4: begin // SCRATCH.STORE: rs1=scratch_addr, rs2=ext_mem_addr+len
-                            dma_addr   <= cmd_rs2_data[31:16];             // External RAM destination address
-                            dma_cnt    <= 16'd0;
-                            dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
-                            result_reg <= cmd_rs1_data;                    // Scratchpad source address
-                            status_done <= 1'b0;
-                            status_error <= 1'b0;
-                            state      <= ST_SCRATCH_ST;
+                            // Validate RAM range for external address (including full transfer)
+                            // Validate scratchpad bounds (0-1023 words)
+                            if ((cmd_rs2_data[31:16] < `ROCC_DMA_ADDR_MIN) ||
+                                (({16'd0, cmd_rs2_data[31:16]} + (cmd_rs2_data[15:0] << 2)) > `ROCC_DMA_ADDR_MAX) ||
+                                (cmd_rs1_data + cmd_rs2_data[15:0] > SCRATCH_WORDS)) begin
+                                status_error <= 1'b1;
+                                status_done  <= 1'b1;
+                                resp_data    <= {29'd0, 1'b1, 1'b1, 1'b0};
+                                resp_valid   <= 1'b1;
+                                resp_rd      <= cmd_rd;
+                                resp_tag     <= cmd_tag;
+                                resp_tid     <= cmd_tid;
+                            end else begin
+                                dma_addr   <= cmd_rs2_data[31:16];             // External RAM destination address
+                                dma_cnt    <= 16'd0;
+                                dma_total  <= cmd_rs2_data[15:0];              // Length in words (lower 16 bits)
+                                result_reg <= cmd_rs1_data;                    // Scratchpad source address
+                                status_done <= 1'b0;
+                                status_error <= 1'b0;
+                                state      <= ST_SCRATCH_ST;
+                            end
                         end
 
                         default: begin

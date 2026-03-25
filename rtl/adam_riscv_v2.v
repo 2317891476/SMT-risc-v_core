@@ -923,9 +923,10 @@ bypass_network u_bypass1(
 // ════════════════════════════════════════════════════════════════════════════
 // RoCC Flush-Safe Completion Handling
 // ════════════════════════════════════════════════════════════════════════════
-// Track the epoch of each in-flight RoCC command by tag
+// Track the epoch and tid of each in-flight RoCC command by tag
 reg [`METADATA_EPOCH_W-1:0] rocc_cmd_epoch [0:31];
 reg                         rocc_cmd_in_flight [0:31];
+reg [0:0]                   rocc_cmd_tid_per_tag [0:31];
 integer                     rocc_epoch_idx;
 
 // Capture epoch when RoCC command is issued
@@ -934,19 +935,22 @@ always @(posedge clk or negedge rstn) begin
         for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
             rocc_cmd_epoch[rocc_epoch_idx] <= {`METADATA_EPOCH_W{1'b0}};
             rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
+            rocc_cmd_tid_per_tag[rocc_epoch_idx] <= 1'b0;
         end
     end else begin
-        // Clear in-flight on flush per thread
-        if (combined_flush_any) begin
+        // Clear in-flight entries for flushed thread when flush occurs
+        if (flush) begin
             for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
-                // Note: We don't clear here because we need tag-based flush
-                // The epoch check below will suppress stale responses
+                if (rocc_cmd_in_flight[rocc_epoch_idx] && rocc_cmd_tid_per_tag[rocc_epoch_idx] == flush_tid) begin
+                    rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
+                end
             end
         end
 
         // Mark in-flight when RoCC command is accepted
         if (rocc_cmd_valid && rocc_cmd_ready) begin
             rocc_cmd_epoch[rocc_cmd_tag] <= iss0_epoch;
+            rocc_cmd_tid_per_tag[rocc_cmd_tag] <= iss0_tid;
             rocc_cmd_in_flight[rocc_cmd_tag] <= 1'b1;
         end
 
