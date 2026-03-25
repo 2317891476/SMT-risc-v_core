@@ -43,7 +43,8 @@ jobs:
         export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
         python verification/run_all_tests.py --riscv-tests 2>&1 | tee riscv_tests.log
         # Check results - allow fence_i failure
-        if grep -q "failed" riscv_tests.log | grep -qv "fence_i"; then
+        # Look for actual failures (non-zero failed count), not "0 failed"
+        if grep -E "failed.*[1-9][0-9]*" riscv_tests.log | grep -qv "fence_i"; then
           echo "riscv-tests FAILED"
           exit 1
         fi
@@ -54,7 +55,8 @@ jobs:
         export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
         python verification/run_all_tests.py --riscv-arch-test 2>&1 | tee arch_test.log
         # All arch tests should pass
-        if grep -q "failed" arch_test.log; then
+        # Check for actual failures (non-zero failed count)
+        if grep -E "failed.*[1-9][0-9]*" arch_test.log; then
           echo "riscv-arch-test FAILED"
           exit 1
         fi

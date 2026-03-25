@@ -92,7 +92,7 @@ SECTIONS
 
 def create_model_test_header():
     """Create model_test.h for riscv-arch-test compatibility"""
-    return '''
+    return '''\
 #ifndef _MODEL_TEST_H
 #define _MODEL_TEST_H
 
@@ -101,19 +101,19 @@ def create_model_test_header():
 
 // Boot code - minimal setup for arch-test
 // Note: rvtest_entry_point is defined by the test, we just set up SP
-#define RVMODEL_BOOT                                                     \
+#define RVMODEL_BOOT \\
         li sp, 0x10000;
 
 // Halt code - write PASS to TUBE
-#define RVMODEL_HALT                                                     \
-        li t0, 0x04;                                                     \
-        li t1, TUBE_ADDR;                                                \
-        sb t0, 0(t1);                                                    \
+#define RVMODEL_HALT \\
+        li t0, 0x04; \\
+        li t1, TUBE_ADDR; \\
+        sb t0, 0(t1); \\
 1:      j 1b
 
 // Data sections (empty for our simple setup)
-#define RVMODEL_DATA_BEGIN                                               \
-        .section .tohost;                                                \
+#define RVMODEL_DATA_BEGIN \\
+        .section .tohost; \\
         .align 4;
 
 #define RVMODEL_DATA_END
@@ -144,7 +144,6 @@ def create_model_test_header():
 
 #endif
 '''
-
 
 def create_adapter_header():
     """Create header that adapts test reporting to our TUBE"""
