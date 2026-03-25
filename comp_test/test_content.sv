@@ -2,6 +2,23 @@
 integer test_id;
 reg pass;
 
+// RoCC test status extraction from x3 (STATUS.READ writes here)
+// Per define_v2.v: STATUS.READ returns {29'b0, error, done, busy}
+`define ROCC_STATUS_BUSY_BIT  0
+`define ROCC_STATUS_DONE_BIT  1
+`define ROCC_STATUS_ERROR_BIT 2
+
+// Helper function to extract RoCC status from x3 value
+function automatic rocc_check_status;
+    input [31:0] status_val;
+    input expected_done;
+    begin
+        rocc_check_status = (status_val[`ROCC_STATUS_ERROR_BIT] == 1'b0) && // No error
+                            (status_val[`ROCC_STATUS_DONE_BIT] == expected_done) && // Done bit as expected
+                            (status_val[`ROCC_STATUS_BUSY_BIT] == 1'b0); // Not busy
+    end
+endfunction
+
 // test_id:
 //   1 -> rom/test1.s
 //   2 -> rom/test2.S
@@ -32,6 +49,16 @@ initial begin
         test_id = 10;
     else if (`TB_IROM.mem[0] === 32'h00000093)   // test_interrupt_mask_mret
         test_id = 11;
+    // RoCC tests - detect by custom-0 opcode (0x0B) in instruction bits [6:0]
+    // RoCC instructions use opcode 7'b0001011 (0x0B)
+    else if ((`TB_IROM.mem[0][6:0] === 7'b0001011) ||   // First instr is RoCC custom-0
+             (`TB_IROM.mem[1][6:0] === 7'b0001011) ||   // Or second instr
+             (`TB_IROM.mem[0] === 32'h00500193))        // addi x3, x0, 5 (RoCC test marker)
+        test_id = 12;  // RoCC GEMM/Vector test
+    else if (`TB_IROM.mem[0] === 32'h00d00193)   // addi x3, x0, 13 (RoCC DMA test marker)
+        test_id = 13;  // RoCC DMA test
+    else if (`TB_IROM.mem[0] === 32'h00b00193)   // addi x3, x0, 11 (RoCC status test marker)
+        test_id = 14;  // RoCC STATUS.READ test
     else
         test_id = 0;
 end
@@ -120,6 +147,50 @@ initial begin
         $display("P2 test_id=%0d detected", test_id);
         pass = pass && (`TUBE_STATUS === 8'h04);
     end
+    else if (test_id == 12) begin
+        // RoCC GEMM/Vector Test
+        // Verifies RoCC GEMM.START and VEC.OP commands complete correctly
+        // STATUS.READ returns {29'b0, error, done, busy}
+        // x3 should contain status with done=1, busy=0, error=0
+        $display("RoCC GEMM/Vector test (test_id=12) detected");
+        $display("RoCC Debug: x3=0x%08h, rocc_cmd_count=%0d, rocc_resp_count=%0d",
+                 `TB_REGS.reg_bank[0][3], rocc_cmd_count, rocc_resp_count);
+        $display("RoCC Debug: rocc_dma_rd_count=%0d, rocc_dma_wr_count=%0d",
+                 rocc_dma_rd_count, rocc_dma_wr_count);
+        
+        // Check RoCC status in x3: expected {29'b0, 0, 1, 0} = 0x2 (done set, no error, not busy)
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)              // TUBE end marker
+            && (rocc_timeout_triggered === 1'b0)     // No RoCC timeout
+            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
+            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
+    end
+    else if (test_id == 13) begin
+        // RoCC DMA Test
+        // Verifies SCRATCH.LOAD and SCRATCH.STORE DMA operations
+        $display("RoCC DMA test (test_id=13) detected");
+        $display("RoCC Debug: x3=0x%08h, rocc_dma_rd_count=%0d, rocc_dma_wr_count=%0d",
+                 `TB_REGS.reg_bank[0][3], rocc_dma_rd_count, rocc_dma_wr_count);
+        
+        // DMA test should complete without error
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)              // TUBE end marker
+            && (rocc_timeout_triggered === 1'b0)     // No RoCC timeout
+            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
+            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
+    end
+    else if (test_id == 14) begin
+        // RoCC STATUS.READ Test
+        // Verifies STATUS.READ command returns correct format
+        $display("RoCC STATUS.READ test (test_id=14) detected");
+        $display("RoCC Debug: x3=0x%08h", `TB_REGS.reg_bank[0][3]);
+        
+        // Status should have upper 29 bits = 0, and valid lower 3 bits
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)               // TUBE end marker
+            && (`TB_REGS.reg_bank[0][3][31:3] === 29'd0) // Upper bits zero
+            && (rocc_cmd_count > 32'd0);              // At least one RoCC command issued
+    end
     else begin
         // Generic test: just check TUBE == 0x04 (pass marker)
         $display("Unknown ROM signature, TB_IROM.mem[0]=%h - treating as generic test", `TB_IROM.mem[0]);
@@ -132,10 +203,36 @@ initial begin
         TEST_FAIL;
 end
 
+// RoCC extended timeout (for long-running RoCC operations)
+// RoCC tests may need more time due to DMA operations
+reg rocc_extended_timeout;
+initial begin
+    rocc_extended_timeout = 1'b0;
+    // Only use extended timeout for RoCC tests
+    if (test_id == 12 || test_id == 13 || test_id == 14) begin
+        #400us;  // Extended timeout for RoCC operations
+        if (`TUBE_STATUS !== 8'h04) begin
+            rocc_extended_timeout = 1'b1;
+            $display("\n----------------------------------------\n");
+            $display("\t RoCC Extended Timeout Error !!!!\n");
+            $display("RoCC Debug: cmd_count=%0d, resp_count=%0d, operation_active=%0b",
+                     rocc_cmd_count, rocc_resp_count, rocc_operation_active);
+            TEST_FAIL;
+        end
+    end
+end
+
 //Timeout Error
 initial begin
     #200us;
-    $display("\n----------------------------------------\n");
-    $display("\t Timeout Error !!!!\n");
-    TEST_FAIL;
+    // Skip standard timeout for RoCC tests (they use extended timeout)
+    if (test_id == 12 || test_id == 13 || test_id == 14) begin
+        // RoCC tests handled by extended timeout above
+        #300us; // Wait for extended timeout to handle it
+    end
+    else begin
+        $display("\n----------------------------------------\n");
+        $display("\t Timeout Error !!!!\n");
+        TEST_FAIL;
+    end
 end

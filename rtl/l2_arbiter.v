@@ -1,9 +1,11 @@
 // =============================================================================
 // Module : l2_arbiter
-// Description: 2-master round-robin arbiter for L2 cache access.
+// Description: 3-master round-robin arbiter for L2 cache access.
 //   - Master 0: I-side (instruction refill)
 //   - Master 1: D-side (LSU/store buffer)
-//   - Round-robin arbitration when both masters request simultaneously
+//   - Master 2: RoCC DMA (AI accelerator)
+//   - Priority: M2 (RoCC) > M0/M1 when active
+//   - Round-robin between M0/M1 when M2 is not requesting
 // =============================================================================
 `include "define_v2.v"
 
@@ -34,6 +36,18 @@ module l2_arbiter (
     output wire [31:0] m1_resp_data,
 
     // ═══════════════════════════════════════════════════════════════════════════
+    // Master 2: RoCC DMA interface (AI accelerator)
+    // ═══════════════════════════════════════════════════════════════════════════
+    input  wire        m2_req_valid,
+    output wire        m2_req_ready,
+    input  wire [31:0] m2_req_addr,
+    input  wire        m2_req_write,
+    input  wire [31:0] m2_req_wdata,
+    input  wire [3:0]  m2_req_wen,
+    output wire        m2_resp_valid,
+    output wire [31:0] m2_resp_data,
+
+    // ═══════════════════════════════════════════════════════════════════════════
     // L2 Cache interface (output)
     // ═══════════════════════════════════════════════════════════════════════════
     output wire        l2_req_valid,
@@ -52,7 +66,8 @@ module l2_arbiter (
     // ═══════════════════════════════════════════════════════════════════════════
     output wire        grant_m0,        // M0 currently granted
     output wire        grant_m1,        // M1 currently granted
-    output wire [1:0]  grant_count      // Number of grants issued
+    output wire        grant_m2,        // M2 currently granted (RoCC DMA)
+    output wire [2:0]  grant_count      // Number of grants issued (3-bit for 3 masters)
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -67,6 +82,7 @@ module l2_arbiter (
 
 wire addr_is_ram_m0     = (m0_req_addr >= `RAM_CACHEABLE_BASE) && (m0_req_addr <= `RAM_CACHEABLE_TOP);
 wire addr_is_ram_m1     = (m1_req_addr >= `RAM_CACHEABLE_BASE) && (m1_req_addr <= `RAM_CACHEABLE_TOP);
+wire addr_is_ram_m2     = (m2_req_addr >= `RAM_CACHEABLE_BASE) && (m2_req_addr <= `RAM_CACHEABLE_TOP);
 wire addr_is_tube_m1    = (m1_req_addr == `TUBE_ADDR);
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
@@ -76,59 +92,60 @@ wire addr_is_uncached_m1 = addr_is_tube_m1 || addr_is_clint_m1 || addr_is_plic_m
 wire m0_cacheable = addr_is_ram_m0;
 // M1 (D-side) is cacheable only for RAM region
 wire m1_cacheable = addr_is_ram_m1;
+// M2 (RoCC DMA) is cacheable only for RAM region (addresses 0x0000_0000 to 0x0000_3FFF)
+wire m2_cacheable = addr_is_ram_m2;
 
 // ═════════════════════════════════════════════════════════════════════════════
-// Round-Robin Arbitration State
+// Priority Arbitration State (M2 > M0/M1, round-robin M0/M1)
 // ═════════════════════════════════════════════════════════════════════════════
 
-reg last_grant;     // 0 = last granted to M0, 1 = last granted to M1
-reg active;         // Transaction in progress
-reg master_select;  // 0 = M0 selected, 1 = M1 selected
+// last_grant encoding: 2'b00=M0, 2'b01=M1, 2'b10=M2
+reg [1:0] last_grant;
+reg active;             // Transaction in progress
+reg [1:0] master_select; // 2'b00=M0, 2'b01=M1, 2'b10=M2
 
 // Request detection
 wire m0_requesting = m0_req_valid && m0_cacheable;
 wire m1_requesting = m1_req_valid && (m1_cacheable || addr_is_uncached_m1);
+wire m2_requesting = m2_req_valid && m2_cacheable;
 
-// Arbitration logic (combinational)
-wire grant_m0_next;
-wire grant_m1_next;
-
-assign grant_m0_next = !active && (
-    (m0_requesting && !m1_requesting) ||                          // Only M0
-    (m0_requesting && m1_requesting && last_grant) ||             // Both, M1 had it last
-    (m0_requesting && !m1_requesting && !last_grant)              // Only M0 (redundant but clear)
-);
-
-assign grant_m1_next = !active && (
-    (!m0_requesting && m1_requesting) ||                          // Only M1
-    (m0_requesting && m1_requesting && !last_grant) ||            // Both, M0 had it last
-    (!m0_requesting && m1_requesting && last_grant)              // Only M1 (redundant but clear)
-);
-
-// Simplified arbitration
+// Priority arbitration logic (combinational)
+// M2 (RoCC DMA) gets priority when active to ensure deterministic GEMM timing
 reg next_grant_m0;
 reg next_grant_m1;
+reg next_grant_m2;
 
 always @(*) begin
     if (active) begin
         // Hold current grant until transaction completes
-        next_grant_m0 = (master_select == 1'b0);
-        next_grant_m1 = (master_select == 1'b1);
+        next_grant_m0 = (master_select == 2'b00);
+        next_grant_m1 = (master_select == 2'b01);
+        next_grant_m2 = (master_select == 2'b10);
     end else begin
-        // New arbitration
-        if (m0_requesting && !m1_requesting) begin
+        // Priority: M2 > M0/M1
+        // When M2 is not requesting, round-robin between M0 and M1
+        if (m2_requesting) begin
+            // M2 has highest priority
+            next_grant_m0 = 1'b0;
+            next_grant_m1 = 1'b0;
+            next_grant_m2 = 1'b1;
+        end else if (m0_requesting && !m1_requesting) begin
             next_grant_m0 = 1'b1;
             next_grant_m1 = 1'b0;
+            next_grant_m2 = 1'b0;
         end else if (!m0_requesting && m1_requesting) begin
             next_grant_m0 = 1'b0;
             next_grant_m1 = 1'b1;
+            next_grant_m2 = 1'b0;
         end else if (m0_requesting && m1_requesting) begin
-            // Round-robin: give to the one that didn't have it last
-            next_grant_m0 = last_grant;     // If last was M1 (1), give to M0
-            next_grant_m1 = !last_grant;    // If last was M0 (0), give to M1
+            // Round-robin between M0 and M1 when both request
+            next_grant_m0 = last_grant[0];  // If last was M1 (2'b01), give to M0
+            next_grant_m1 = !last_grant[0]; // If last was M0 (2'b00), give to M1
+            next_grant_m2 = 1'b0;
         end else begin
             next_grant_m0 = 1'b0;
             next_grant_m1 = 1'b0;
+            next_grant_m2 = 1'b0;
         end
     end
 end
@@ -136,20 +153,24 @@ end
 // Sequential state update
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        last_grant <= 1'b0;
+        last_grant <= 2'b00;
         active <= 1'b0;
-        master_select <= 1'b0;
+        master_select <= 2'b00;
     end else begin
         if (!active) begin
             // Start new transaction
             if (next_grant_m0) begin
                 active <= 1'b1;
-                master_select <= 1'b0;
-                last_grant <= 1'b0;
+                master_select <= 2'b00;
+                last_grant <= 2'b00;
             end else if (next_grant_m1) begin
                 active <= 1'b1;
-                master_select <= 1'b1;
-                last_grant <= 1'b1;
+                master_select <= 2'b01;
+                last_grant <= 2'b01;
+            end else if (next_grant_m2) begin
+                active <= 1'b1;
+                master_select <= 2'b10;
+                last_grant <= 2'b10;
             end
         end else begin
             // Transaction in progress - check for completion
@@ -165,50 +186,66 @@ end
 // ═════════════════════════════════════════════════════════════════════════════
 
 assign l2_req_valid = active;
-assign l2_req_addr  = master_select ? m1_req_addr  : m0_req_addr;
-assign l2_req_write = master_select ? m1_req_write : 1'b0;  // M0 never writes
-assign l2_req_wdata = master_select ? m1_req_wdata : 32'd0;
-assign l2_req_wen   = master_select ? m1_req_wen   : 4'd0;
-assign l2_req_uncached = master_select ? addr_is_uncached_m1 : 1'b0;
+
+// 3-way mux using master_select
+// master_select: 2'b00=M0, 2'b01=M1, 2'b10=M2
+assign l2_req_addr  = (master_select == 2'b10) ? m2_req_addr  :
+                      (master_select == 2'b01) ? m1_req_addr  : m0_req_addr;
+assign l2_req_write = (master_select == 2'b10) ? m2_req_write :
+                      (master_select == 2'b01) ? m1_req_write : 1'b0;  // M0 never writes
+assign l2_req_wdata = (master_select == 2'b10) ? m2_req_wdata :
+                      (master_select == 2'b01) ? m1_req_wdata : 32'd0;
+assign l2_req_wen   = (master_select == 2'b10) ? m2_req_wen   :
+                      (master_select == 2'b01) ? m1_req_wen   : 4'd0;
+// Only M1 can have uncached MMIO accesses
+assign l2_req_uncached = (master_select == 2'b01) ? addr_is_uncached_m1 : 1'b0;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Response Demuxing from L2 Cache
 // ═════════════════════════════════════════════════════════════════════════════
 
 // M0 response
-assign m0_resp_valid = l2_resp_valid && (master_select == 1'b0) && active;
+assign m0_resp_valid = l2_resp_valid && (master_select == 2'b00) && active;
 assign m0_resp_data  = l2_resp_data;
-assign m0_resp_last  = l2_resp_last && (master_select == 1'b0);
+assign m0_resp_last  = l2_resp_last && (master_select == 2'b00);
 
 // M1 response
-assign m1_resp_valid = l2_resp_valid && (master_select == 1'b1) && active;
+assign m1_resp_valid = l2_resp_valid && (master_select == 2'b01) && active;
 assign m1_resp_data  = l2_resp_data;
+
+// M2 response (RoCC DMA)
+assign m2_resp_valid = l2_resp_valid && (master_select == 2'b10) && active;
+assign m2_resp_data  = l2_resp_data;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Ready Signals
 // ═════════════════════════════════════════════════════════════════════════════
 
 // M0 ready when not active or when completing M0 transaction
-assign m0_req_ready = !active ? next_grant_m0 : (master_select == 1'b0 && l2_req_ready);
+assign m0_req_ready = !active ? next_grant_m0 : (master_select == 2'b00 && l2_req_ready);
 
 // M1 ready when not active or when completing M1 transaction  
-assign m1_req_ready = !active ? next_grant_m1 : (master_select == 1'b1 && l2_req_ready);
+assign m1_req_ready = !active ? next_grant_m1 : (master_select == 2'b01 && l2_req_ready);
+
+// M2 ready when not active or when completing M2 transaction  
+assign m2_req_ready = !active ? next_grant_m2 : (master_select == 2'b10 && l2_req_ready);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Status Outputs
 // ═════════════════════════════════════════════════════════════════════════════
 
-assign grant_m0 = (master_select == 1'b0) && active;
-assign grant_m1 = (master_select == 1'b1) && active;
+assign grant_m0 = (master_select == 2'b00) && active;
+assign grant_m1 = (master_select == 2'b01) && active;
+assign grant_m2 = (master_select == 2'b10) && active;
 
-// Simple grant counter (saturates at 3)
-reg [1:0] grant_cnt;
+// Simple grant counter (saturates at 7 for 3-bit)
+reg [2:0] grant_cnt;
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        grant_cnt <= 2'd0;
+        grant_cnt <= 3'd0;
     end else begin
-        if (l2_resp_valid && l2_resp_last && grant_cnt != 2'd3) begin
-            grant_cnt <= grant_cnt + 2'd1;
+        if (l2_resp_valid && l2_resp_last && grant_cnt != 3'd7) begin
+            grant_cnt <= grant_cnt + 3'd1;
         end
     end
 end
