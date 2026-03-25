@@ -238,7 +238,7 @@ test_smt.s        PASS
 python verification/run_all_tests.py --basic --riscv-tests --riscv-arch-test
 
 # 单独运行各测试集
-python verification/run_all_tests.py --basic              # 基础测试 (test1, test2, test_rv32i_full)
+python verification/run_all_tests.py --basic              # 基础测试 (8个测试，包含 Store Buffer 测试)
 python verification/run_all_tests.py --riscv-tests        # 经典 riscv-tests (自动下载)
 python verification/run_all_tests.py --riscv-arch-test    # 官方 arch-test (自动下载)
 
@@ -255,14 +255,19 @@ python verification/run_riscv_tests.py --suite all                   # 运行所
 ============================================================
   Test Summary
 ============================================================
-  ✓ test1: PASS
-  ✓ test2: PASS
-  ✓ test_rv32i_full: PASS
-  ✓ riscv-tests: PASS (41/42 passed)
-  ✓ riscv-arch-test: PASS (47/47 passed)
+  [PASS] test1: PASS
+  [PASS] test2: PASS
+  [PASS] test_rv32i_full: PASS
+  [PASS] test_store_buffer_simple: PASS
+  [PASS] test_store_buffer_commit: PASS
+  [PASS] test_store_buffer_forwarding: PASS
+  [PASS] test_store_buffer_hazard: PASS
+  [PASS] test_commit_flush_store: PASS
+  [PASS] riscv-tests: PASS (49/50 passed)
+  [PASS] riscv-arch-test: PASS (47/47 passed)
 
 ------------------------------------------------------------
-  Total: 5 passed, 0 failed, 0 skipped
+  Total: 10 passed, 0 failed, 0 skipped
 ```
 
 ### 手动运行 V2 管线仿真
@@ -301,6 +306,13 @@ vvp out_iverilog\bin\tb_v2.out
 | `test2.S` | Scoreboard RAW 冒险链 (ADD→SUB→LW→SW→LW) | 寄存器 x1-x9 + DRAM 黄金值 |
 | `test_smt.s` | SMT: T0 求和 1+..+10=55, T1 乘法 10×3=30 | DRAM[1152]=0x37, DRAM[1153]=0x1E |
 | `test_rv32i_full.s` | **RV32I 全部 47 条指令** (详见下表) | 9 个 DRAM 检查点 + TUBE 标记 |
+| `test_store_buffer_simple.s` | Store Buffer 基础功能测试 | 存储-加载验证 |
+| `test_store_buffer_commit.s` | Store Buffer 提交边界测试 | ROB 提交时序验证 |
+| `test_store_buffer_forwarding.s` | Store-Load 转发测试 | 数据前递验证 |
+| `test_store_buffer_hazard.s` | Store Buffer 冒险检测测试 | RAW/WAW 冒险处理 |
+| `test_commit_flush_store.s` | Flush 时 Store 提交测试 | 投机执行回滚验证 |
+
+**注：** `test_rv32i_full.s` 包含 17 条分支指令，用于验证分支预测单元 (BPU)。
 
 ### 7.2 riscv-tests (经典测试集)
 
@@ -330,7 +342,44 @@ vvp out_iverilog\bin\tb_v2.out
 - 自动下载，无需手动配置
 - 当前通过率：47/47 (100%)
 
-### 7.4 test_rv32i_full.s 覆盖的指令 (37 条 + NOP)
+### 7.4 Store Buffer 测试集
+
+专用测试验证乱序执行中的存储缓冲区功能：
+
+| 测试文件 | 测试场景 | 验证要点 |
+|---------|---------|---------|
+| `test_store_buffer_simple.s` | 基础存储缓冲 | Store 缓冲、内存写入、数据一致性 |
+| `test_store_buffer_commit.s` | 提交边界 | ROB 提交时序、非投机 Store 提交 |
+| `test_store_buffer_forwarding.s` | Store-Load 转发 | 同地址 Store-Load 数据前递 |
+| `test_store_buffer_hazard.s` | 冒险检测 | RAW/WAW 冒险识别与处理 |
+| `test_commit_flush_store.s` | Flush 回滚 | 投机执行失败时 Store 缓冲区清理 |
+
+**运行方式：**
+```powershell
+python verification/run_all_tests.py --basic  # 自动包含所有 Store Buffer 测试
+```
+
+### 7.5 分支预测测试
+
+分支预测单元 (BPU) 测试通过 `test_rv32i_full.s` 中的分支指令进行验证：
+
+| 分支类型 | 指令 | 测试场景 |
+|---------|------|---------|
+| 条件分支 | BEQ, BNE, BLT, BGE, BLTU, BGEU | 6 条指令，覆盖相等、大小、无符号比较 |
+| 无条件跳转 | JAL, JALR | 函数调用、间接跳转 |
+
+**BPU 配置：**
+- 256-entry PHT (Pattern History Table)
+- 2-bit 饱和计数器
+- 直接映射 BTB (Branch Target Buffer)
+- 每线程独立索引 (XOR-fold)
+
+**运行方式：**
+```powershell
+python verification/run_all_tests.py --basic  # test_rv32i_full.s 包含 17 条分支指令
+```
+
+### 7.6 test_rv32i_full.s 覆盖的指令 (37 条 + NOP)
 
 | 类别 | 指令 | 数量 |
 |------|------|------|

@@ -4,7 +4,11 @@ Unified test runner for AdamRiscv.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
-  --basic           : test1, test2, test_rv32i_full (3 tests)
+  --basic           : Core tests + Store Buffer tests (8 tests)
+                      - test1, test2, test_rv32i_full (core functionality)
+                      - test_store_buffer_simple, test_store_buffer_commit,
+                        test_store_buffer_forwarding, test_store_buffer_hazard,
+                        test_commit_flush_store (Store Buffer dedicated)
   --riscv-tests     : Classic riscv-tests RV32I/M (~50 tests, auto-download)
   --riscv-arch-test : Official architecture tests (500+ tests, auto-download)
   --riscof          : RISCOF framework (requires Spike)
@@ -91,11 +95,23 @@ class TestRunner:
             return False
     
     def run_basic_tests(self, tests=None):
-        """Run basic tests (test1, test2, test_rv32i_full)"""
+        """Run basic tests including Store Buffer and Branch Prediction tests"""
         self.log("Running basic tests...", "INFO")
         
         if tests is None:
-            tests = ["test1.s", "test2.S", "test_rv32i_full.s"]
+            # Core functionality tests
+            tests = [
+                "test1.s",
+                "test2.S",
+                "test_rv32i_full.s",
+                # Store Buffer dedicated tests
+                "test_store_buffer_simple.s",
+                "test_store_buffer_commit.s",
+                "test_store_buffer_forwarding.s",
+                "test_store_buffer_hazard.s",
+                "test_commit_flush_store.s",
+                # Branch Prediction tests (included in test_rv32i_full with 17 branch instructions)
+            ]
         
         for test in tests:
             test_name = Path(test).stem
@@ -210,11 +226,11 @@ riscv-none-elf-objcopy -j .data -O verilog {test_name}.elf data.hex
         
         for name, result, detail in self.results:
             if result == "PASS":
-                status = "✓"
+                status = "[PASS]"
             elif result == "SKIP":
-                status = "○"
+                status = "[SKIP]"
             else:
-                status = "✗"
+                status = "[FAIL]"
             print(f"  {status} {name}: {result}")
             if detail and result != "PASS":
                 print(f"      {detail[:80]}")

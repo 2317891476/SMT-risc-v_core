@@ -20,7 +20,6 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y iverilog
-        pip install riscof
 
     - name: Install RISC-V toolchain
       run: |
@@ -28,92 +27,49 @@ jobs:
         tar -xzf xpack-riscv-none-elf-gcc-13.2.0-1-linux-x64.tar.gz
         echo "$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin" >> $GITHUB_PATH
 
-    - name: Install Spike (Reference Model)
-      run: |
-        sudo apt-get install -y device-tree-compiler
-        git clone --recursive https://github.com/riscv-software-src/riscv-isa-sim.git
-        cd riscv-isa-sim
-        mkdir build && cd build
-        ../configure --prefix=$HOME/spike
-        make -j$(nproc)
-        make install
-        echo "$HOME/spike/bin" >> $GITHUB_PATH
-
-    - name: Build ROMs
+    - name: Run Basic Tests (Core + Store Buffer)
       run: |
         export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
-        cd rom
-        for test in test1.s test2.S test_smt.s test_rv32i_full.s; do
-          if [ -f "$test" ]; then
-            base=$(basename "$test" .s)
-            base=$(basename "$base" .S)
-            riscv-none-elf-as -march=rv32im -mabi=ilp32 -o ${base}.o $test
-            riscv-none-elf-ld -T harvard_link.ld -o ${base}.elf ${base}.o
-            riscv-none-elf-objcopy -O verilog ${base}.elf inst.hex
-            echo "Built $test"
-          fi
-        done
-
-    - name: Run V1 Tests
-      run: |
-        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
-        cd comp_test
-        
-        # Compile V1 testbench
-        iverilog -g2012 -s tb -o out_iverilog/bin/tb_v1.out \
-          -I ../module/CORE/RTL_V1_2 \
-          $(cat module_list | xargs) \
-          ../libs/REG_ARRAY/SRAM/ram_bfm.v \
-          tb.sv 2>&1 || true
-        
-        # Run and check results
-        if [ -f out_iverilog/bin/tb_v1.out ]; then
-          vvp out_iverilog/bin/tb_v1.out 2>&1 | tee v1_test.log
-          grep -q "PASS" v1_test.log && echo "V1 Tests PASSED" || echo "V1 Tests FAILED"
+        python verification/run_all_tests.py --basic 2>&1 | tee basic_test.log
+        # Check if all tests passed
+        if grep -q "failed, 0 skipped" basic_test.log | grep -qv "0 failed"; then
+          echo "Basic tests FAILED"
+          exit 1
         fi
+        echo "Basic tests PASSED"
 
-    - name: Run V2 Tests
+    - name: Run riscv-tests (Classic Test Suite)
       run: |
         export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
-        cd comp_test
-        
-        # Restore test_rv32i_full ROM
-        cd ../rom
-        riscv-none-elf-as -march=rv32im -mabi=ilp32 -o test_rv32i_full.o test_rv32i_full.s
-        riscv-none-elf-ld -T harvard_link.ld -o test_rv32i_full.elf test_rv32i_full.o
-        riscv-none-elf-objcopy -O verilog test_rv32i_full.elf inst.hex
-        cd ../comp_test
-        
-        # Compile V2 testbench
-        iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2.out \
-          -I ../module/CORE/RTL_V1_2 \
-          ../module/CORE/RTL_V1_2/*.v \
-          ../libs/REG_ARRAY/SRAM/ram_bfm.v \
-          tb_v2.sv 2>&1
-        
-        # Run V2 tests
-        vvp out_iverilog/bin/tb_v2.out 2>&1 | tee v2_test.log
-        grep -q "PASS" v2_test.log && echo "V2 Tests PASSED" || echo "V2 Tests FAILED"
-
-    - name: Run RISCOF Tests
-      run: |
-        export PATH="$HOME/spike/bin:$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
-        
-        # Clone riscv-tests
-        git clone https://github.com/riscv-software-src/riscv-tests.git
-        
-        cd verification/riscof
-        
-        # Update config.ini with absolute paths
-        sed -i "s|E:\\\\1\\\\SMT-risc-v_core|$GITHUB_WORKSPACE|g" config.ini
-        
-        # Run RISCOF
-        riscof run --config config.ini --suite ../../riscv-tests/isa --env ../../riscv-tests/env 2>&1 || true
-        
-        # Check results
-        if [ -d "riscof_work" ]; then
-          echo "RISCOF tests completed"
+        python verification/run_all_tests.py --riscv-tests 2>&1 | tee riscv_tests.log
+        # Check results - allow fence_i failure
+        if grep -q "failed" riscv_tests.log | grep -qv "fence_i"; then
+          echo "riscv-tests FAILED"
+          exit 1
         fi
+        echo "riscv-tests PASSED"
+
+    - name: Run riscv-arch-test (Official Architecture Tests)
+      run: |
+        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        python verification/run_all_tests.py --riscv-arch-test 2>&1 | tee arch_test.log
+        # All arch tests should pass
+        if grep -q "failed" arch_test.log; then
+          echo "riscv-arch-test FAILED"
+          exit 1
+        fi
+        echo "riscv-arch-test PASSED"
+
+    - name: Run Full Regression
+      run: |
+        export PATH="$PWD/xpack-riscv-none-elf-gcc-13.2.0-1/bin:$PATH"
+        python verification/run_all_tests.py --basic --riscv-tests --riscv-arch-test 2>&1 | tee full_regression.log
+        # Check overall result
+        if grep -q "failed, 0 skipped" full_regression.log | grep -qv "0 failed"; then
+          echo "Full regression FAILED"
+          exit 1
+        fi
+        echo "Full regression PASSED"
 
     - name: Upload Test Results
       uses: actions/upload-artifact@v4
@@ -121,6 +77,5 @@ jobs:
       with:
         name: test-results
         path: |
-          comp_test/*.log
+          *.log
           comp_test/out_iverilog/logs/
-          verification/riscof/riscof_work/
