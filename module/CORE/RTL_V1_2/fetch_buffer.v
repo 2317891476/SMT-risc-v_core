@@ -106,25 +106,27 @@ always @(posedge clk or negedge rstn) begin
     end
     else begin
         // ── Flush: invalidate entries of flushed thread(s) ──────
-        // After flush, reset pointers (simplified: full reset on any flush)
+        // Per-thread flush: only invalidate entries belonging to flushed thread(s)
+        // Do NOT reset head/tail - other thread's work must be preserved
         if (|flush) begin
-            // Selective invalidation
+            // Selective invalidation: only mark flushed thread's entries as invalid
             for (i = 0; i < DEPTH; i = i + 1) begin
                 if (buf_valid[i] && flush[buf_tid[i]]) begin
                     buf_valid[i] <= 1'b0;
                 end
             end
-            // On flush we compact by resetting pointers
-            // This is a simplification; a more complex design could compact in-place
-            head <= 0;
-            tail <= 0;
-            for (i = 0; i < DEPTH; i = i + 1) begin
-                buf_valid[i] <= 1'b0;
-            end
+            // Note: head/tail are NOT reset - other thread's buffered work is preserved
+            // The consume logic will naturally skip invalid entries
         end
         else begin
+            // ── Auto-skip invalid entries at tail (post-flush cleanup) ──
+            // After flush, tail may point to an invalid entry - skip it to prevent deadlock
+            if (!fifo_empty && !buf_valid[tail_idx]) begin
+                // Advance tail past invalid (flushed) entries
+                tail <= tail + 1;
+            end
             // ── Consume (pop) ───────────────────────────────────
-            if (consume_0 && pop0_valid) begin
+            else if (consume_0 && pop0_valid) begin
                 buf_valid[tail_idx] <= 1'b0;
                 if (consume_1 && pop1_valid) begin
                     // Both consumed
