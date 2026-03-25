@@ -140,6 +140,26 @@ reg [31:0] result_reg;
 reg status_done;
 reg status_error;
 
+// ─── GEMM Byte Extraction ──────────────────────────────────────────────────
+// Extract INT8 bytes from packed scratchpad words
+wire [7:0] scratchpad_a_byte;
+wire [7:0] scratchpad_b_byte;
+wire [9:0] word_idx_a = (gemm_row << 1) + (gemm_k >> 2);
+wire [9:0] word_idx_b = 16 + (gemm_k << 1) + (gemm_col >> 2);
+wire [1:0] byte_sel_a = gemm_k[1:0];
+wire [1:0] byte_sel_b = gemm_col[1:0];
+
+// Byte extraction using case statements
+assign scratchpad_a_byte = (byte_sel_a == 2'b00) ? scratchpad[word_idx_a][7:0] :
+                           (byte_sel_a == 2'b01) ? scratchpad[word_idx_a][15:8] :
+                           (byte_sel_a == 2'b10) ? scratchpad[word_idx_a][23:16] :
+                                                   scratchpad[word_idx_a][31:24];
+
+assign scratchpad_b_byte = (byte_sel_b == 2'b00) ? scratchpad[word_idx_b][7:0] :
+                           (byte_sel_b == 2'b01) ? scratchpad[word_idx_b][15:8] :
+                           (byte_sel_b == 2'b10) ? scratchpad[word_idx_b][23:16] :
+                                                   scratchpad[word_idx_b][31:24];
+
 integer gi, gj, gk;
 
 // ─── Main FSM ───────────────────────────────────────────────────────────────
@@ -216,6 +236,8 @@ always @(posedge clk or negedge rstn) begin
                             gemm_row    <= 4'd0;
                             gemm_col    <= 4'd0;
                             gemm_k      <= 4'd0;
+                            status_done <= 1'b0;  // Clear status for new operation
+                            status_error<= 1'b0;
                             state       <= ST_GEMM_LOAD_A;
                         end
 
@@ -303,25 +325,24 @@ always @(posedge clk or negedge rstn) begin
                 end
             end
 
-            // Phase 3: Compute 8x8 matrix multiply (systolic-style)
+            // Phase 3: Compute 8x8 matrix multiply (byte-by-byte)
             ST_GEMM_COMP: begin
-                // Compute one MAC operation per cycle for simplicity
+                // Compute one MAC operation per cycle
                 // gemm_acc[row][col] += A[row][k] * B[k][col]
                 
                 // Extract INT8 values from packed scratchpad words
                 // A is in scratchpad[0:15], B is in scratchpad[16:31]
-                // Each word contains 4 INT8 values
+                // Layout: word[row*2 + k/4] contains A[row][k*4+3:k*4]
+                //         word[16 + k*2 + col/4] contains B[k][col*4+3:col*4]
                 
-                // Get A[row][k]: word = row*2 + k/4, byte = k%4
-                // Using bit selects directly in the accumulation
-                // a_val = scratchpad[(gemm_row << 1) + (gemm_k >> 2)][(gemm_k & 3'd3) << 3 +: 8];
-                // b_val = scratchpad[16 + (gemm_k << 1) + (gemm_col >> 2)][(gemm_col & 3'd3) << 3 +: 8];
+                // Calculate word and byte offsets
+                // A: word_idx_a = gemm_row*2 + gemm_k/4, byte_offset_a = (gemm_k % 4) * 8
+                // B: word_idx_b = 16 + gemm_k*2 + gemm_col/4, byte_offset_b = (gemm_col % 4) * 8
                 
-                // Simplified: just accumulate scratchpad values for now
-                // Full INT8 extract would need more complex bit manipulation
-                gemm_acc[gemm_row][gemm_col] <= gemm_acc[gemm_row][gemm_col] + 
-                    {{24{scratchpad[(gemm_row << 1) + (gemm_k >> 2)][7]}}, scratchpad[(gemm_row << 1) + (gemm_k >> 2)][7:0]} * 
-                    {{24{scratchpad[16 + (gemm_k << 1) + (gemm_col >> 2)][7]}}, scratchpad[16 + (gemm_k << 1) + (gemm_col >> 2)][7:0]};
+                // Extract bytes using case statements (Verilog-compatible)
+                gemm_acc[gemm_row][gemm_col] <= gemm_acc[gemm_row][gemm_col] +
+                    ({{24{scratchpad_a_byte[7]}}, scratchpad_a_byte} *
+                     {{24{scratchpad_b_byte[7]}}, scratchpad_b_byte});
                 
                 // Advance indices
                 if (gemm_k < (SA_SIZE-1)) begin

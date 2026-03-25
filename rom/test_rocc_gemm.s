@@ -75,16 +75,16 @@ clear_b:
     addi x13, x13, 1
     blt x13, x12, clear_b
     
-    # Set diagonal elements to 1 (simplified - just set first few)
+    # Set diagonal elements to 1 (word-aligned addresses)
     li x10, 0x00000140
     li x11, 0x01000000      # Element [0][0] = 1
-    sw x11, 0(x10)
-    li x11, 0x00010000      # Element [1][1] = 1
-    sw x11, 10(x10)
-    li x11, 0x00000100      # Element [2][2] = 1  
-    sw x11, 20(x10)
+    sw x11, 0(x10)          # Word 0 at offset 0
+    li x11, 0x00010000      # Element [1][1] = 1  
+    sw x11, 4(x10)          # Word 1 at offset 4
+    li x11, 0x00000100      # Element [2][2] = 1
+    sw x11, 8(x10)          # Word 2 at offset 8
     li x11, 0x00000001      # Element [3][3] = 1
-    sw x11, 24(x10)
+    sw x11, 12(x10)         # Word 3 at offset 12
     
     # Test 1: Call GEMM.START (funct7=0)
     # Address encoding:
