@@ -271,7 +271,7 @@ def run_simulation():
     """Run the V2 simulation"""
     compile_cmd = (
         "iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2_riscv_test.out "
-        "-I ../module/CORE/RTL_V1_2 ../module/CORE/RTL_V1_2/*.v "
+        "-I ../rtl ../rtl/*.v "
         "../libs/REG_ARRAY/SRAM/ram_bfm.v tb_v2.sv"
     )
     
