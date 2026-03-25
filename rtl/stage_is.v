@@ -22,7 +22,12 @@ module stage_is(
     output reg          is_rs1_used,
     output reg          is_rs2_used,
     output reg[2:0]     is_fu,
-    output wire         is_valid
+    output wire         is_valid,
+    // CSR/SYSTEM extension outputs
+    output wire         is_system,       // SYSTEM opcode detected
+    output wire         is_csr,          // CSR instruction (CSRRW/S/C/WI/SI/CI)
+    output wire         is_mret,         // MRET instruction
+    output wire [11:0]  csr_addr         // CSR address from instruction
 );
 
 wire[6:0] opcode;
@@ -38,6 +43,13 @@ assign is_func7_code = func7_code;
 assign is_rd         = is_inst[11:7];
 assign is_rs1        = is_inst[19:15];
 assign is_rs2        = is_inst[24:20];
+
+// CSR/SYSTEM decode
+assign is_system = (opcode == `SYSTEM);
+// CSR instructions have funct3 != 0, MRET is funct3=0 and bits[31:20]=0x302
+assign is_csr    = is_system && (func3 != 3'b000);
+assign is_mret   = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h302);
+assign csr_addr  = is_inst[31:20];
 
 ctrl u_ctrl(
     .inst_op      (opcode         ),
@@ -82,6 +94,7 @@ always @(*) begin
         `Btype : is_fu = `FU_INT0;  // Branch -> Pipe 0 (has branch resolution)
         `ItypeJ: is_fu = `FU_INT0;  // JALR -> Pipe 0
         `Jtype : is_fu = `FU_INT0;  // JAL -> Pipe 0
+        `SYSTEM: is_fu = `FU_INT0;  // SYSTEM (CSR/MRET) -> Pipe 0 for serialization
         default: is_fu = `FU_NOP;
     endcase
 end
@@ -104,6 +117,12 @@ always @(*) begin
         `Btype: begin
             is_rs1_used = 1'b1;
             is_rs2_used = 1'b1;
+        end
+        `SYSTEM: begin
+            // CSR instructions: rs1 is used for non-immediate variants
+            // funct3[2] = 0 means CSR reg (uses rs1), funct3[2] = 1 means CSR imm
+            is_rs1_used = is_csr && !func3[2];  // CSRRW/S/C use rs1, CSRRWI/SI/CI don't
+            is_rs2_used = 1'b0;
         end
         default: begin
             is_rs1_used = 1'b0;

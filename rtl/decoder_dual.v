@@ -75,7 +75,15 @@ module decoder_dual (
 
     // ─── Backpressure: how many instructions consumed ───────────
     output wire        consume_0,      // decoder consumed inst0
-    output wire        consume_1       // decoder consumed inst1
+    output wire        consume_1,      // decoder consumed inst1
+
+    // ─── CSR/SYSTEM outputs ─────────────────────────────────────
+    output wire        dec0_is_csr,
+    output wire        dec0_is_mret,
+    output wire [11:0] dec0_csr_addr,
+    output wire        dec1_is_csr,
+    output wire        dec1_is_mret,
+    output wire [11:0] dec1_csr_addr
 );
 
 // ─── Internal decoded signals for instruction 0 ─────────────────────────────
@@ -122,6 +130,12 @@ wire        d1_rs2_used;
 wire [2:0]  d1_fu;
 wire [31:0] d1_pc_o;
 
+// ─── Internal SYSTEM signals ────────────────────────────────────────────────
+wire        d0_is_system, d1_is_system;
+wire        d0_is_csr, d1_is_csr;
+wire        d0_is_mret, d1_is_mret;
+wire [11:0] d0_csr_addr, d1_csr_addr;
+
 // ─── Decoder 0 (reuses existing stage_is logic) ─────────────────────────────
 stage_is u_dec0 (
     .is_inst         (inst0_word      ),
@@ -145,7 +159,11 @@ stage_is u_dec0 (
     .is_rs1_used     (d0_rs1_used     ),
     .is_rs2_used     (d0_rs2_used     ),
     .is_fu           (d0_fu           ),
-    .is_valid        (d0_valid_raw    )
+    .is_valid        (d0_valid_raw    ),
+    .is_system       (d0_is_system    ),
+    .is_csr          (d0_is_csr       ),
+    .is_mret         (d0_is_mret      ),
+    .csr_addr        (d0_csr_addr     )
 );
 
 // ─── Decoder 1 (second copy) ────────────────────────────────────────────────
@@ -171,7 +189,11 @@ stage_is u_dec1 (
     .is_rs1_used     (d1_rs1_used     ),
     .is_rs2_used     (d1_rs2_used     ),
     .is_fu           (d1_fu           ),
-    .is_valid        (d1_valid_raw    )
+    .is_valid        (d1_valid_raw    ),
+    .is_system       (d1_is_system    ),
+    .is_csr          (d1_is_csr       ),
+    .is_mret         (d1_is_mret      ),
+    .csr_addr        (d1_csr_addr     )
 );
 
 // ─── Dual-issue structural hazard check ─────────────────────────────────────
@@ -182,18 +204,21 @@ stage_is u_dec1 (
 //   4) inst0 is invalid (must issue in program order)
 //   5) inst1 thread differs from inst0 (fetch_buffer already guarantees same-thread,
 //      but double-check for safety)
+//   6) Any SYSTEM instruction (CSR/MRET) - must serialize, no dual-issue
 
 wire structural_conflict;
 wire both_branch;
 wire both_mem;
 wire waw_conflict;
 wire thread_mismatch;
+wire any_system;        // NEW: any SYSTEM instruction blocks dual-issue
 
 assign both_branch     = d0_br && d1_br;
 assign both_mem        = (d0_mem_read || d0_mem_write) && (d1_mem_read || d1_mem_write);
 assign waw_conflict    = d0_regs_write && d1_regs_write && (d0_rd == d1_rd) && (d0_rd != 5'd0);
 assign thread_mismatch = (inst0_tid != inst1_tid);
-assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch;
+assign any_system      = d0_is_system || d1_is_system;  // Serialize SYSTEM ops
+assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch || any_system;
 
 // ─── Final valid signals ────────────────────────────────────────────────────
 // Important: We always consume from fetch_buffer (consume_0 always asserted if inst0_valid)
@@ -258,5 +283,13 @@ assign dec1_tid          = inst1_tid;
 // Note: inst0_valid is actually fb_pop0_valid from fetch_buffer (buffer has entry)
 assign consume_0 = inst0_valid;  // Always consume if buffer has entry for slot 0
 assign consume_1 = dec1_valid_int;  // Consume inst1 only if both valid and no conflict
+
+// ─── CSR/SYSTEM outputs ─────────────────────────────────────────────────────
+assign dec0_is_csr    = d0_is_csr;
+assign dec0_is_mret   = d0_is_mret;
+assign dec0_csr_addr  = d0_csr_addr;
+assign dec1_is_csr    = d1_is_csr;
+assign dec1_is_mret   = d1_is_mret;
+assign dec1_csr_addr  = d1_csr_addr;
 
 endmodule

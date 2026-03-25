@@ -67,6 +67,21 @@ wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
 
+// CSR from Pipe0
+wire       pipe0_csr_valid;
+wire [31:0] pipe0_csr_wdata;
+wire [2:0] pipe0_csr_op;
+
+// CSR read data from csr_unit
+wire [31:0] csr_rdata;
+
+// Trap signals
+wire        trap_enter;
+wire [31:0] trap_target;
+wire        trap_return;
+wire [31:0] mepc_out;
+wire        global_int_en;
+
 assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
 assign flush_any    = pipe0_br_ctrl;
@@ -131,15 +146,32 @@ wire        if_pred_taken;
 // Fetch buffer backpressure
 wire fb_push_ready;
 
+// ════════════════════════════════════════════════════════════════════════════
+// Trap Redirect Mux: Prioritize trap entry > MRET > Branch > Normal flow
+// ════════════════════════════════════════════════════════════════════════════
+wire        trap_redirect_valid = trap_enter || trap_return;
+wire [31:0] trap_redirect_pc    = trap_enter ? trap_target : 
+                                   trap_return ? mepc_out : 32'd0;
+wire [0:0]  trap_redirect_tid   = 1'b0;  // M-mode only, single context
+
+// Combine flush signals: trap_redirect overrides branch
+wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'b1, 
+                                                          trap_redirect_tid == 1'b0} :
+                                  smt_flush;
+wire        combined_flush_any  = trap_redirect_valid || flush_any;
+
 stage_if_v2 u_stage_if_v2(
     .clk              (clk              ),
     .rstn             (rstn             ),
     .pc_stall         (stall            ),
-    .if_flush         (smt_flush        ),
-    .br_addr_t0       (pipe0_br_ctrl && (pipe0_br_tid==1'b0) ? pipe0_br_addr : 32'd0),
-    .br_addr_t1       (pipe0_br_ctrl && (pipe0_br_tid==1'b1) ? pipe0_br_addr : 32'd0),
-    .br_ctrl          ({pipe0_br_ctrl && (pipe0_br_tid==1'b1),
-                        pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
+    .if_flush         (combined_flush   ),  // Use combined flush (trap > branch)
+    .br_addr_t0       (trap_redirect_valid ? trap_redirect_pc :
+                        (pipe0_br_ctrl && (pipe0_br_tid==1'b0) ? pipe0_br_addr : 32'd0)),
+    .br_addr_t1       (trap_redirect_valid ? trap_redirect_pc :
+                        (pipe0_br_ctrl && (pipe0_br_tid==1'b1) ? pipe0_br_addr : 32'd0)),
+    .br_ctrl          (trap_redirect_valid ? {trap_redirect_tid == 1'b1, trap_redirect_tid == 1'b0} :
+                        {pipe0_br_ctrl && (pipe0_br_tid==1'b1),
+                         pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
     .bpu_update_valid (pipe0_br_ctrl    ),
     .bpu_update_pc    (pipe0_br_addr    ),  // simplified
     .bpu_update_tid   (pipe0_br_tid     ),
@@ -176,7 +208,7 @@ wire        fb_consume_0,  fb_consume_1;
 fetch_buffer #(.DEPTH(4)) u_fetch_buffer(
     .clk        (clk            ),
     .rstn       (rstn           ),
-    .flush      (smt_flush      ),
+    .flush      (combined_flush ),
     .push_valid (if_valid       ),
     .push_inst  (if_inst        ),
     .push_pc    (if_pc          ),
@@ -342,8 +374,8 @@ scoreboard_v2 #(
 ) u_scoreboard_v2 (
     .clk         (clk              ),
     .rstn        (rstn             ),
-    .flush       (flush_any        ),
-    .flush_tid   (pipe0_br_tid     ),
+    .flush       (combined_flush_any ),
+    .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
 
     // Dispatch 0
     .disp0_valid       (disp0_valid_gated ),
@@ -503,9 +535,9 @@ rob_lite #(
     .rstn               (rstn),
 
     // Flush interface
-    .flush              (flush_any),
-    .flush_tid          (pipe0_br_tid),
-    .flush_new_epoch    (pipe0_br_tid ? flush_new_epoch_t1 : flush_new_epoch_t0),
+    .flush              (combined_flush_any),
+    .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
+    .flush_new_epoch    ((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
 
     // Dispatch Port 0
     .disp0_valid        (disp0_valid_gated),
@@ -885,8 +917,8 @@ lsu_shell #(
     .rstn               (rstn),
 
     // Flush interface
-    .flush              (pipe0_br_ctrl    ),
-    .flush_tid          (pipe0_br_tid     ),
+    .flush              (combined_flush_any ),
+    .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
 
@@ -1108,32 +1140,34 @@ assign w_regs_data_1 = result_buffer[rob_commit1_tag];
 assign w_regs_tid_1  = 1'b1;  // Thread 1
 
 // ════════════════════════════════════════════════════════════════════════════
-// CSR Unit (currently unused in basic RV32I tests, connected for future use)
+// CSR Unit (Live connection for CSR/MRET support)
 // ════════════════════════════════════════════════════════════════════════════
 csr_unit #(.HART_ID(0)) u_csr_unit(
     .clk             (clk           ),
     .rstn            (rstn          ),
-    .csr_valid       (1'b0          ),  // not driven in basic tests
-    .csr_addr        (12'd0         ),
-    .csr_op          (3'd0          ),
-    .csr_wdata       (32'd0         ),
-    .csr_rdata       (              ),
-    .exc_valid       (1'b0          ),
+    .csr_valid       (pipe0_csr_valid ),  // CSR instruction executed
+    .csr_addr        (iss0_csr_addr   ),  // CSR address from issue
+    .csr_op          (pipe0_csr_op    ),  // CSR operation
+    .csr_wdata       (pipe0_csr_wdata ),  // CSR write data
+    .csr_rdata       (csr_rdata       ),  // CSR read data
+    .exc_valid       (1'b0          ),  // TODO: Exception handling
     .exc_cause       (32'd0         ),
     .exc_pc          (32'd0         ),
     .exc_tval        (32'd0         ),
-    .mret_valid      (1'b0          ),
-    .trap_enter      (              ),
-    .trap_target     (              ),
-    .trap_return     (              ),
-    .mepc_out        (              ),
+    .mret_valid      (trap_return   ),  // MRET executed
+    .trap_enter      (trap_enter    ),
+    .trap_target     (trap_target   ),
+    .trap_return     (trap_return   ),
+    .mepc_out        (mepc_out      ),
     .satp_out        (              ),
     .priv_mode_out   (              ),
     .mstatus_mxr     (              ),
     .mstatus_sum     (              ),
-    .global_int_en   (              ),
+    .global_int_en   (global_int_en ),
     .instr_retired   (rob_instr_retired[0] ),
-    .instr_retired_1 (rob_instr_retired[1] )
+    .instr_retired_1 (rob_instr_retired[1] ),
+    .ext_timer_irq   (ext_timer_irq ),  // CLINT timer interrupt
+    .ext_external_irq(ext_external_irq)  // PLIC external interrupt
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1144,7 +1178,7 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
 // For now, enable by default for P2 integration testing
 // When 0: legacy direct connection mode (backward compatible)
 // When 1: use mem_subsys with variable-latency responses
-wire use_mem_subsys = 1'b0;  // Set to 1'b0 for now to maintain backward compatibility
+wire use_mem_subsys = 1'b1;  // Enable L2 cache and mem_subsys for P2 testing
 
 // M0 (I-side) interface signals
 wire        m0_req_valid;
@@ -1195,9 +1229,18 @@ mem_subsys u_mem_subsys (
     // Testbench observation
     .tube_status       (mem_subsys_tube_status),
 
-    // External interrupt (unused in basic tests)
-    .ext_irq_pending   ( )
+    // External interrupt outputs to csr_unit
+    .ext_irq_pending   (ext_irq_pending)
 );
+
+// External interrupt signals from mem_subsys (CLINT/PLIC)
+wire ext_irq_pending;
+wire ext_timer_irq;     // CLINT timer interrupt (MTIP)
+wire ext_external_irq;  // PLIC external interrupt (MEIP)
+
+// Assign interrupt signals from mem_subsys output
+assign ext_timer_irq    = ext_irq_pending;  // Combined for now
+assign ext_external_irq = 1'b0;  // TODO: Separate PLIC interrupt
 
 // Export tube_status (from mem_subsys when enabled, otherwise 0)
 assign tube_status = use_mem_subsys ? mem_subsys_tube_status : 8'd0;

@@ -70,7 +70,11 @@ module csr_unit #(
 
     // ─── Performance Counters ───────────────────────────────────
     input  wire               instr_retired,   // pulse: 1 instruction retired this cycle
-    input  wire               instr_retired_1  // pulse: second instruction retired (dual-issue)
+    input  wire               instr_retired_1, // pulse: second instruction retired (dual-issue)
+
+    // ─── External Interrupt Inputs ──────────────────────────────
+    input  wire               ext_timer_irq,   // CLINT timer interrupt (MTIP)
+    input  wire               ext_external_irq // PLIC external interrupt (MEIP)
 );
 
 // ─── CSR Storage ────────────────────────────────────────────────────────────
@@ -175,6 +179,12 @@ always @(posedge clk or negedge rstn) begin
 
         // ── Instruction retired counter ─────────────────────────
         minstret <= minstret + {63'd0, instr_retired} + {63'd0, instr_retired_1};
+
+        // ── Update mip from external interrupt sources ──────────
+        // mip[7] = MTIP (timer interrupt pending)
+        // mip[11] = MEIP (external interrupt pending)
+        mip[7]  <= ext_timer_irq;
+        mip[11] <= ext_external_irq;
 
         // ── Exception entry ─────────────────────────────────────
         if (exc_valid) begin

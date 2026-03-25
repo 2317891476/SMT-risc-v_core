@@ -34,6 +34,12 @@ module exec_pipe0 #(
     input  wire [2:0]         in_fu,
     input  wire [0:0]         in_tid,
 
+    // ─── CSR/MRET inputs ────────────────────────────────────────
+    input  wire               in_is_csr,     // CSR instruction
+    input  wire               in_is_mret,    // MRET instruction
+    input  wire [11:0]        in_csr_addr,   // CSR address
+    input  wire [31:0]        csr_rdata,     // CSR read data from csr_unit
+
     // ─── ALU result output (to WB and bypass network) ───────────
     output wire               out_valid,
     output wire [TAG_W-1:0]   out_tag,
@@ -42,6 +48,11 @@ module exec_pipe0 #(
     output wire               out_regs_write,
     output wire [2:0]         out_fu,
     output wire [0:0]         out_tid,
+
+    // ─── CSR outputs ────────────────────────────────────────────
+    output wire               csr_valid,     // CSR instruction executed
+    output wire [31:0]        csr_wdata,     // CSR write data
+    output wire [2:0]        csr_op,        // CSR operation
 
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
@@ -98,6 +109,9 @@ reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
 reg               br_complete_r;   // branch execution complete
+reg               csr_valid_r;     // CSR instruction executed
+reg [31:0]        csr_wdata_r;     // CSR write data
+reg [2:0]         csr_op_r;        // CSR operation
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
@@ -121,6 +135,9 @@ always @(posedge clk or negedge rstn) begin
         br_addr_r        <= 32'd0;
         br_tid_r         <= 1'b0;
         br_complete_r    <= 1'b0;
+        csr_valid_r      <= 1'b0;
+        csr_wdata_r      <= 32'd0;
+        csr_op_r         <= 3'd0;
         stored_pc        <= 32'd0;
         stored_imm       <= 32'd0;
         stored_op_a      <= 32'd0;
@@ -147,11 +164,18 @@ always @(posedge clk or negedge rstn) begin
         // Output registers (1 cycle delay)
         out_valid_r      <= in_valid;
         out_tag_r        <= in_tag;
-        out_result_r     <= alu_out;
+        // For CSR instructions, result comes from csr_unit (available 1 cycle later)
+        // For other instructions, use ALU result
+        out_result_r     <= in_is_csr ? csr_rdata : alu_out;
         out_rd_r         <= in_rd;
         out_regs_write_r <= in_regs_write;
         out_fu_r         <= in_fu;
         out_tid_r        <= in_tid;
+        
+        // CSR execution signals
+        csr_valid_r      <= in_valid && in_is_csr;
+        csr_wdata_r      <= in_op_a;  // rs1 value for CSR ops
+        csr_op_r         <= in_func3; // funct3 encodes CSR operation
         
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r        <= stored_valid && stored_br && stored_br_mark;
@@ -168,6 +192,10 @@ assign out_rd         = out_rd_r;
 assign out_regs_write = out_regs_write_r;
 assign out_fu         = out_fu_r;
 assign out_tid        = out_tid_r;
+
+assign csr_valid      = csr_valid_r;
+assign csr_wdata      = csr_wdata_r;
+assign csr_op         = csr_op_r;
 
 assign br_ctrl = br_ctrl_r;
 assign br_addr = br_addr_r;

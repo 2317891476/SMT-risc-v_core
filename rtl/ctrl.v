@@ -16,7 +16,8 @@ assign alu_op = (inst_op == `ItypeL || inst_op == `Stype || inst_op == `UtypeL |
                 (inst_op == `Btype)? 3'b001:
                 (inst_op == `Rtype)? 3'b010:
                 (inst_op == `ItypeA) ? 3'b011:
-                (inst_op == `ItypeJ || inst_op == `Jtype)? 3'b100 : 3'b111;
+                (inst_op == `ItypeJ || inst_op == `Jtype)? 3'b100 :
+                (inst_op == `SYSTEM)? 3'b101 : 3'b111;
 
 assign alu_src1 = (inst_op == `ItypeJ || inst_op == `Jtype || inst_op == `UtypeU) ? `PC : 
                   (inst_op == `UtypeL) ? `NULL : `REG;

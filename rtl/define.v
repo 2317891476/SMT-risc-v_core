@@ -8,8 +8,9 @@
 `define UtypeL 7'b0110111 //Utype for lui
 `define UtypeU 7'b0010111 //Utype for auipc
 `define Jtype  7'b1101111 //Utype for jal
+`define SYSTEM 7'b1110011 // SYSTEM opcode for CSR/MRET
  
-
+ 
 //-------------------ALU_MODE------------------
 `define ADD    4'd0 
 `define SUB    4'd1 
