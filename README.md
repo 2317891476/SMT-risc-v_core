@@ -153,6 +153,9 @@ AdamRiscv/
 │  ├─ test_clint_timer_interrupt.s  # ★ CLINT 定时器中断测试
 │  ├─ test_plic_external_interrupt.s # ★ PLIC 外部中断测试
 │  ├─ test_interrupt_mask_mret.s    # ★ 中断掩码/MRET 测试
+│  ├─ test_rocc_dma.s               # ★ RoCC DMA 测试
+│  ├─ test_rocc_gemm.s              # ★ RoCC GEMM 测试
+│  ├─ test_rocc_status.s            # ★ RoCC STATUS 测试
 │  ├─ p2_mmio.inc                   # ★ P2 MMIO 地址定义头文件
 │  ├─ harvard_link.ld               # 链接脚本 (.text=0x0, .data=0x1000)
 │  └─ inst.hex / data.hex           # 仿真加载镜像
@@ -199,7 +202,7 @@ AdamRiscv/
 |------|------|---------|
 | `mem_subsys` | 统一内存子系统 | 集成 L2 缓存、仲裁器、MMIO |
 | `l2_cache` | 统一二级缓存 | 8KB, 4-way, 32B 行, PLRU 替换, 阻塞设计 |
-| `l2_arbiter` | 2主设备轮询仲裁器 | I-side (M0) + D-side (M1), 轮询调度 |
+| `l2_arbiter` | 3主设备优先级仲裁器 | I-side (M0) + D-side (M1) + RoCC DMA (M2), M2优先级最高 |
 | `clint` | 内核本地中断器 (CLINT) | 64位 mtime/mtimecmp, 定时器中断 |
 | `plic` | 平台级中断控制器 (PLIC) | 优先级/使能/阈值寄存器, Claim/Complete |
 
@@ -215,11 +218,39 @@ AdamRiscv/
 - PLIC：RISC-V 标准外部中断控制器 (mcause=0x8000000B)
 - 支持中断屏蔽 (mie 寄存器) 和 MRET 返回
 
-### 4.5 扩展 (Extensions)
+### 4.5 RoCC AI 加速器 (P3 Implementation)
 
 | 模块 | 功能 | 关键参数 |
 |------|------|---------|
-| `rocc_ai_accelerator` | RoCC AI 协处理器 | GEMM 8×8, SIMD 128-bit, 4KB scratchpad |
+| `rocc_ai_accelerator` | RoCC AI 协处理器 | GEMM 8×8 INT8/INT32, SIMD 128-bit, 4KB scratchpad, DMA (M2) |
+
+**RoCC 指令编码 (custom-0 opcode 0x0B):**
+
+| funct7 | 指令 | 描述 |
+|--------|------|------|
+| 0 | GEMM.START | 启动 8×8 矩阵乘法 (rs1=A, rs2=B, rd=C) |
+| 1 | VEC.OP | 向量操作 (VADD/VMUL/VRELU/VREDUCE) |
+| 3 | SCRATCH.LOAD | DMA 从 RAM 加载到 scratchpad |
+| 4 | SCRATCH.STORE | DMA 从 scratchpad 存储到 RAM |
+| 5 | STATUS.READ | 读取加速器状态到 rd |
+
+**RoCC DMA 特性：**
+- 专用 M2 主设备，优先级高于 M0/M1
+- RAM-only 访问 (0x0000_0000 - 0x0000_3FFF)
+- 单拍确定性传输，支持地址错误检测
+- DMA 完成通过现有 WB/ROB 机制退休
+
+**RoCC 测试集：**
+| 测试文件 | 覆盖内容 |
+|---------|---------|
+| `test_rocc_dma.s` | SCRATCH.LOAD/STORE, 错误地址检测 |
+| `test_rocc_gemm.s` | GEMM.START 8×8 矩阵乘法 |
+| `test_rocc_status.s` | STATUS.READ 格式验证 |
+
+### 4.6 其他扩展 (Other Extensions)
+
+| 模块 | 功能 | 关键参数 |
+|------|------|---------|
 | `csr_unit` | Machine-mode CSR 单元 | mstatus/mepc/mcause/mtvec/satp, cycle/instret |
 
 ---
