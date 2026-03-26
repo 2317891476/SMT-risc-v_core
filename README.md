@@ -605,10 +605,10 @@ w_regs_en, w_regs_addr, w_regs_data
 | ~~P1~~ | ~~L1 ICache~~ | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory) |
 | ~~P2~~ | ~~L2 Cache~~ | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器) |
 | ~~P2~~ | ~~中断控制器~~ | ✅ 已完成 (CLINT + PLIC，7个中断测试通过) |
-| P3 | RoCC DMA 完善 | 完整 GEMM 数据搬运流水 |
-| P3 | FPGA 综合 | 目标板适配 + 时序收敛 |
-| P3 | RoCC DMA 完善 | 完整 GEMM 数据搬运流水 |
-| P3 | FPGA 综合 | 目标板适配 + 时序收敛 |
+| ~~P3~~ | ~~FPGA 综合~~ | ✅ 已完成 (AX7203 板级适配 + 时序收敛) |
+| P3 | CoreMark 上板测试 | 待硬件就绪 |
+| P4 | RoCC DMA 完善 | 完整 GEMM 数据搬运流水 |
+| P4 | DDR3 支持 | 外部存储器接口 |
 
 ---
 
@@ -628,7 +628,68 @@ w_regs_en, w_regs_addr, w_regs_data
 
 ---
 
-## 13. 验证状态
+## 13. FPGA 支持 (AX7203)
+
+### 13.1 硬件支持
+
+| 特性 | 状态 | 说明 |
+|------|------|------|
+| **目标板** | ✅ | ALINX AX7203 (XC7A200T-2FBG484I) |
+| **时钟** | ✅ | 200MHz 差分时钟输入 |
+| **BRAM 启动** | ✅ | 32KB/64KB BRAM 初始化 (COE) |
+| **UART 调试** | ✅ | 115200 baud 串口输出 |
+| **JTAG 编程** | ✅ | Vivado Tcl 脚本 |
+| **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
+| **DDR3** | ⏳ | 后续支持 (当前 BRAM-first) |
+
+### 13.2 FPGA 目录结构
+
+```
+fpga/
+├─ board_manifest_ax7203.md      # AX7203 板级规格
+├─ observability_contract_ax7203.md  # UART/LED 输出规范
+├─ rtl/
+│  └─ adam_riscv_v2_ax7203_top.v # FPGA 顶层封装
+├─ constraints/
+│  ├─ ax7203_base.xdc            # 时钟/复位约束
+│  └─ ax7203_uart_led.xdc        # UART/LED 约束
+├─ ip/
+│  └─ create_clk_wiz_ax7203.tcl  # 时钟向导 IP
+├─ bram_init/
+│  ├─ README.md
+│  ├─ create_bram_ip.tcl         # BRAM IP 生成
+│  ├─ inst_mem.coe               # 指令存储器初始化
+│  └─ data_mem.coe               # 数据存储器初始化
+├─ scripts/
+│  └─ generate_coe.py            # COE 文件生成脚本
+└─ *.tcl                         # Vivado 流程脚本
+```
+
+### 13.3 快速开始 (FPGA)
+
+```powershell
+# 1. 生成 BRAM 初始化文件
+python fpga/scripts/generate_coe.py
+
+# 2. 创建 Vivado 项目
+vivado -mode batch -source fpga/create_project_ax7203.tcl
+
+# 3. 综合实现
+vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
+
+# 4. JTAG 下载
+vivado -mode batch -source fpga/program_ax7203_jtag.tcl
+```
+
+### 13.4 CoreMark 性能测试
+
+```powershell
+cd benchmarks/coremark
+make -f Makefile.ax7203
+cp build_ax7203/coremark_ax7203.elf ../../rom/
+```
+
+## 14. 验证状态
 
 ### 基础测试
 

@@ -1,0 +1,126 @@
+# Makefile.ax7203 - CoreMark build for AdamRiscv AX7203
+# Usage: make -f Makefile.ax7203
+
+# Toolchain
+CROSS_PREFIX ?= riscv-none-elf-
+CC = $(CROSS_PREFIX)gcc
+OBJCOPY = $(CROSS_PREFIX)objcopy
+OBJDUMP = $(CROSS_PREFIX)objdump
+SIZE = $(CROSS_PREFIX)size
+
+# CoreMark sources (upstream files to be copied here)
+COREMARK_SRCS := \
+    core_main.c \
+    core_list_join.c \
+    core_matrix.c \
+    core_state.c \
+    core_util.c
+
+# Platform sources
+PORT_SRCS := core_portme.c
+
+ALL_SRCS := $(COREMARK_SRCS) $(PORT_SRCS)
+
+# Build directory
+BUILD_DIR := build_ax7203
+
+# Output name
+OUTPUT := coremark_ax7203
+
+# Architecture flags
+ARCH_FLAGS := -march=rv32im -mabi=ilp32
+
+# Optimization
+OPT_FLAGS := -O2 -fdata-sections -ffunction-sections
+
+# Warnings
+WARN_FLAGS := -Wall -Wextra -Wpedantic
+
+# Defines
+DEFINES := \
+    -DAX7203_CPU_HZ=50000000 \
+    -DITERATIONS=2000 \
+    -DTOTAL_DATA_SIZE=2000 \
+    -DMEM_METHOD=MEM_STATIC \
+    -DMULTITHREAD=1 \
+    -DMAIN_HAS_NOARGC=1 \
+    -DHAS_FLOAT=0 \
+    -DHAS_TIME_H=0
+
+# Include paths
+INCLUDES := -I. -I$(BUILD_DIR)
+
+# Linker script (BRAM-based Harvard-style)
+LDSCRIPT := ../../rom/harvard_link.ld
+
+# Compiler flags
+CFLAGS := $(ARCH_FLAGS) $(OPT_FLAGS) $(WARN_FLAGS) $(DEFINES) $(INCLUDES)
+LDFLAGS := -T$(LDSCRIPT) -nostartfiles -nostdlib -Wl,--gc-sections
+LDFLAGS += -lgcc -lc
+
+# Object files
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(ALL_SRCS))
+
+# Default target
+.PHONY: all clean directories
+
+all: directories $(BUILD_DIR)/$(OUTPUT).hex $(BUILD_DIR)/$(OUTPUT).dis
+
+directories:
+	@mkdir -p $(BUILD_DIR)
+
+# Compile CoreMark sources
+$(BUILD_DIR)/%.o: %.c | directories
+	$(CC) $(CFLAGS) -c $< -o $@
+
+# Link
+$(BUILD_DIR)/$(OUTPUT).elf: $(OBJS)
+	$(CC) $(ARCH_FLAGS) $(OBJS) $(LDFLAGS) -o $@
+	@echo "=== Size report ==="
+	$(SIZE) $@
+
+# Generate binary
+$(BUILD_DIR)/$(OUTPUT).bin: $(BUILD_DIR)/$(OUTPUT).elf
+	$(OBJCOPY) -O binary $< $@
+
+# Generate hex (Verilog format)
+$(BUILD_DIR)/$(OUTPUT).hex: $(BUILD_DIR)/$(OUTPUT).bin
+	$(OBJCOPY) -I binary -O verilog --verilog-data-width=4 $< $@
+
+# Disassembly
+$(BUILD_DIR)/$(OUTPUT).dis: $(BUILD_DIR)/$(OUTPUT).elf
+	$(OBJDUMP) -d -S $< > $@
+
+# Map file
+$(BUILD_DIR)/$(OUTPUT).map: $(BUILD_DIR)/$(OUTPUT).elf
+	$(OBJDUMP) -t $< > $@
+
+# Copy to rom directory for FPGA build
+copy-to-rom: $(BUILD_DIR)/$(OUTPUT).hex
+	cp $(BUILD_DIR)/$(OUTPUT).hex ../../rom/inst.hex
+	@echo "Copied to ../../rom/inst.hex"
+
+clean:
+	rm -rf $(BUILD_DIR)
+
+# Check for upstream CoreMark sources
+check-sources:
+	@echo "Checking for CoreMark sources..."
+	@for f in $(COREMARK_SRCS); do \
+		if [ ! -f $$f ]; then \
+			echo "MISSING: $$f (copy from EEMBC CoreMark)"; \
+		fi; \
+	done
+
+help:
+	@echo "CoreMark Makefile for AX7203"
+	@echo ""
+	@echo "Targets:"
+	@echo "  all          - Build CoreMark (default)"
+	@echo "  copy-to-rom  - Copy hex to rom/ directory"
+	@echo "  clean        - Remove build directory"
+	@echo "  check-sources - Verify CoreMark sources present"
+	@echo ""
+	@echo "Variables:"
+	@echo "  ITERATIONS=2000       - Number of iterations"
+	@echo "  TOTAL_DATA_SIZE=2000  - Data set size"
