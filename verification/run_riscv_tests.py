@@ -219,8 +219,9 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
     if suite_name == "riscv-tests":
         suite_dir = RISCV_TESTS_DIR
         # Include original riscv-tests headers
+        # Use rv32im_zifencei to support fence.i instruction
         cmd = [
-            GCC, "-march=rv32im", "-mabi=ilp32", "-static",
+            GCC, "-march=rv32im_zifencei", "-mabi=ilp32", "-static",
             "-mcmodel=medany", "-fvisibility=hidden",
             "-nostdlib", "-nostartfiles", "-g",
             f"-I{adapter_dir}",
