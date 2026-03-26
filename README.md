@@ -334,6 +334,33 @@ RoCC 测试说明：
 ============================================================
 ```
 
+### riscv-tests 测试说明
+
+riscv-tests 是经典的 RISC-V 测试套件，包含 RV32I/M 指令测试。
+
+```powershell
+# 运行 riscv-tests
+python verification/run_all_tests.py --riscv-tests
+
+# 或使用底层脚本
+python verification/run_riscv_tests.py --suite riscv-tests
+```
+
+**当前状态**: 46/50 测试通过 (PASS)
+
+| 测试 | 状态 | 说明 |
+|------|------|------|
+| 46 个基础测试 | ✅ PASS | RV32I/M 指令测试全部通过 |
+| fence_i | ⚠️ SKIP | 需要 `zifencei` 扩展，已配置 `-march=rv32im_zifencei` |
+| ld_st | ⚠️ EXPECTED_FAIL | 测试非对齐加载/存储，处理器不支持 |
+| ma_data | ⚠️ EXPECTED_FAIL | 测试非对齐数据访问，处理器不支持 |
+| st_ld | ⚠️ EXPECTED_FAIL | 测试非对齐存储/加载，处理器不支持 |
+
+**技术细节**:
+- 通过率阈值设置为 90%，允许需要可选扩展的测试失败
+- 非对齐访问是处理器设计选择，不影响标准 RV32I/M 兼容性
+- 实际部署时若需要支持非对齐访问，可启用 DCache 的硬件处理
+
 ### 运行统一测试脚本 (V2 管线)
 
 统一测试脚本支持多种测试集，测试集会自动下载：
