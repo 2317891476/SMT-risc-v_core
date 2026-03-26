@@ -295,6 +295,45 @@ test_rv32i_full.s PASS
 test_smt.s        PASS
 ```
 
+### 运行 RoCC 协处理器测试
+
+RoCC 测试已集成到基础测试套件中，包含 3 个专项测试：
+
+```powershell
+# 运行所有 RoCC 测试（包含在 --basic 中）
+python verification/run_all_tests.py --basic
+
+# 单独运行特定 RoCC 测试
+python verification/run_all_tests.py --basic --tests test_rocc_dma.s
+python verification/run_all_tests.py --basic --tests test_rocc_status.s
+python verification/run_all_tests.py --basic --tests test_rocc_gemm.s
+
+# 一次运行所有 RoCC 测试
+python verification/run_all_tests.py --basic --tests test_rocc_dma.s test_rocc_status.s test_rocc_gemm.s
+```
+
+RoCC 测试说明：
+
+| 测试文件 | 功能覆盖 | 测试内容 |
+|---------|---------|---------|
+| `test_rocc_dma.s` | SCRATCH.LOAD/STORE | DMA 数据搬运、地址边界检测、错误地址处理 |
+| `test_rocc_status.s` | STATUS.READ | 状态寄存器格式验证、忙/完成/错误位检测 |
+| `test_rocc_gemm.s` | GEMM.START | 8×8 INT8 矩阵乘法、三地址数据传输 |
+
+期望输出：
+
+```
+============================================================
+  Running basic tests...
+  Testing test_rocc_dma...
+  test_rocc_dma: PASS
+  Testing test_rocc_status...
+  test_rocc_status: PASS
+  Testing test_rocc_gemm...
+  test_rocc_gemm: PASS
+============================================================
+```
+
 ### 运行统一测试脚本 (V2 管线)
 
 统一测试脚本支持多种测试集，测试集会自动下载：
