@@ -68,14 +68,14 @@ if {$clk_cur_proj eq ""} {
 create_ip -name clk_wiz -vendor xilinx.com -library ip -module_name $clk_ip_name
 
 # MMCM configuration for AX7203 bring-up clocking:
-#   Fin  = 200.000 MHz (differential oscillator source)
+#   Fin  = 200.000 MHz (single-ended clock after top-level IBUFGDS)
 #   Fvco = Fin / DIVCLK * CLKFBOUT_MULT = 200 / 1 * 5 = 1000 MHz
 #   Fout = Fvco / CLKOUT0_DIVIDE = 1000 / 20 = 50 MHz
 #
 # Keep only one output clock for initial integration simplicity.
 set_property -dict [list \
   CONFIG.PRIMITIVE {MMCM} \
-  CONFIG.PRIM_SOURCE {Differential_clock_capable_pin} \
+  CONFIG.PRIM_SOURCE {Single_ended_clock_capable_pin} \
   CONFIG.PRIM_IN_FREQ {200.000} \
   CONFIG.CLKIN1_JITTER_PS {50.0} \
   CONFIG.NUM_OUT_CLKS {1} \

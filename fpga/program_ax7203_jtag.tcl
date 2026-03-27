@@ -12,7 +12,7 @@ if {[info exists ::env(TARGET_PART)]} {
     set target_part $::env(TARGET_PART)
 }
 
-set bitstream_file "$project_dir/${project_name}_${target_part}.bit"
+set bitstream_file "$project_dir/adam_riscv_ax7203.runs/impl_1/adam_riscv_v2_ax7203_top.bit"
 
 # Check if bitstream exists
 if {![file exists $bitstream_file]} {

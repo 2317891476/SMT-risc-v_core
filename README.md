@@ -598,17 +598,30 @@ w_regs_en, w_regs_addr, w_regs_data
 
 ## 11. 后续路线图
 
-| 优先级 | 任务 | 说明 |
+| **优先级** | **任务**                                                 | **说明**                                                     |
 |--------|------|------|
-| ~~P0~~ | ~~V2 管线仿真调试~~ | ✅ 已完成 (test1/test2/smt/rv32i_full 全部通过) |
-| ~~P1~~ | ~~Store Buffer~~ | ✅ 已完成 (5个专用测试通过) |
-| ~~P1~~ | ~~L1 ICache~~ | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory) |
-| ~~P2~~ | ~~L2 Cache~~ | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器) |
-| ~~P2~~ | ~~中断控制器~~ | ✅ 已完成 (CLINT + PLIC，7个中断测试通过) |
-| ~~P3~~ | ~~FPGA 综合~~ | ✅ 已完成 (AX7203 板级适配 + 时序收敛) |
-| P3 | CoreMark 上板测试 | 待硬件就绪 |
-| P4 | RoCC DMA 完善 | 完整 GEMM 数据搬运流水 |
-| P4 | DDR3 支持 | 外部存储器接口 |
+| ~~P0~~     | ~~V2 管线仿真调试~~                                      | ✅ 已完成 (test1/test2/smt/rv32i_full 全部通过)               |
+| ~~P1~~     | ~~Store Buffer~~                                         | ✅ 已完成 (5个专用测试通过)                                   |
+| ~~P1~~     | ~~L1 ICache~~                                            | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory)                  |
+| ~~P2~~     | ~~L2 Cache~~                                             | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器)                      |
+| ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
+| ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (AX7203 板级适配 + 时序收敛)                        |
+| ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud, 启动消息验证)                         |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 建立统一性能测试框架，形成 `仿真结果 + 上板结果 + 编译参数 + MHz 归一化成绩` 四联表。输出核心指标：CoreMark/MHz、DMIPS/MHz、Embench 几何平均分、平均 IPC。 |
+| **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
+| **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
+| **P3**     | **资源封顶版竞赛 Bitstream**                             | 冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
+| **P4**     | **轻量前端优化（只做资源友好升级）**                     | 在不明显增加 BRAM/LUT 的前提下，将现有 Bimodal 升级为轻量 Gshare / 小型 Tournament 版本；严禁引入 TAGE/Perceptron 这类高成本预测器。目标是用极小代价提升 CoreMark 与分支密集程序的实际 IPC。 |
+| **P4**     | **Load/Store 路径微优化**                                | 聚焦影响跑分最明显的路径：Store-Load 转发时序、Cache refill 停顿、提交边界气泡、MMIO 访问旁路。只做“小改动高收益”的微优化，不引入更大 ROB / 更深 LSQ。 |
+| **P4**     | **DDR3 支持（最小可用版本）**                            | 打通 AX7203 板载 DDR3 的最小稳定数据面：代码仍可驻留 BRAM，数据集/工作集放入 DDR3。优先服务 benchmark 扩展测试和 Demo 数据集加载，而不是一开始就追求完整外存操作系统。 |
+| **P4**     | **RoCC DMA 软件栈完善**                                  | 补齐 C 语言接口、内联汇编封装、scratchpad 分配器、blocking/non-blocking DMA API，形成可复用的软件层。让评委看到“不是单个硬件指令能跑，而是软件可调用、系统可集成”。 |
+| **P4**     | **应用 Demo A：端侧 AI / TinyML 加速**                   | 主打场景。使用现有 8×8 INT8 GEMM + SIMD，完成小型 MLP / 卷积核 / 关键词分类 / 矩阵推理 Demo。必须给出 `纯 CPU` vs `RoCC` 的延迟、吞吐和能效对比，是最容易形成“杀手锏”的展示方向。 |
+| **P5**     | **应用 Demo B：轻量数据流处理**                          | 结合 UART / DDR3 / PCIe / 千兆网口中的一种输入路径，完成 `数据搬运 + 规则计算 + 加速处理 + 输出` 的闭环。例如包头过滤、流式 checksum、工业传感器数据预处理等，强调处理器不仅能跑分，还能接近真实系统。 |
+| **P5**     | **应用 Demo C：轻量图像前处理（可选）**                  | 若时序与资源余量允许，再做 Sobel / 阈值化 / Resize / 卷积前处理等轻量图像任务。注意这是“可选加分项”，不应压过主线的 CoreMark + AI Demo。 |
+| **P5**     | **评测材料工程化**                                       | 输出统一展示材料：性能表、资源利用率表、时钟频率、测试脚本、上板录像、波形截图、RoCC 加速比图、架构亮点图。将“功能完成”升级为“证据完备”。 |
+| **P5**     | **资源/时序最终压榨**                                    | 定位关键长路径，优先对 Bypass、Scoreboard 仲裁、Cache tag compare、RoCC 接口做切分；乘法与 GEMM 尽量向 DSP48E1 收敛。目标不是极限堆频，而是在 AX7203 上保持稳定、可重复、可展示。 |
+| **P6**     | **RTOS / OpenSBI 适配（中期）**                          | 在 benchmark 与 Demo 已经稳定拿分后，再向 RT-Thread / OpenSBI 推进。重点展示“从裸机核到系统软件”的延展性，而非比赛前期就把大量时间压在复杂系统移植上。 |
+| **P6**     | **Linux / RV32A / 外设全面化（长期）**                   | 作为长期路线保留。Linux 启动、RV32A、完整 DDR3 外存体系、重型外设联动都很有价值，但更适合放在比赛后续迭代，而不是赛前核心里程碑。 |
 
 ---
 
@@ -635,12 +648,19 @@ w_regs_en, w_regs_addr, w_regs_data
 | 特性 | 状态 | 说明 |
 |------|------|------|
 | **目标板** | ✅ | ALINX AX7203 (XC7A200T-2FBG484I) |
-| **时钟** | ✅ | 200MHz 差分时钟输入 |
+| **时钟** | ✅ | 200MHz 差分时钟输入 (R4/T4) |
+| **复位** | ✅ | 按键复位 T6 (active-low) |
 | **BRAM 启动** | ✅ | 32KB/64KB BRAM 初始化 (COE) |
-| **UART 调试** | ✅ | 115200 baud 串口输出 |
+| **UART 调试** | ✅ | 115200 baud, TX=N15, RX=P20 |
 | **JTAG 编程** | ✅ | Vivado Tcl 脚本 |
 | **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
 | **DDR3** | ⏳ | 后续支持 (当前 BRAM-first) |
+
+**引脚分配 (来自官方资源文档):**
+- 时钟: SYS_CLK_P=R4, SYS_CLK_N=T4
+- 复位: RESET_N=T6
+- UART: UART1_TXD=N15 (FPGA→PC), UART1_RXD=P20 (PC→FPGA)
+- LED: 核心板 LED1=W5, 扩展板 LED1-4=B13/C13/D14/D15
 
 ### 13.2 FPGA 目录结构
 
@@ -672,14 +692,22 @@ fpga/
 python fpga/scripts/generate_coe.py
 
 # 2. 创建 Vivado 项目
-vivado -mode batch -source fpga/create_project_ax7203.tcl
+vivado -mode batch -source fpga/create_project_ax7203.tcl build/ax7203
 
 # 3. 综合实现
 vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
 
 # 4. JTAG 下载
 vivado -mode batch -source fpga/program_ax7203_jtag.tcl
+
+# 5. 查看串口输出 (Windows)
+python -c "import serial; ser=serial.Serial('COM5',115200); print(ser.read(100))"
 ```
+
+**当前状态**: UART 启动消息 "AdamRiscv AX7203 Boot" ✅ 已验证
+- 波特率: 115200
+- 数据位: 8, 停止位: 1, 无校验
+- 流控: 无
 
 ### 13.4 CoreMark 性能测试
 

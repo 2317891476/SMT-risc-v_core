@@ -10,15 +10,7 @@
 //   - Handles reset synchronization
 //   - Exposes UART TX/RX for CP2102 USB-UART bridge
 //   - Transmits "AdamRiscv AX7203 Boot\r\n" on startup via UART
-//   - Drives 5 status LEDs
 //   - Instantiates adam_riscv_v2 core with FPGA_MODE enabled
-//
-//   LED Mapping (AX7203):
-//   - led[0]: Heartbeat - toggles when core is running
-//   - led[1]: Boot Status - ON when boot complete
-//   - led[2]: Core LED[0] from adam_riscv_v2 (FPGA_MODE)
-//   - led[3]: Core LED[1] from adam_riscv_v2 (FPGA_MODE)
-//   - led[4]: Core LED[2] from adam_riscv_v2 (FPGA_MODE)
 // =============================================================================
 
 `ifndef FPGA_MODE
@@ -28,12 +20,12 @@
 module adam_riscv_v2_ax7203_top (
     input  wire sys_clk_p,      // 200MHz differential P (Pin R4, Bank 34)
     input  wire sys_clk_n,      // 200MHz differential N (Pin T4, Bank 34)
-    input  wire sys_rst_n,      // Active-low reset (external button)
+    input  wire sys_rst_n,      // Active-low reset (Pin T6)
     // UART (CP2102 USB-UART bridge)
-    output wire uart_tx,        // FPGA TX -> PC RX
-    input  wire uart_rx,        // FPGA RX <- PC TX
-    // LEDs (5 total on AX7203)
-    output wire [4:0] led       // Status LEDs
+    output wire uart_tx,        // FPGA TX -> PC RX (Pin N15)
+    input  wire uart_rx,        // FPGA RX <- PC TX (Pin P20)
+    // LEDs for debug
+    output wire [4:0] led       // LED[0-2]=core, LED[3]=heartbeat, LED[4]=uart_tx
 );
 
 // =============================================================================
@@ -51,6 +43,27 @@ IBUFGDS clk_ibufgds (
 
 // Note: clk_wiz_0 is instantiated inside adam_riscv_v2 when FPGA_MODE is defined
 // We use sys_clk_200m directly; the core handles clock generation internally
+
+// =============================================================================
+// Power-on Reset Generator
+// =============================================================================
+// Internal reset since external reset pin has routing issues
+reg [15:0] por_cnt;
+reg por_rst_n;
+
+always @(posedge sys_clk_200m) begin
+    if (por_cnt != 16'hFFFF) begin
+        por_cnt <= por_cnt + 1;
+        por_rst_n <= 1'b0;
+    end else begin
+        por_rst_n <= 1'b1;
+    end
+end
+
+initial begin
+    por_cnt = 0;
+    por_rst_n = 0;
+end
 
 // =============================================================================
 // Core Instantiation
@@ -83,33 +96,57 @@ adam_riscv_v2 u_adam_riscv_v2 (
 // Uses 200MHz clock; uart_tx_autoboot handles internal clock division
 wire uart_tx_internal;
 
-uart_tx_autoboot u_uart_tx_autoboot (
+// Use simple UART for testing
+uart_tx_simple u_uart_tx_simple (
     .clk   (sys_clk_200m),
-    .rst_n (sys_rst_n    ),
+    .rst_n (sys_rst_n ),
     .tx    (uart_tx_internal)
 );
-
-// =============================================================================
-// LED Output Mapping
-// =============================================================================
-
-// LED assignments:
-// - led[4:2]: Direct mapping from core LED outputs (when FPGA_MODE enabled)
-// - led[1:0]: Status indicators derived from core signals
-
-assign led[4:2] = core_led;     // Core status LEDs
-assign led[1]   = sys_rst_n;    // Boot status: ON when external reset is high (released)
-assign led[0]   = tube_status[0]; // Heartbeat from tube_status bit 0
 
 // =============================================================================
 // UART Output Assignment
 // =============================================================================
 
 // UART TX is driven by the boot message transmitter
-// Once message is sent, it stays at idle state (high)
 assign uart_tx = uart_tx_internal;
 
 // UART RX is currently not connected to the core
 // Wire available for future UART controller integration
+
+// =============================================================================
+// Debug LED Output
+// =============================================================================
+
+// LED heartbeat to verify FPGA is running
+reg [24:0] led_cnt;
+reg led_blink;
+
+always @(posedge sys_clk_200m or negedge sys_rst_n) begin
+    if (!sys_rst_n) begin
+        led_cnt <= 0;
+        led_blink <= 0;
+    end else begin
+        if (led_cnt == 25'd19_999_999) begin  // ~100ms toggle at 200MHz
+            led_cnt <= 0;
+            led_blink <= ~led_blink;
+        end else begin
+            led_cnt <= led_cnt + 1;
+        end
+    end
+end
+
+// Output assignments for debugging
+// led[0] = core_led[0] (if available)
+// led[1] = core_led[1] (if available)
+// led[2] = core_led[2] (if available)
+// led[3] = LED blink heartbeat
+// led[4] = uart_tx_internal (to see TX activity)
+
+// Route core LEDs if available, otherwise tie to debug signals
+assign led[0] = core_led[0];
+assign led[1] = core_led[1];
+assign led[2] = core_led[2];
+assign led[3] = led_blink;           // Heartbeat
+assign led[4] = uart_tx_internal;    // UART TX activity
 
 endmodule

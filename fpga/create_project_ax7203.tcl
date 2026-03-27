@@ -7,6 +7,7 @@ set project_name "adam_riscv_ax7203"
 set project_dir "$script_dir/../build/ax7203"
 set rtl_dir "$script_dir/../rtl"
 set fpga_rtl_dir "$script_dir/rtl"
+set ram_bfm_file "$script_dir/../libs/REG_ARRAY/SRAM/ram_bfm.v"
 set bram_init_dir "$script_dir/bram_init"
 set coe_gen_py "$script_dir/scripts/generate_coe.py"
 set inst_hex "$script_dir/../rom/inst.hex"
@@ -15,7 +16,7 @@ set inst_coe "$bram_init_dir/inst_mem.coe"
 set data_coe "$bram_init_dir/data_mem.coe"
 
 # Parse arguments for part selection
-set target_part "xc7a200t-2fbg484i"
+set target_part "xc7a200tfbg484-2"
 if {[info exists ::env(TARGET_PART)]} {
     set target_part $::env(TARGET_PART)
 }
@@ -57,6 +58,13 @@ if {[llength $core_rtl_files] == 0} {
     exit 1
 }
 add_files $core_rtl_files
+
+# Shared library models required by the core RTL
+if {![file exists $ram_bfm_file]} {
+    puts "ERROR: Missing shared library model: $ram_bfm_file"
+    exit 1
+}
+add_files -norecurse $ram_bfm_file
 
 # FPGA-specific RTL (to be created)
 if {[file exists $fpga_rtl_dir]} {

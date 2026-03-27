@@ -7,7 +7,7 @@ set project_dir "$script_dir/../build/ax7203"
 set project_name "adam_riscv_ax7203"
 
 # Parse arguments
-set target_part "xc7a200t-2fbg484i"
+set target_part "xc7a200tfbg484-2"
 set is_compare 0
 if {[info exists ::env(TARGET_PART)]} {
     set target_part $::env(TARGET_PART)
@@ -35,7 +35,7 @@ reset_run impl_1
 
 # Run synthesis
 puts "Starting synthesis..."
-launch_runs synth_1 -jobs 4
+launch_runs synth_1 -jobs 2
 wait_on_run synth_1
 
 # Check synthesis results

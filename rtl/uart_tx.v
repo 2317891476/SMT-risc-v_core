@@ -21,7 +21,7 @@ module uart_tx #(
     // Baud rate calculation: clk_freq / baud_rate
     // For 50MHz / 115200 = 434
     // For 200MHz / 115200 = 1736
-    localparam CLK_DIV_BITS = 9;  // 2^9 = 512 > 434
+    localparam CLK_DIV_BITS = $clog2(CLK_DIV + 1);  // Auto-calculate bits needed
 
     // State machine states
     localparam [2:0] STATE_IDLE  = 3'b000;
@@ -155,12 +155,14 @@ module uart_tx_autoboot (
     localparam [2:0] S_WAIT    = 3'b010;
     localparam [2:0] S_NEXT    = 3'b011;
     localparam [2:0] S_DONE    = 3'b100;
+    localparam [2:0] S_DELAY   = 3'b101;  // Delay between characters
 
     reg [2:0] state;
     reg [4:0] char_idx;      // Character index (0-23)
     reg [7:0] tx_data;
     wire      uart_busy;
     reg       tx_start;
+    reg [7:0] delay_cnt;     // Inter-character delay counter
 
     // UART transmitter instance
     uart_tx #(
@@ -177,10 +179,11 @@ module uart_tx_autoboot (
     // State machine to send boot message
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state    <= S_IDLE;
-            char_idx <= 0;
-            tx_data  <= 8'h00;
-            tx_start <= 1'b0;
+            state     <= S_IDLE;
+            char_idx  <= 0;
+            tx_data   <= 8'h00;
+            tx_start  <= 1'b0;
+            delay_cnt <= 0;
         end else begin
             tx_start <= 1'b0;  // Default to low
 
@@ -224,6 +227,8 @@ module uart_tx_autoboot (
                 end
 
                 S_WAIT: begin
+                    // Hold tx_start for a second cycle to ensure UART sees it
+                    tx_start <= 1'b0;
                     if (!uart_busy) begin
                         state <= S_NEXT;
                     end
@@ -232,15 +237,25 @@ module uart_tx_autoboot (
                 S_NEXT: begin
                     if (char_idx < MSG_LEN - 1) begin
                         char_idx <= char_idx + 1;
-                        state    <= S_START;
+                        state    <= S_DELAY;  // Go to delay before starting next char
                     end else begin
                         state <= S_DONE;
                     end
                 end
 
+                S_DELAY: begin
+                    // Small delay between characters to ensure clean transitions
+                    if (delay_cnt == 0) begin
+                        delay_cnt <= 8'd10;  // ~50 cycles at 200MHz
+                        state <= S_START;
+                    end else begin
+                        delay_cnt <= delay_cnt - 1;
+                    end
+                end
+
                 S_DONE: begin
-                    // Message sent, stay here
-                    state <= S_DONE;
+                    // Message sent, loop back to send again
+                    state <= S_IDLE;
                 end
 
                 default: begin

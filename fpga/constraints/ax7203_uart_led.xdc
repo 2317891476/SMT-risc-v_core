@@ -1,25 +1,22 @@
 ################################################################################
 # File: ax7203_uart_led.xdc
 # Board: ALINX AX7203 (XC7A200T-2FBG484I)
-# Scope: UART + LED constraints
-#
-# NOTE:
-# - UART/LED pin assignments below are typical ALINX-style placeholders.
-# - MUST verify against actual AX7203 schematic and board revision before use.
+# Scope: UART and LED constraints
+# Reference: fpga/resource.md (official ALINX documentation)
 ################################################################################
 
 ################################################################################
 # 1) USB-UART (CP2102GM) pins
 ################################################################################
 
-# Typical UART pin candidates (3.3V bank, often bank 15/16 on ALINX boards)
-# TODO(verify): Confirm exact FPGA pins connected to CP2102GM TXD/RXD.
-# FPGA TX (to PC RX)
-set_property PACKAGE_PIN A16 [get_ports uart_tx]
+# AX7203 USB UART pins from schematic
+# UART1_TXD = N15, UART1_RXD = P20
+# FPGA TX (to PC RX via CP2102)
+set_property PACKAGE_PIN N15 [get_ports uart_tx]
 set_property IOSTANDARD LVCMOS33 [get_ports uart_tx]
 
-# FPGA RX (from PC TX)
-set_property PACKAGE_PIN A15 [get_ports uart_rx]
+# FPGA RX (from PC TX via CP2102)
+set_property PACKAGE_PIN P20 [get_ports uart_rx]
 set_property IOSTANDARD LVCMOS33 [get_ports uart_rx]
 
 # Hold RX high when line is idle/floating.
@@ -46,40 +43,34 @@ set_clock_groups -asynchronous \
   -group [get_clocks uart_line_clk]
 
 ################################################################################
-# 3) User LEDs (5 total)
+# 3) Debug visibility recommendations (optional, commented)
 ################################################################################
 
-# Typical ALINX LED pin candidates on 3.3V I/O bank.
-# TODO(verify): Confirm LED0..LED4 physical mapping and active polarity.
-set_property PACKAGE_PIN G14 [get_ports {led[0]}]
-set_property PACKAGE_PIN F14 [get_ports {led[1]}]
-set_property PACKAGE_PIN E14 [get_ports {led[2]}]
-set_property PACKAGE_PIN D14 [get_ports {led[3]}]
-set_property PACKAGE_PIN C14 [get_ports {led[4]}]
+################################################################################
+# 3) LED pins (from resource.md)
+################################################################################
 
+# Core board LED1 (active-low, high=off, low=on)
+set_property PACKAGE_PIN W5 [get_ports {led[0]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led[0]}]
+
+# Extension board LEDs (active-low)
+set_property PACKAGE_PIN B13 [get_ports {led[1]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led[1]}]
+
+set_property PACKAGE_PIN C13 [get_ports {led[2]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led[2]}]
+
+set_property PACKAGE_PIN D14 [get_ports {led[3]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led[3]}]
+
+set_property PACKAGE_PIN D15 [get_ports {led[4]}]
 set_property IOSTANDARD LVCMOS33 [get_ports {led[4]}]
-
-set_property DRIVE 8 [get_ports {led[0]}]
-set_property DRIVE 8 [get_ports {led[1]}]
-set_property DRIVE 8 [get_ports {led[2]}]
-set_property DRIVE 8 [get_ports {led[3]}]
-set_property DRIVE 8 [get_ports {led[4]}]
-
-set_property SLEW SLOW [get_ports {led[0]}]
-set_property SLEW SLOW [get_ports {led[1]}]
-set_property SLEW SLOW [get_ports {led[2]}]
-set_property SLEW SLOW [get_ports {led[3]}]
-set_property SLEW SLOW [get_ports {led[4]}]
 
 ################################################################################
 # 4) Debug visibility recommendations (optional, commented)
 ################################################################################
 
 # Uncomment and adapt for debug builds.
-# set_property MARK_DEBUG TRUE [get_nets -of_objects [get_ports uart_txd]]
-# set_property MARK_DEBUG TRUE [get_nets -of_objects [get_ports uart_rxd]]
-# set_property MARK_DEBUG TRUE [get_nets -of_objects [get_ports {led[0]}]]
+# set_property MARK_DEBUG TRUE [get_nets -of_objects [get_ports uart_tx]]
+# set_property MARK_DEBUG TRUE [get_nets -of_objects [get_ports uart_rx]]

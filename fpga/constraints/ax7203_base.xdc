@@ -29,13 +29,10 @@ create_clock -name sys_clk -period 5.000 [get_ports sys_clk_p]
 # 2) Reset input (active-low push button)
 ################################################################################
 
-# Typical ALINX reset button pin candidate.
-# TODO(verify): Confirm PACKAGE_PIN D9 in AX7203 schematic for sys_rst_n key.
-set_property PACKAGE_PIN D9 [get_ports sys_rst_n]
+# Official AX7203 reset pin from resource.md section 8.2
+# RESET_N = T6 (active-low push button on core board)
+set_property PACKAGE_PIN T6 [get_ports sys_rst_n]
 set_property IOSTANDARD LVCMOS33 [get_ports sys_rst_n]
-
-# Keep reset deasserted by default if board-level resistor differs.
-set_property PULLUP true [get_ports sys_rst_n]
 
 ################################################################################
 # 3) Baseline timing exceptions (justified)
