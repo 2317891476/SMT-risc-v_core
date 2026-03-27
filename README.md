@@ -131,34 +131,26 @@ AdamRiscv/
 │  ├─ alu.v / alu_control.v / ctrl.v / imm_gen.v
 │  ├─ reg_if_id.v / reg_is_ro.v / reg_ro_ex.v / reg_ex_stage.v
 │  ├─ reg_ex_mem.v / reg_mem_wb.v
-│  └─ syn_rst.v / define.v
+│  ├─ syn_rst.v / define.v
+│  └─ uart_tx.v                     # ★ UART 发送模块
 │
-├─ comp_test/
-│  ├─ run_iverilog_tests.ps1        # 一键构建 ROM + 仿真 + 判分
-│  ├─ module_list                   # V1 iverilog 源文件清单
-│  ├─ module_list_v2                # ★ V2 iverilog 源文件清单
-│  ├─ tb.sv                         # V1 testbench
-│  ├─ tb_v2.sv                      # ★ V2 testbench
-│  ├─ test_content.sv               # 测试判分 (支持 test1/test2/smt/rv32i_full/P2测试)
-│  └─ out_iverilog/                 # 仿真输出 (日志/波形/可执行)
-│
-├─ rom/
-│  ├─ test1.s                       # 基础 ALU + Load/Store
-│  ├─ test2.S                       # Scoreboard RAW 冒险
-│  ├─ test_smt.s                    # SMT 双线程验证
-│  ├─ test_rv32i_full.s             # ★ RV32I 全部 47 条指令测试
-│  ├─ test_store_buffer_*.s         # ★ Store Buffer 测试集 (5个测试)
-│  ├─ test_l2_*.s                   # ★ L2 缓存测试集 (3个测试)
-│  ├─ test_csr_mret_smoke.s         # ★ CSR/MRET 基础测试
-│  ├─ test_clint_timer_interrupt.s  # ★ CLINT 定时器中断测试
-│  ├─ test_plic_external_interrupt.s # ★ PLIC 外部中断测试
-│  ├─ test_interrupt_mask_mret.s    # ★ 中断掩码/MRET 测试
-│  ├─ test_rocc_dma.s               # ★ RoCC DMA 测试
-│  ├─ test_rocc_gemm.s              # ★ RoCC GEMM 测试
-│  ├─ test_rocc_status.s            # ★ RoCC STATUS 测试
-│  ├─ p2_mmio.inc                   # ★ P2 MMIO 地址定义头文件
-│  ├─ harvard_link.ld               # 链接脚本 (.text=0x0, .data=0x1000)
-│  └─ inst.hex / data.hex           # 仿真加载镜像
+├─ fpga/                            # ★ FPGA 板级支持 (AX7203)
+│  ├─ board_manifest_ax7203.md      # ★ AX7203 板级规格
+│  ├─ observability_contract_ax7203.md  # ★ UART/LED 输出规范
+│  ├─ resource.md                   # ★ 官方引脚资源文档
+│  ├─ rtl/
+│  │  ├─ adam_riscv_v2_ax7203_top.v # ★ FPGA 顶层封装
+│  │  └─ uart_tx_simple.v           # ★ 简化 UART (板级调试)
+│  ├─ constraints/
+│  │  ├─ ax7203_base.xdc            # ★ 时钟/复位约束
+│  │  └─ ax7203_uart_led.xdc        # ★ UART/LED 约束
+│  ├─ ip/
+│  │  └─ create_clk_wiz_ax7203.tcl  # ★ 时钟向导 IP
+│  ├─ bram_init/
+│  │  ├─ create_bram_ip.tcl         # ★ BRAM IP 生成
+│  │  ├─ inst_mem.coe               # ★ 指令存储器初始化
+│  │  └─ data_mem.coe               # ★ 数据存储器初始化
+│  └─ *.tcl                         # ★ Vivado 流程脚本
 │
 └─ libs/REG_ARRAY/SRAM/ram_bfm.v    # 行为级 RAM 模型
 ```
@@ -666,23 +658,27 @@ w_regs_en, w_regs_addr, w_regs_data
 
 ```
 fpga/
-├─ board_manifest_ax7203.md      # AX7203 板级规格
-├─ observability_contract_ax7203.md  # UART/LED 输出规范
+├─ board_manifest_ax7203.md         # AX7203 板级规格
+├─ observability_contract_ax7203.md # UART/LED 输出规范
+├─ resource.md                      # ★ 官方硬件资源文档 (完整引脚表)
 ├─ rtl/
-│  └─ adam_riscv_v2_ax7203_top.v # FPGA 顶层封装
+│  ├─ adam_riscv_v2_ax7203_top.v    # FPGA 顶层封装
+│  └─ uart_tx_simple.v              # ★ 简化 UART (启动消息发送)
 ├─ constraints/
-│  ├─ ax7203_base.xdc            # 时钟/复位约束
-│  └─ ax7203_uart_led.xdc        # UART/LED 约束
+│  ├─ ax7203_base.xdc               # 时钟/复位约束 (T6复位, R4/T4时钟)
+│  └─ ax7203_uart_led.xdc           # UART/LED 约束 (N15/P20, W5/B13等)
 ├─ ip/
-│  └─ create_clk_wiz_ax7203.tcl  # 时钟向导 IP
+│  └─ create_clk_wiz_ax7203.tcl     # 时钟向导 IP 生成
 ├─ bram_init/
-│  ├─ README.md
-│  ├─ create_bram_ip.tcl         # BRAM IP 生成
-│  ├─ inst_mem.coe               # 指令存储器初始化
-│  └─ data_mem.coe               # 数据存储器初始化
+│  ├─ create_bram_ip.tcl            # BRAM IP 生成
+│  ├─ inst_mem.coe                  # 指令存储器初始化
+│  └─ data_mem.coe                  # 数据存储器初始化
 ├─ scripts/
-│  └─ generate_coe.py            # COE 文件生成脚本
-└─ *.tcl                         # Vivado 流程脚本
+│  └─ generate_coe.py               # COE 文件生成脚本
+├─ build_ax7203_bitstream.tcl       # ★ 综合实现脚本
+├─ create_project_ax7203.tcl        # ★ 创建工程脚本
+├─ program_ax7203_jtag.tcl          # ★ JTAG 下载脚本
+└─ program_ax7203_flash.tcl         # QSPI Flash 烧录脚本
 ```
 
 ### 13.3 快速开始 (FPGA)
