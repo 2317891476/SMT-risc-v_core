@@ -272,7 +272,7 @@ $env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;E:\iverilo
 ```powershell
 cd .\comp_test
 $env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;" + $env:PATH
-.\run_iverilog_tests.ps1 -Tests @("test1.s","test2.S","test_rv32i_full.s","test_smt.s") -NoGtkWave
+.\run_iverilog_tests.ps1 -Flow V1 -Tests @("test1.s","test2.S","test_rv32i_full.s","test_smt.s") -NoGtkWave
 ```
 
 期望输出:
@@ -394,29 +394,15 @@ python verification/run_riscv_tests.py --suite all                   # 运行所
   Total: 10 passed, 0 failed, 0 skipped
 ```
 
-### 手动运行 V2 管线仿真
+### 运行 V2 管线仿真（Canonical Entrypoint）
 
 ```powershell
 cd .\comp_test
 $env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;" + $env:PATH
-
-# 1) 构建 ROM
-riscv-none-elf-gcc -nostdlib -nostartfiles -Wl,--build-id=none `
-  -Wl,-T,..\rom\harvard_link.ld -march=rv32i -mabi=ilp32 `
-  ..\rom\test_rv32i_full.s -o ..\rom\main_s.elf
-riscv-none-elf-objcopy -j .text -O verilog ..\rom\main_s.elf ..\rom\inst.hex
-riscv-none-elf-objcopy -j .data -j .sdata -O verilog ..\rom\main_s.elf ..\rom\data.hex
-
-# 2) iverilog 编译 V2
-iverilog -g2012 -s tb_v2 -o out_iverilog\bin\tb_v2.out `
-  -I ..\module\CORE\RTL_V1_2\ `
-  (Get-Content module_list_v2 | Where-Object {$_ -match '\.v$'} | `
-   ForEach-Object { (Resolve-Path $_).Path }) `
-  ..\libs\REG_ARRAY\SRAM\ram_bfm.v tb_v2.sv
-
-# 3) 运行
-vvp out_iverilog\bin\tb_v2.out
+.\run_iverilog_tests.ps1 -Flow V2 -Tests @("test1.s","test2.S","test_smt.s") -NoGtkWave
 ```
+
+`run_iverilog_tests.ps1 -Flow V2` 是 AX7203 / V2 仿真的唯一规范入口；它会显式解析 `tb_v2.sv`、`module_list_v2` 和 `..\rtl\`，不再文档化裸 `iverilog` 命令。
 
 ---
 
@@ -752,10 +738,4 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 ### V2 编译选项
 
-```powershell
-# 单线程模式 (test1, test2)
-iverilog -g2012 -s tb_v2 -o tb_v2.out ...
-
-# SMT 双线程模式 (test_smt)
-iverilog -g2012 -s tb_v2 -DSMT_MODE=1 -o tb_v2_smt.out ...
-```
+V2 编译/运行统一由 `comp_test/run_iverilog_tests.ps1 -Flow V2 ...` 处理；测试差异通过 `-Tests` 选择，不再维护单独的裸 `iverilog` 编译命令。
