@@ -1,27 +1,53 @@
+// V2 Module List - Complete dependency list for adam_riscv_v2 simulation
+// Generated for tb_v2.sv testbench
+
+// ─── Core V2 Top ─────────────────────────────────────────────────────────────
 ../rtl/adam_riscv_v2.v
-../rtl/define.v
-../rtl/syn_rst.v
-../rtl/thread_scheduler.v
-../rtl/pc_mt.v
-../rtl/inst_memory.v
+
+// ─── Defines (define_v2.v includes define.v) ─────────────────────────────────
+// Note: define_v2.v is included by adam_riscv_v2.v via `include
+
+// ─── V2 Frontend ─────────────────────────────────────────────────────────────
+../rtl/stage_if_v2.v
 ../rtl/bpu_bimodal.v
 ../rtl/fetch_buffer.v
 ../rtl/decoder_dual.v
-../rtl/stage_is.v
-../rtl/ctrl.v
-../rtl/imm_gen.v
+../rtl/inst_memory_v2.v
+../rtl/icache.v
+../rtl/icache_mem_adapter.v
+../rtl/inst_backing_store.v
+
+// ─── V2 OoO Engine ───────────────────────────────────────────────────────────
 ../rtl/scoreboard_v2.v
-../rtl/regs_mt.v
+../rtl/rob_lite.v
 ../rtl/bypass_network.v
 ../rtl/exec_pipe0.v
 ../rtl/exec_pipe1.v
 ../rtl/mul_unit.v
+
+// ─── V2 Memory Pipeline ──────────────────────────────────────────────────────
+../rtl/lsu_shell.v
+../rtl/store_buffer.v
+../rtl/data_memory.v
+
+// ─── V2 Control ──────────────────────────────────────────────────────────────
+../rtl/csr_unit.v
+
+// ─── Shared Modules (V1/V2) ──────────────────────────────────────────────────
+../rtl/syn_rst.v
+../rtl/thread_scheduler.v
+../rtl/pc_mt.v
+../rtl/regs_mt.v
+../rtl/stage_is.v
+../rtl/ctrl.v
+../rtl/imm_gen.v
 ../rtl/alu.v
 ../rtl/alu_control.v
 ../rtl/stage_mem.v
-../rtl/data_memory.v
 ../rtl/stage_wb.v
-../rtl/csr_unit.v
-../rtl/stage_if_v2.v
-+libext+ ../libs/REG_ARRAY/SRAM/ram_bfm.v
+
+// ─── Library (behavioral RAM model) ───────────────────────────────────────────
+../libs/REG_ARRAY/SRAM/ram_bfm.v
+
+// ─── Include Paths ────────────────────────────────────────────────────────────
 +incdir+../rtl/

@@ -1,7 +1,9 @@
 `timescale 1ns/1ns
-`define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_ram_data
+`define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb.u_adam_riscv.u_stage_ro.u_regs_mt
 `define TB_DRAM tb.u_adam_riscv.u_stage_mem.u_data_memory.u_ram_data
+// TUBE_STATUS for compatibility with test_content.sv (V1 uses tube port directly)
+`define TUBE_STATUS tb.u_adam_riscv.tube
 
 `define RAM_DEEP 4096
 
@@ -75,12 +77,13 @@ end
 //---------------------------------------------------------------------------------------------
 // TEST CONTENT
 //---------------------------------------------------------------------------------------------
-`include "test_content.sv"
+`include "test_content_v1.sv"
 
 //---------------------------------------------------------------------------------------------
 // show test result
 //---------------------------------------------------------------------------------------------
 task    TEST_PASS;
+    tube_status = 8'h04;  // Set TUBE_STATUS for test_content.sv compatibility
     $display("==================================================================");
     $display("==================================================================");
     $display("=========                                              ===========");
@@ -118,5 +121,16 @@ task    TEST_FAIL;
     $finish;
 endtask
 
+
+// TUBE_STATUS register for V2 test_content.sv compatibility
+reg [7:0] tube_status;
+initial tube_status = 8'd0;
+
+// Monitor for test completion via PASS/FAIL tasks
+always @(posedge clk) begin
+    if (rst) begin
+        tube_status <= 8'd0;
+    end
+end
 
 endmodule

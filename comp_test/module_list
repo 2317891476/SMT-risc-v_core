@@ -19,6 +19,7 @@
 ../rtl/stage_ex.v
 ../rtl/stage_wb.v
 ../rtl/alu.v
+../rtl/inst_backing_store.v
 ../rtl/inst_memory.v
 ../rtl/reg_if_id.v
 ../rtl/stage_id.v

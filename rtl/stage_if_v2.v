@@ -105,7 +105,7 @@ wire [0:0]  resp_tid_from_mem;
 wire [3:0]  resp_epoch_from_mem;
 wire        resp_valid_from_mem;
 
-inst_memory #(
+inst_memory_v2 #(
     .IROM_SPACE (4096)
 ) u_inst_memory (
     .clk            (clk               ),
