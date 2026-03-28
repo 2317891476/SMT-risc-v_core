@@ -1,10 +1,10 @@
 `timescale 1ns/1ns
 `define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
-// Legacy data memory path (u_mem_subsys is disabled in current config)
-`define TB_DATA_MEM tb_v2.u_adam_riscv_v2.u_legacy_data_memory.u_ram_data
+// Data memory path through mem_subsys (when USE_MEM_SUBSYS=1)
+`define TB_DATA_MEM tb_v2.u_adam_riscv_v2.u_mem_subsys.ram
 // For backward compatibility with test_content.sv
-`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_legacy_data_memory.u_ram_data
+`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_mem_subsys.ram
 `define TUBE_STATUS tb_v2.u_adam_riscv_v2.tube_status
 
 `define RAM_DEEP 4096
@@ -76,7 +76,7 @@ initial begin : init_dram
     $readmemh("../rom/data.hex", data_bytes);
 
     for (i = 0; i < `RAM_DEEP; i = i + 1) begin
-        `TB_DATA_MEM.mem[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
+        `TB_DATA_MEM[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
     end
 end
 
@@ -266,7 +266,7 @@ end
 // Debug: Monitor WB signals and ROB state
 //---------------------------------------------------------------------------------------------
 always @(posedge clk) begin
-    if (rst) begin
+    if (!rst) begin
         // Monitor dispatch
         if (u_adam_riscv_v2.disp0_valid_gated && !u_adam_riscv_v2.sb_disp_stall) begin
             $display("[DISP0] tag=%0d rd=%0d tid=%0d @%0t",
@@ -328,10 +328,10 @@ always @(posedge clk) begin
                      u_adam_riscv_v2.sb_mem_write_wen,
                      $time);
         end
-        // Monitor TUBE write
-        if (u_adam_riscv_v2.legacy_tube_write) begin
-            $display("[TUBE WRITE] status=0x%02h @%0t",
-                     u_adam_riscv_v2.sb_mem_write_data[7:0],
+        // Monitor TUBE status (test completion marker)
+        if (u_adam_riscv_v2.tube_status !== 8'b0) begin
+            $display("[TUBE STATUS] status=0x%02h @%0t",
+                     u_adam_riscv_v2.tube_status,
                      $time);
         end
         // Monitor ROB commits
