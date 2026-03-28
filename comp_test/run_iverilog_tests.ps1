@@ -282,10 +282,10 @@ function Get-SimulationStatus {
     param([Parameter(Mandatory = $true)][string]$LogPath)
 
     $simText = Get-Content -Path $LogPath -Raw
-    if ($simText -match "This case is pass" -or $simText -match "V2 case PASS") {
+    if ($simText -match "Test PASS" -or $simText -match "This case is pass") {
         return "PASS"
     }
-    if ($simText -match "This case is failed" -or $simText -match "V2 case FAILED" -or $simText -match "Timeout Error") {
+    if ($simText -match "Test FAILED" -or $simText -match "This case is failed" -or $simText -match "Timeout Error") {
         return "FAIL"
     }
     return "DONE"

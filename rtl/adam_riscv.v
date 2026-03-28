@@ -6,7 +6,7 @@
 //   wiring the new internal pipeline.
 //
 //   New Pipeline:
-//   IF_v2 → FetchBuffer → DualDecoder → Scoreboard_v2 → RO → BypassNet →
+//   IF → FetchBuffer → DualDecoder → Scoreboard → RO → BypassNet →
 //   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+AGU) → MEM → WB
 
 `include "define.v"
@@ -374,7 +374,7 @@ wire [7:0] disp0_epoch = (dec0_tid == 1'b0) ? epoch_t0 : epoch_t1;
 wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
 
 // ════════════════════════════════════════════════════════════════════════════
-// STAGE 4: Scoreboard V2 (16-entry RS, Dual-Issue)
+// STAGE 4: Scoreboard (16-entry RS, Dual-Issue)
 // ════════════════════════════════════════════════════════════════════════════
 // Issue port 0 wires
 wire        iss0_valid;
