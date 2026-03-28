@@ -1,5 +1,5 @@
 // =============================================================================
-// Module : adam_riscv_v2
+// Module : adam_riscv
 // Description: Upgraded top-level processor integrating all new micro-architecture
 //   modules from the 4-phase upgrade. This module preserves backward compatibility
 //   with the existing adam_riscv.v module interface (sys_clk, sys_rstn, led) while
@@ -9,7 +9,7 @@
 //   IF_v2 → FetchBuffer → DualDecoder → Scoreboard_v2 → RO → BypassNet →
 //   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+AGU) → MEM → WB
 
-`include "define_v2.v"
+`include "define.v"
 //
 //   Additional subsystems:
 //   - BPU (bimodal branch predictor in stage_if_v2)
@@ -19,7 +19,7 @@
 //   - RoCC AI Accelerator (stub connected, not activated in basic tests)
 // =============================================================================
 
-module adam_riscv_v2(
+module adam_riscv(
     input wire sys_clk,
 `ifdef FPGA_MODE
     output wire[2:0] led,

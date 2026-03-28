@@ -1,24 +1,24 @@
-// V2 Module List - Complete dependency list for adam_riscv_v2 simulation
-// Generated for tb_v2.sv testbench
+// Module List - Complete dependency list for adam_riscv_v2 simulation
+// Generated for tb.sv testbench
 
 // ─── Core V2 Top ─────────────────────────────────────────────────────────────
-../rtl/adam_riscv_v2.v
+../rtl/adam_riscv.v
 
 // ─── Defines (define_v2.v includes define.v) ─────────────────────────────────
-// Note: define_v2.v is included by adam_riscv_v2.v via `include
+// Note: define_v2.v is included by adam_riscv.v via `include
 
 // ─── V2 Frontend ─────────────────────────────────────────────────────────────
-../rtl/stage_if_v2.v
+../rtl/stage_if.v
 ../rtl/bpu_bimodal.v
 ../rtl/fetch_buffer.v
 ../rtl/decoder_dual.v
-../rtl/inst_memory_v2.v
+../rtl/inst_memory.v
 ../rtl/icache.v
 ../rtl/icache_mem_adapter.v
 ../rtl/inst_backing_store.v
 
 // ─── V2 OoO Engine ───────────────────────────────────────────────────────────
-../rtl/scoreboard_v2.v
+../rtl/scoreboard.v
 ../rtl/rob_lite.v
 ../rtl/bypass_network.v
 ../rtl/exec_pipe0.v

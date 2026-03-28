@@ -1,5 +1,5 @@
 // =============================================================================
-// Module : inst_memory_v2
+// Module : inst_memory
 // Description: Instruction memory with ICache integration for V2 architecture.
 //   - Wraps icache and inst_backing_store for testbench compatibility
 //   - Preserves hierarchy: u_inst_memory.u_inst_backing_store.u_ram
@@ -7,7 +7,7 @@
 //   - Internally uses nonblocking ICache with hit-under-miss
 //   - Exposes refill interface for connection to mem_subsys
 // =============================================================================
-module inst_memory_v2 #(
+module inst_memory #(
     parameter IROM_SPACE = 4096
 )(
     input  wire       clk,

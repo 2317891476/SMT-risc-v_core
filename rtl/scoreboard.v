@@ -1,5 +1,5 @@
 // =============================================================================
-// Module : scoreboard_v2
+// Module : scoreboard
 // Description: Enhanced Scoreboard with 16-entry Reservation Station and
 //   Dual-Issue Arbiter. Implements the full Scoreboard algorithm:
 //     Dispatch → Issue → Execute → WriteResult
@@ -23,9 +23,9 @@
 //   CDB (Common Data Bus) Wakeup:
 //     - Two writeback ports broadcast tag; matching qj/qk/qd entries are cleared
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
-module scoreboard_v2 #(
+module scoreboard #(
     parameter RS_DEPTH   = 16,
     parameter RS_IDX_W   = 4,       // log2(RS_DEPTH)
     parameter RS_TAG_W   = 5,       // tag bits (must be > log2(RS_DEPTH))

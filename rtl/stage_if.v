@@ -1,5 +1,5 @@
 // =============================================================================
-// Module : stage_if_v2
+// Module : stage_if
 // Description: Upgraded IF stage with BPU integration and fetch buffer output.
 //   - Fetches 1 instruction per cycle from the selected thread (via scheduler)
 //   - Integrates inst_memory (which now contains ICache with epoch tracking)
@@ -10,7 +10,7 @@
 //
 //   This module wraps: pc_mt (multi-thread PC), inst_memory (with ICache), bpu_bimodal
 // =============================================================================
-module stage_if_v2 (
+module stage_if (
     input  wire        clk,
     input  wire        rstn,
 
