@@ -12,13 +12,13 @@
 //   - Write low word (which may temporarily trigger interrupt)
 //   - Write high word with final value (clears any spurious interrupt)
 //   
-//   Memory Map (from define_v2.v):
+//   Memory Map (from define.v):
 //   - mtimecmp lo: 0x0200_4000
 //   - mtimecmp hi: 0x0200_4004
 //   - mtime lo:    0x0200_BFF8
 //   - mtime hi:    0x0200_BFFC
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module clint (
     input  wire        clk,

@@ -62,15 +62,15 @@ end
 // Track register write enables directly from regs_mt
 always @(posedge clk) begin
     if (rst) begin
-        if (tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_en_0) begin
+        if (tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_en_0) begin
             $display("WB0: rd=%0d, data=%h", 
-                     tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_addr_0, 
-                     tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_data_0);
+                     tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_addr_0, 
+                     tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_data_0);
         end
-        if (tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_en_1) begin
+        if (tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_en_1) begin
             $display("WB1: rd=%0d, data=%h", 
-                     tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_addr_1, 
-                     tb_v2_debug.u_adam_riscv_v2.u_regs_mt.w_regs_data_1);
+                     tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_addr_1, 
+                     tb_v2_debug.u_adam_riscv.u_regs_mt.w_regs_data_1);
         end
     end
 end

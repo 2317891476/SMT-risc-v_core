@@ -12,7 +12,7 @@
 `include "define.v"
 //
 //   Additional subsystems:
-//   - BPU (bimodal branch predictor in stage_if_v2)
+//   - BPU (bimodal branch predictor in stage_if)
 //   - CSR Unit (Machine-mode CSRs + exception handling)
 //   - MMU (Sv32, currently in bare mode for simulation)
 //   - L1 DCache (non-blocking, currently bypassed for sim with direct SRAM)
@@ -171,7 +171,7 @@ localparam USE_MEM_SUBSYS = 1'b1;
 wire use_mem_subsys = USE_MEM_SUBSYS;
 
 // ════════════════════════════════════════════════════════════════════════════
-// STAGE 1: Instruction Fetch (stage_if_v2 with BPU)
+// STAGE 1: Instruction Fetch (stage_if with BPU)
 // ════════════════════════════════════════════════════════════════════════════
 wire        if_valid;
 wire [31:0] if_inst;
@@ -196,7 +196,7 @@ wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'
                                   smt_flush;
 wire        combined_flush_any  = trap_redirect_valid || flush_any;
 
-stage_if_v2 u_stage_if_v2(
+stage_if u_stage_if(
     .clk              (clk              ),
     .rstn             (rstn             ),
     .pc_stall         (stall            ),
@@ -422,9 +422,9 @@ wire        wb0_regs_write, wb1_regs_write;
 wire [2:0]  wb0_fu,    wb1_fu;
 wire [0:0]  wb0_tid,   wb1_tid;
 
-scoreboard_v2 #(
+scoreboard #(
     .RS_DEPTH(16), .RS_IDX_W(4), .RS_TAG_W(5)
-) u_scoreboard_v2 (
+) u_scoreboard (
     .clk         (clk              ),
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),

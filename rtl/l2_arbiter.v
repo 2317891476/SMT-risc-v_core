@@ -7,7 +7,7 @@
 //   - Priority: M2 (RoCC) > M0/M1 when active
 //   - Round-robin between M0/M1 when M2 is not requesting
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module l2_arbiter (
     input  wire        clk,
@@ -74,7 +74,7 @@ module l2_arbiter (
 // Address Decode for Cacheability
 // ═════════════════════════════════════════════════════════════════════════════
 
-// Address regions (from define_v2.v)
+// Address regions (from define.v)
 // RAM cacheable: 0x0000_0000 - 0x0000_3FFF
 // TUBE MMIO:     0x1300_0000
 // CLINT MMIO:    0x0200_0000 - 0x0200_BFFC

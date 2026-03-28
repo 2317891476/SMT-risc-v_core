@@ -17,7 +17,7 @@
 //     - epoch: for flush detection
 //     - committed: store has received commit signal from ROB
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module store_buffer #(
     parameter SB_DEPTH      = 4,        // Entries per thread (power of 2)

@@ -1,4 +1,4 @@
-`include "define_v2.v"
+`include "define.v"
 
 module stage_is(
     input  wire[31:0]   is_inst,

@@ -6,7 +6,7 @@
 //   - PLRU replacement policy
 //   - Interfaces with backing RAM for refill and write-back
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module l2_cache (
     input  wire        clk,

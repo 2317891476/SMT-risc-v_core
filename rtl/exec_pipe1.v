@@ -9,7 +9,7 @@
 //   The pipe arbitrates between ALU/MUL/AGU based on in_fu and in_mem* signals.
 //   Only one sub-unit operates per cycle (guaranteed by scoreboard FU checking).
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module exec_pipe1 #(
     parameter TAG_W = 5

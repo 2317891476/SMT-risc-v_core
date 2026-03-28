@@ -5,7 +5,7 @@
 //   - Uses separate l2_arbiter and l2_cache modules
 //   - MMIO decode for TUBE, CLINT, PLIC (uncached)
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module mem_subsys (
     input  wire        clk,

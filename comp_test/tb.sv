@@ -113,7 +113,7 @@ end
 //------------------------------------------------------------------------------------------------
 initial begin : plic_stimulus
     // Default: no external interrupt
-    force u_adam_riscv_v2.ext_irq_src = 1'b0;
+    force u_adam_riscv.ext_irq_src = 1'b0;
     
     // Wait for reset release
     @(posedge rst);
@@ -122,9 +122,9 @@ initial begin : plic_stimulus
     // to allow test setup (enable interrupts, configure PLIC)
     if (`TB_IROM.mem[0] === 32'h00000093) begin  // Detect PLIC test by first instruction
         #5000;  // Wait 5us for test setup
-        force u_adam_riscv_v2.ext_irq_src = 1'b1;
+        force u_adam_riscv.ext_irq_src = 1'b1;
         #1000;  // Hold for 1us
-        force u_adam_riscv_v2.ext_irq_src = 1'b0;
+        force u_adam_riscv.ext_irq_src = 1'b0;
     end
 end
 
@@ -286,85 +286,85 @@ end
 always @(posedge clk) begin
     if (!rst) begin
         // Monitor dispatch
-        if (u_adam_riscv_v2.disp0_valid_gated && !u_adam_riscv_v2.sb_disp_stall) begin
+        if (u_adam_riscv.disp0_valid_gated && !u_adam_riscv.sb_disp_stall) begin
             $display("[DISP0] tag=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv_v2.sb_disp0_tag,
-                     u_adam_riscv_v2.dec0_rd,
-                     u_adam_riscv_v2.dec0_tid,
+                     u_adam_riscv.sb_disp0_tag,
+                     u_adam_riscv.dec0_rd,
+                     u_adam_riscv.dec0_tid,
                      $time);
         end
-        if (u_adam_riscv_v2.disp1_valid_gated && !u_adam_riscv_v2.sb_disp_stall) begin
+        if (u_adam_riscv.disp1_valid_gated && !u_adam_riscv.sb_disp_stall) begin
             $display("[DISP1] tag=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv_v2.sb_disp1_tag,
-                     u_adam_riscv_v2.dec1_rd,
-                     u_adam_riscv_v2.dec1_tid,
+                     u_adam_riscv.sb_disp1_tag,
+                     u_adam_riscv.dec1_rd,
+                     u_adam_riscv.dec1_tid,
                      $time);
         end
         // Monitor exec_pipe1 memory requests
-        if (u_adam_riscv_v2.p1_mem_req_valid) begin
+        if (u_adam_riscv.p1_mem_req_valid) begin
             $display("[P1 MEM REQ] addr=0x%08h wen=%0b wdata=0x%08h tag=%0d @%0t",
-                     u_adam_riscv_v2.p1_mem_req_addr,
-                     u_adam_riscv_v2.p1_mem_req_wen,
-                     u_adam_riscv_v2.p1_mem_req_wdata,
-                     u_adam_riscv_v2.p1_mem_req_tag,
+                     u_adam_riscv.p1_mem_req_addr,
+                     u_adam_riscv.p1_mem_req_wen,
+                     u_adam_riscv.p1_mem_req_wdata,
+                     u_adam_riscv.p1_mem_req_tag,
                      $time);
         end
         // Monitor WB0
-        if (u_adam_riscv_v2.wb0_valid) begin
+        if (u_adam_riscv.wb0_valid) begin
             $display("[WB0] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
-                     u_adam_riscv_v2.wb0_tag,
-                     u_adam_riscv_v2.wb0_rd,
-                     u_adam_riscv_v2.wb0_tid,
-                     u_adam_riscv_v2.wb0_fu,
+                     u_adam_riscv.wb0_tag,
+                     u_adam_riscv.wb0_rd,
+                     u_adam_riscv.wb0_tid,
+                     u_adam_riscv.wb0_fu,
                      $time);
         end
         // Monitor WB1
-        if (u_adam_riscv_v2.wb1_valid) begin
+        if (u_adam_riscv.wb1_valid) begin
             $display("[WB1] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
-                     u_adam_riscv_v2.wb1_tag,
-                     u_adam_riscv_v2.wb1_rd,
-                     u_adam_riscv_v2.wb1_tid,
-                     u_adam_riscv_v2.wb1_fu,
+                     u_adam_riscv.wb1_tag,
+                     u_adam_riscv.wb1_rd,
+                     u_adam_riscv.wb1_tid,
+                     u_adam_riscv.wb1_fu,
                      $time);
         end
         // Monitor ROB state (every 100 cycles)
         if ($time % 1000 == 0) begin
             $display("[ROB STATE] T0: head=%0d tail=%0d count=%0d | T1: head=%0d tail=%0d count=%0d @%0t",
-                     u_adam_riscv_v2.u_rob_lite.rob_head[0],
-                     u_adam_riscv_v2.u_rob_lite.rob_tail[0],
-                     u_adam_riscv_v2.u_rob_lite.rob_count[0],
-                     u_adam_riscv_v2.u_rob_lite.rob_head[1],
-                     u_adam_riscv_v2.u_rob_lite.rob_head[1],
-                     u_adam_riscv_v2.u_rob_lite.rob_count[1],
+                     u_adam_riscv.u_rob_lite.rob_head[0],
+                     u_adam_riscv.u_rob_lite.rob_tail[0],
+                     u_adam_riscv.u_rob_lite.rob_count[0],
+                     u_adam_riscv.u_rob_lite.rob_head[1],
+                     u_adam_riscv.u_rob_lite.rob_head[1],
+                     u_adam_riscv.u_rob_lite.rob_count[1],
                      $time);
         end
         // Monitor store buffer write attempts
-        if (u_adam_riscv_v2.sb_mem_write_valid) begin
+        if (u_adam_riscv.sb_mem_write_valid) begin
             $display("[SB WRITE] addr=0x%08h data=0x%08h wen=0x%h @%0t",
-                     u_adam_riscv_v2.sb_mem_write_addr,
-                     u_adam_riscv_v2.sb_mem_write_data,
-                     u_adam_riscv_v2.sb_mem_write_wen,
+                     u_adam_riscv.sb_mem_write_addr,
+                     u_adam_riscv.sb_mem_write_data,
+                     u_adam_riscv.sb_mem_write_wen,
                      $time);
         end
         // Monitor TUBE status (test completion marker)
-        if (u_adam_riscv_v2.tube_status !== 8'b0) begin
+        if (u_adam_riscv.tube_status !== 8'b0) begin
             $display("[TUBE STATUS] status=0x%02h @%0t",
-                     u_adam_riscv_v2.tube_status,
+                     u_adam_riscv.tube_status,
                      $time);
         end
         // Monitor ROB commits
-        if (u_adam_riscv_v2.rob_commit0_valid) begin
+        if (u_adam_riscv.rob_commit0_valid) begin
             $display("[ROB COMMIT0] tag=%0d rd=%0d is_store=%0b @%0t",
-                     u_adam_riscv_v2.rob_commit0_tag,
-                     u_adam_riscv_v2.rob_commit0_rd,
-                     u_adam_riscv_v2.rob_commit0_is_store,
+                     u_adam_riscv.rob_commit0_tag,
+                     u_adam_riscv.rob_commit0_rd,
+                     u_adam_riscv.rob_commit0_is_store,
                      $time);
         end
-        if (u_adam_riscv_v2.rob_commit1_valid) begin
+        if (u_adam_riscv.rob_commit1_valid) begin
             $display("[ROB COMMIT1] tag=%0d rd=%0d is_store=%0b @%0t",
-                     u_adam_riscv_v2.rob_commit1_tag,
-                     u_adam_riscv_v2.rob_commit1_rd,
-                     u_adam_riscv_v2.rob_commit1_is_store,
+                     u_adam_riscv.rob_commit1_tag,
+                     u_adam_riscv.rob_commit1_rd,
+                     u_adam_riscv.rob_commit1_is_store,
                      $time);
         end
     end
@@ -386,11 +386,11 @@ always @(posedge clk) begin
         if (heartbeat_counter % 1000 == 0) begin
             $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b rst=%b @%0t",
                      heartbeat_counter,
-                     u_adam_riscv_v2.dec0_pc,
-                     u_adam_riscv_v2.if_valid,
-                     u_adam_riscv_v2.if_inst,
-                     u_adam_riscv_v2.dec0_valid,
-                     u_adam_riscv_v2.fb_pop0_valid,
+                     u_adam_riscv.dec0_pc,
+                     u_adam_riscv.if_valid,
+                     u_adam_riscv.if_inst,
+                     u_adam_riscv.dec0_valid,
+                     u_adam_riscv.fb_pop0_valid,
                      rst,
                      $time);
         end

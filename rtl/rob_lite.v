@@ -16,7 +16,7 @@
 //     - rd: destination register (for retirement accounting)
 //     - is_store: memory store flag
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module rob_lite #(
     parameter ROB_DEPTH     = 8,        // Entries per thread (power of 2)

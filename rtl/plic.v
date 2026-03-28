@@ -10,14 +10,14 @@
 //   - Priority threshold per context
 //   - Claim/Complete mechanism
 //   
-//   Memory Map (from define_v2.v):
+//   Memory Map (from define.v):
 //   - Priority[1]: 0x0C00_0004 (source 1 priority)
 //   - Pending:     0x0C00_1000 (pending bits)
 //   - Enable[0]:   0x0C00_2000 (context 0 enable)
 //   - Threshold:   0x0C20_0000 (context 0 threshold)
 //   - Claim/Comp:  0x0C20_0004 (context 0 claim/complete)
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module plic (
     input  wire        clk,

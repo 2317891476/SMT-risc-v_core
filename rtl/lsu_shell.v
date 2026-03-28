@@ -27,7 +27,7 @@
 //     - Backward-compatible with direct stage_mem connection
 //
 // =============================================================================
-`include "define_v2.v"
+`include "define.v"
 
 module lsu_shell #(
     parameter TAG_W = 5,
