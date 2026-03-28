@@ -578,7 +578,7 @@ w_regs_en, w_regs_addr, w_regs_data
 
 | **优先级** | **任务**                                                 | **说明**                                                     |
 |--------|------|------|
-| ~~P0~~     | ~~V2 管线仿真调试~~                                      | ✅ 已完成 (test1/test2/smt/rv32i_full 全部通过)               |
+| ~~P0~~     | ~~仿真调试~~                                      | ✅ 已完成 (test1/test2/smt/rv32i_full 全部通过)               |
 | ~~P1~~     | ~~Store Buffer~~                                         | ✅ 已完成 (5个专用测试通过)                                   |
 | ~~P1~~     | ~~L1 ICache~~                                            | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory)                  |
 | ~~P2~~     | ~~L2 Cache~~                                             | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器)                      |
@@ -611,10 +611,7 @@ w_regs_en, w_regs_addr, w_regs_data
 **Q2: test_rv32i_full.s FAIL？**
 检查 `out_iverilog/logs/test_rv32i_full.log`，确认 DRAM 黄金值是否匹配。用 gtkwave 打开对应 VCD 波形调试。
 
-**Q3: V1 和 可以并存吗？**
-否。V1管线已删除，当前仅保留标准架构。
-
-**Q4: 为什么使用 stage_mem / data_memory？**
+**Q3: 为什么使用 stage_mem / data_memory？**
 当前仿真使用 `stage_mem` + `data_memory` (SRAM 行为模型) 确保功能正确。`l1_dcache_nb` 和 `mmu_sv32` 已就位，待切换到 AXI4 仿真环境后启用。
 
 ---

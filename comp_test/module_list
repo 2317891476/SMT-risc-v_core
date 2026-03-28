@@ -1,11 +1,10 @@
-// Module List - Complete dependency list for adam_riscv_v2 simulation
+// Module List - Complete dependency list for adam_riscv simulation
 // Generated for tb.sv testbench
 
-// ─── Core V2 Top ─────────────────────────────────────────────────────────────
+// ─── Core Top ─────────────────────────────────────────────────────────────
 ../rtl/adam_riscv.v
 
-// ─── Defines (define_v2.v includes define.v) ─────────────────────────────────
-// Note: define_v2.v is included by adam_riscv.v via `include
+// ─── Defines (define.v contains all macros) ─────────────────────────────────
 
 // ─── Frontend ─────────────────────────────────────────────────────────────
 ../rtl/stage_if.v
@@ -41,7 +40,7 @@
 ../rtl/clint.v
 ../rtl/plic.v
 
-// ─── Shared Modules (V1/V2) ──────────────────────────────────────────────────
+// ─── Shared Modules ──────────────────────────────────────────────────
 ../rtl/syn_rst.v
 ../rtl/thread_scheduler.v
 ../rtl/pc_mt.v
