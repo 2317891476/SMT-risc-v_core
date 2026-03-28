@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run riscv-tests and riscv-arch-test on AdamRiscv V2.
+Run riscv-tests and riscv-arch-test on AdamRiscv.
 Adapts tests to our memory map and testbench format.
 Auto-downloads test suites if not present.
 """
@@ -268,11 +268,11 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
 
 
 def run_simulation():
-    """Run the V2 simulation"""
+    """Run the simulation"""
     compile_cmd = (
-        "iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2_riscv_test.out "
+        "iverilog -g2012 -s tb -o out_iverilog/bin/tb_riscv_test.out "
         "-I ../rtl ../rtl/*.v "
-        "../libs/REG_ARRAY/SRAM/ram_bfm.v tb_v2.sv"
+        "../libs/REG_ARRAY/SRAM/ram_bfm.v tb.sv"
     )
     
     result = subprocess.run(compile_cmd, shell=True, capture_output=True, 
@@ -280,7 +280,7 @@ def run_simulation():
     if result.returncode != 0:
         return False, "Compile failed", ""
     
-    run_cmd = "vvp out_iverilog/bin/tb_v2_riscv_test.out"
+    run_cmd = "vvp out_iverilog/bin/tb_riscv_test.out"
     try:
         result = subprocess.run(run_cmd, shell=True, capture_output=True, 
                                text=True, cwd=str(COMP_TEST_DIR), timeout=30)
@@ -421,7 +421,7 @@ def run_tests_for_suite(suite_name, categories=None, auto_download=True):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run RISC-V tests on AdamRiscv V2")
+    parser = argparse.ArgumentParser(description="Run RISC-V tests on AdamRiscv")
     parser.add_argument("--suite", choices=["riscv-tests", "riscv-arch-test", "all"], 
                         default="riscv-tests", help="Test suite to run")
     parser.add_argument("--download", action="store_true", help="Force download even if exists")
@@ -429,7 +429,7 @@ def main():
     args = parser.parse_args()
     
     print("=" * 60)
-    print("  RISC-V Tests Runner for AdamRiscv V2")
+    print("  RISC-V Tests Runner for AdamRiscv")
     print("=" * 60)
     
     all_results = []

@@ -154,7 +154,7 @@ if {[file exists $data_coe]} {
     add_files -norecurse $data_coe
 }
 
-# Generate Clock Wizard IP (required by adam_riscv_v2 when FPGA_MODE is defined)
+# Generate Clock Wizard IP (required by adam_riscv when FPGA_MODE is defined)
 set clk_wiz_tcl "$script_dir/ip/create_clk_wiz_ax7203.tcl"
 if {[file exists $clk_wiz_tcl]} {
     puts "Generating Clock Wizard IP from: $clk_wiz_tcl"
@@ -177,7 +177,7 @@ if {[file exists $bram_ip_tcl]} {
 }
 
 # Set top module
-set_property top adam_riscv_v2_ax7203_top [get_filesets sources_1]
+set_property top adam_riscv_ax7203_top [get_filesets sources_1]
 
 # Define FPGA_MODE for core (required for clk_wiz_0 and led port)
 set_property verilog_define FPGA_MODE=1 [get_filesets sources_1]

@@ -1,14 +1,14 @@
 `timescale 1ns/1ns
-`define TB_IROM tb_v2_debug.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_ram_data
-`define TB_REGS tb_v2_debug.u_adam_riscv_v2.u_regs_mt
-`define TB_DRAM tb_v2_debug.u_adam_riscv_v2.u_stage_mem.u_data_memory.u_ram_data
-`define TB_SB tb_v2_debug.u_adam_riscv_v2.u_scoreboard_v2
-`define TB_P0 tb_v2_debug.u_adam_riscv_v2.u_exec_pipe0
-`define TB_P1 tb_v2_debug.u_adam_riscv_v2.u_exec_pipe1
+`define TB_IROM tb_debug.u_adam_riscv.u_stage_if.u_inst_memory.u_ram_data
+`define TB_REGS tb_debug.u_adam_riscv.u_regs_mt
+`define TB_DRAM tb_debug.u_adam_riscv.u_stage_mem.u_data_memory.u_ram_data
+`define TB_SB tb_debug.u_adam_riscv.u_scoreboard
+`define TB_P0 tb_debug.u_adam_riscv.u_exec_pipe0
+`define TB_P1 tb_debug.u_adam_riscv.u_exec_pipe1
 
 `define RAM_DEEP 4096
 
-module tb_v2_debug;
+module tb_debug;
 
 reg clk;
 reg rst;
@@ -20,14 +20,14 @@ reg [7:0] inst_bytes [0:(`RAM_DEEP*4)-1];
 reg [7:0] data_bytes [0:(`RAM_DEEP*4)-1];
 integer j;
 
-adam_riscv_v2 u_adam_riscv_v2(
+adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
     .sys_rstn (rst )
 );
 
 initial begin
-    $dumpfile("tb_v2.vcd");
-    $dumpvars(0, tb_v2_debug);
+    $dumpfile("tb.vcd");
+    $dumpvars(0, tb_debug);
 end
 
 initial begin : init_irom
@@ -53,7 +53,7 @@ initial begin : init_dram
 end
 
 initial begin
-    $display ($time, "<<Starting V2 debug simulation>>");
+    $display ($time, "<<Starting debug simulation>>");
     clk = 1'b1;
     rst = 1'b0;
     #100 rst = 1'b1;

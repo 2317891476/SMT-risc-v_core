@@ -1,6 +1,6 @@
 // =============================================================================
-// Module : adam_riscv_v2_ax7203_top
-// Description: AX7203 FPGA Top-Level Wrapper for AdamRISC-V V2 Processor
+// Module : adam_riscv_ax7203_top
+// Description: AX7203 FPGA Top-Level Wrapper for AdamRISC-V Processor
 //   Target Board: ALINX AX7203 (XC7A200T-2FBG484I)
 //   Clock: 200MHz differential (SiT9102-200.00MHz)
 //
@@ -17,7 +17,7 @@
     `define FPGA_MODE 1
 `endif
 
-module adam_riscv_v2_ax7203_top (
+module adam_riscv_ax7203_top (
     input  wire sys_clk_p,      // 200MHz differential P (Pin R4, Bank 34)
     input  wire sys_clk_n,      // 200MHz differential N (Pin T4, Bank 34)
     input  wire sys_rst_n,      // Active-low reset (Pin T6)
@@ -41,7 +41,7 @@ IBUFGDS clk_ibufgds (
     .IB (sys_clk_n   )
 );
 
-// Note: clk_wiz_0 is instantiated inside adam_riscv_v2 when FPGA_MODE is defined
+// Note: clk_wiz_0 is instantiated inside adam_riscv when FPGA_MODE is defined
 // We use sys_clk_200m directly; the core handles clock generation internally
 
 // =============================================================================
@@ -79,7 +79,7 @@ wire [7:0] tube_status;
 // 1. Instantiate clk_wiz_0 to convert sys_clk (200MHz) to core clock
 // 2. Instantiate syn_rst for reset synchronization
 // We pass the raw 200MHz clock and external reset to the core.
-adam_riscv_v2 u_adam_riscv_v2 (
+adam_riscv u_adam_riscv (
     .sys_clk   (sys_clk_200m),  // 200MHz from IBUFGDS (core has clk_wiz_0 inside)
     .sys_rstn  (sys_rst_n   ),  // External active-low reset (core has syn_rst inside)
     .ext_irq_src (1'b0      ),  // External interrupt - tied low for now

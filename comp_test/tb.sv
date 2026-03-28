@@ -1,11 +1,11 @@
 `timescale 1ns/1ns
-`define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
-`define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
+`define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_inst_backing_store.u_ram
+`define TB_REGS tb.u_adam_riscv.u_regs_mt
 // Data memory path through mem_subsys (when USE_MEM_SUBSYS=1)
-`define TB_DATA_MEM tb_v2.u_adam_riscv_v2.u_mem_subsys.ram
+`define TB_DATA_MEM tb.u_adam_riscv.u_mem_subsys.ram
 // For backward compatibility with test_content.sv
-`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_mem_subsys.ram
-`define TUBE_STATUS tb_v2.u_adam_riscv_v2.tube_status
+`define TB_MEM_SUBSYS tb.u_adam_riscv.u_mem_subsys.ram
+`define TUBE_STATUS tb.u_adam_riscv.tube_status
 
 `define RAM_DEEP 4096
 
@@ -17,7 +17,7 @@
 // RoCC monitoring hooks (for verification when RoCC is integrated)
 // These macros reference RoCC signals for command/response/DMA tracing
 `ifndef ROCC_INST_PATH
-`define ROCC_INST_PATH tb_v2.u_adam_riscv_v2.u_rocc_ai_accelerator
+`define ROCC_INST_PATH tb.u_adam_riscv.u_rocc_ai_accelerator
 `endif
 
 // RoCC STATUS.READ result bits (per define_v2.v)
@@ -25,7 +25,7 @@
 `define ROCC_STATUS_DONE  1
 `define ROCC_STATUS_ERROR 2
 
-module tb_v2;
+module tb;
 
 reg clk;
 reg rst;
@@ -37,7 +37,7 @@ reg [7:0] inst_bytes [0:(`RAM_DEEP*4)-1];
 reg [7:0] data_bytes [0:(`RAM_DEEP*4)-1];
 integer j;
 
-adam_riscv_v2 u_adam_riscv_v2(
+adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
     .sys_rstn (rst )
 );
@@ -46,8 +46,8 @@ adam_riscv_v2 u_adam_riscv_v2(
 // Wave dump
 //------------------------------------------------------------------------------------------------
 initial begin
-    $dumpfile("tb_v2.vcd");
-    $dumpvars(0, tb_v2);
+    $dumpfile("tb.vcd");
+    $dumpvars(0, tb);
 end
 
 //------------------------------------------------------------------------------------------------

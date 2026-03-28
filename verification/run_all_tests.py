@@ -151,14 +151,14 @@ riscv-none-elf-objcopy -j .data -O verilog {test_name}.elf data.hex
             out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
             out_dir.mkdir(parents=True, exist_ok=True)
 
-            compile_cmd = "iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2_test.out -I ../rtl ../rtl/*.v ../libs/REG_ARRAY/SRAM/ram_bfm.v tb_v2.sv"
+            compile_cmd = "iverilog -g2012 -s tb -o out_iverilog/bin/tb_test.out -I ../rtl ../rtl/*.v ../libs/REG_ARRAY/SRAM/ram_bfm.v tb.sv"
             ret, out, err = self.run_command(compile_cmd, cwd=COMP_TEST_DIR)
             if ret != 0:
                 self.results.append((test_name, "COMPILE_FAIL", err))
                 continue
             
             # Run simulation
-            run_cmd = "vvp out_iverilog/bin/tb_v2_test.out"
+            run_cmd = "vvp out_iverilog/bin/tb_test.out"
             ret, out, err = self.run_command(run_cmd, cwd=COMP_TEST_DIR, timeout=60)
             
             if "PASS" in out:
