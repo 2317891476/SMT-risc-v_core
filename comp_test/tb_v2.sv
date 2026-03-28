@@ -316,7 +316,7 @@ always @(posedge clk) begin
                      u_adam_riscv_v2.u_rob_lite.rob_tail[0],
                      u_adam_riscv_v2.u_rob_lite.rob_count[0],
                      u_adam_riscv_v2.u_rob_lite.rob_head[1],
-                     u_adam_riscv_v2.u_rob_lite.rob_tail[1],
+                     u_adam_riscv_v2.u_rob_lite.rob_head[1],
                      u_adam_riscv_v2.u_rob_lite.rob_count[1],
                      $time);
         end

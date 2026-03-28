@@ -1,3 +1,4 @@
+`timescale 1ns/1ns
 // =============================================================================
 // Module : rob_lite
 // Description: Minimal per-thread Reorder Buffer for in-order commit.
@@ -245,20 +246,26 @@ always @(posedge clk or negedge rstn) begin
         end
 
         // ── WB Completion ──────────────────────────────────────
-        // Mark matching entries as complete
+        // Mark ALL matching entries as complete (handles duplicate tags)
         if (wb0_valid) begin
-            if (wb0_tid == 1'b0 && wb0_match_found_t0) begin
-                rob_complete[0][wb0_match_idx_t0] <= 1'b1;
-            end else if (wb0_tid == 1'b1 && wb0_match_found_t1) begin
-                rob_complete[1][wb0_match_idx_t1] <= 1'b1;
+            for (j = 0; j < ROB_DEPTH; j = j + 1) begin
+                if (wb0_tid == 1'b0 && rob_valid[0][j] && !rob_complete[0][j] && (rob_tag[0][j] == wb0_tag)) begin
+                    rob_complete[0][j] <= 1'b1;
+                end
+                if (wb0_tid == 1'b1 && rob_valid[1][j] && !rob_complete[1][j] && (rob_tag[1][j] == wb0_tag)) begin
+                    rob_complete[1][j] <= 1'b1;
+                end
             end
         end
 
         if (wb1_valid) begin
-            if (wb1_tid == 1'b0 && wb1_match_found_t0) begin
-                rob_complete[0][wb1_match_idx_t0] <= 1'b1;
-            end else if (wb1_tid == 1'b1 && wb1_match_found_t1) begin
-                rob_complete[1][wb1_match_idx_t1] <= 1'b1;
+            for (j = 0; j < ROB_DEPTH; j = j + 1) begin
+                if (wb1_tid == 1'b0 && rob_valid[0][j] && !rob_complete[0][j] && (rob_tag[0][j] == wb1_tag)) begin
+                    rob_complete[0][j] <= 1'b1;
+                end
+                if (wb1_tid == 1'b1 && rob_valid[1][j] && !rob_complete[1][j] && (rob_tag[1][j] == wb1_tag)) begin
+                    rob_complete[1][j] <= 1'b1;
+                end
             end
         end
 

@@ -33,6 +33,14 @@
 // ─── V2 Control ──────────────────────────────────────────────────────────────
 ../rtl/csr_unit.v
 
+// ─── V2 Extensions ───────────────────────────────────────────────────────────
+../rtl/rocc_ai_accelerator.v
+../rtl/mem_subsys.v
+../rtl/l2_cache.v
+../rtl/l2_arbiter.v
+../rtl/clint.v
+../rtl/plic.v
+
 // ─── Shared Modules (V1/V2) ──────────────────────────────────────────────────
 ../rtl/syn_rst.v
 ../rtl/thread_scheduler.v
