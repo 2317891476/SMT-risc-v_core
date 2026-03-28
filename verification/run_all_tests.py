@@ -147,6 +147,10 @@ riscv-none-elf-objcopy -j .data -O verilog {test_name}.elf data.hex
                 continue
             
             # Compile V2 testbench
+            # 确保输出目录存在
+            out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
+            out_dir.mkdir(parents=True, exist_ok=True)
+
             compile_cmd = "iverilog -g2012 -s tb_v2 -o out_iverilog/bin/tb_v2_test.out -I ../rtl ../rtl/*.v ../libs/REG_ARRAY/SRAM/ram_bfm.v tb_v2.sv"
             ret, out, err = self.run_command(compile_cmd, cwd=COMP_TEST_DIR)
             if ret != 0:
