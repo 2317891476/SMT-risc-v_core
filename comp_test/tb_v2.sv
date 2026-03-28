@@ -1,10 +1,18 @@
 `timescale 1ns/1ns
 `define TB_IROM tb_v2.u_adam_riscv_v2.u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb_v2.u_adam_riscv_v2.u_regs_mt
-`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_mem_subsys
+// Legacy data memory path (u_mem_subsys is disabled in current config)
+`define TB_DATA_MEM tb_v2.u_adam_riscv_v2.u_legacy_data_memory.u_ram_data
+// For backward compatibility with test_content.sv
+`define TB_MEM_SUBSYS tb_v2.u_adam_riscv_v2.u_legacy_data_memory.u_ram_data
 `define TUBE_STATUS tb_v2.u_adam_riscv_v2.tube_status
 
 `define RAM_DEEP 4096
+
+// RoCC feature guard - set to 1 to enable RoCC monitoring when accelerator is instantiated
+`ifndef ROCC_ENABLE
+`define ROCC_ENABLE 0
+`endif
 
 // RoCC monitoring hooks (for verification when RoCC is integrated)
 // These macros reference RoCC signals for command/response/DMA tracing
@@ -43,25 +51,32 @@ initial begin
 end
 
 //------------------------------------------------------------------------------------------------
-// Initialize instruction backing store + shared mem_subsys RAM
+// Initialize instruction backing store (from inst.hex)
 //------------------------------------------------------------------------------------------------
-initial begin : init_memories
+initial begin : init_irom
     integer i;
-    reg [31:0] inst_word;
-    reg [31:0] data_word;
-
     for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
         inst_bytes[i] = 8'd0;
-        data_bytes[i] = 8'd0;
     end
     $readmemh("../rom/inst.hex", inst_bytes);
+
+    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
+        `TB_IROM.mem[i] = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
+    end
+end
+
+//------------------------------------------------------------------------------------------------
+// Initialize legacy data memory (from data.hex)
+//------------------------------------------------------------------------------------------------
+initial begin : init_dram
+    integer i;
+    for (i = 0; i < (`RAM_DEEP*4); i = i + 1) begin
+        data_bytes[i] = 8'd0;
+    end
     $readmemh("../rom/data.hex", data_bytes);
 
     for (i = 0; i < `RAM_DEEP; i = i + 1) begin
-        inst_word = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
-        data_word = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
-        `TB_IROM.mem[i]       = inst_word;
-        `TB_MEM_SUBSYS.ram[i] = inst_word | data_word;
+        `TB_DATA_MEM.mem[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
     end
 end
 
@@ -121,46 +136,54 @@ initial begin
     rocc_active_cmd_funct7 = 7'd0;
 end
 
-// RoCC command monitoring (when RoCC is instantiated)
+// RoCC command monitoring (when RoCC is instantiated and enabled)
 // Tracks commands issued to the RoCC accelerator
-always @(posedge clk) begin
-    if (rst) begin
-        rocc_cmd_count <= 32'd0;
-    end
-    // Check if RoCC instance exists and command is valid
-    if (`ROCC_INST_PATH.cmd_valid && `ROCC_INST_PATH.cmd_ready) begin
-        rocc_cmd_count <= rocc_cmd_count + 32'd1;
-        $display("[RoCC MON] CMD: funct7=%0d funct3=%0d rs1=0x%08h rs2=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
-                 `ROCC_INST_PATH.cmd_funct7, `ROCC_INST_PATH.cmd_funct3,
-                 `ROCC_INST_PATH.cmd_rs1_data, `ROCC_INST_PATH.cmd_rs2_data,
-                 `ROCC_INST_PATH.cmd_rd, `ROCC_INST_PATH.cmd_tag,
-                 `ROCC_INST_PATH.cmd_tid, $time);
-        // Track operation start for timeout detection
-        if (`ROCC_INST_PATH.cmd_funct7 == 7'd0 || // GEMM.START
-            `ROCC_INST_PATH.cmd_funct7 == 7'd3 || // SCRATCH.LOAD
-            `ROCC_INST_PATH.cmd_funct7 == 7'd4)   // SCRATCH.STORE
-        begin
-            rocc_operation_active <= 1'b1;
-            rocc_start_cycle <= $time / 50; // Convert to cycle count (20MHz = 50ns)
-            rocc_active_cmd_funct7 <= `ROCC_INST_PATH.cmd_funct7;
+generate
+if (`ROCC_ENABLE) begin : gen_rocc_monitor
+    always @(posedge clk) begin
+        if (rst) begin
+            rocc_cmd_count <= 32'd0;
+        end
+        // Check if RoCC instance exists and command is valid
+        if (`ROCC_INST_PATH.cmd_valid && `ROCC_INST_PATH.cmd_ready) begin
+            rocc_cmd_count <= rocc_cmd_count + 32'd1;
+            $display("[RoCC MON] CMD: funct7=%0d funct3=%0d rs1=0x%08h rs2=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
+                     `ROCC_INST_PATH.cmd_funct7, `ROCC_INST_PATH.cmd_funct3,
+                     `ROCC_INST_PATH.cmd_rs1_data, `ROCC_INST_PATH.cmd_rs2_data,
+                     `ROCC_INST_PATH.cmd_rd, `ROCC_INST_PATH.cmd_tag,
+                     `ROCC_INST_PATH.cmd_tid, $time);
+            // Track operation start for timeout detection
+            if (`ROCC_INST_PATH.cmd_funct7 == 7'd0 || // GEMM.START
+                `ROCC_INST_PATH.cmd_funct7 == 7'd3 || // SCRATCH.LOAD
+                `ROCC_INST_PATH.cmd_funct7 == 7'd4)   // SCRATCH.STORE
+            begin
+                rocc_operation_active <= 1'b1;
+                rocc_start_cycle <= $time / 50; // Convert to cycle count (20MHz = 50ns)
+                rocc_active_cmd_funct7 <= `ROCC_INST_PATH.cmd_funct7;
+            end
         end
     end
 end
+endgenerate
 
-// RoCC response monitoring
-always @(posedge clk) begin
-    if (rst) begin
-        rocc_resp_count <= 32'd0;
-    end
-    if (`ROCC_INST_PATH.resp_valid && `ROCC_INST_PATH.resp_ready) begin
-        rocc_resp_count <= rocc_resp_count + 32'd1;
-        $display("[RoCC MON] RESP: data=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
-                 `ROCC_INST_PATH.resp_data, `ROCC_INST_PATH.resp_rd,
-                 `ROCC_INST_PATH.resp_tag, `ROCC_INST_PATH.resp_tid, $time);
-        // Clear operation active flag on response
-        rocc_operation_active <= 1'b0;
+// RoCC response monitoring (when RoCC is instantiated and enabled)
+generate
+if (`ROCC_ENABLE) begin : gen_rocc_resp_monitor
+    always @(posedge clk) begin
+        if (rst) begin
+            rocc_resp_count <= 32'd0;
+        end
+        if (`ROCC_INST_PATH.resp_valid && `ROCC_INST_PATH.resp_ready) begin
+            rocc_resp_count <= rocc_resp_count + 32'd1;
+            $display("[RoCC MON] RESP: data=0x%08h rd=x%0d tag=%0d tid=%0d @%0t",
+                     `ROCC_INST_PATH.resp_data, `ROCC_INST_PATH.resp_rd,
+                     `ROCC_INST_PATH.resp_tag, `ROCC_INST_PATH.resp_tid, $time);
+            // Clear operation active flag on response
+            rocc_operation_active <= 1'b0;
+        end
     end
 end
+endgenerate
 
 // RoCC DMA transaction monitoring
 always @(posedge clk) begin
@@ -237,6 +260,96 @@ always @(posedge clk) begin
     //         $display("[RoCC STATUS] accel_busy=%0b @%0t", `ROCC_INST_PATH.accel_busy, $time);
     //     end
     // end
+end
+
+//---------------------------------------------------------------------------------------------
+// Debug: Monitor WB signals and ROB state
+//---------------------------------------------------------------------------------------------
+always @(posedge clk) begin
+    if (rst) begin
+        // Monitor dispatch
+        if (u_adam_riscv_v2.disp0_valid_gated && !u_adam_riscv_v2.sb_disp_stall) begin
+            $display("[DISP0] tag=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv_v2.sb_disp0_tag,
+                     u_adam_riscv_v2.dec0_rd,
+                     u_adam_riscv_v2.dec0_tid,
+                     $time);
+        end
+        if (u_adam_riscv_v2.disp1_valid_gated && !u_adam_riscv_v2.sb_disp_stall) begin
+            $display("[DISP1] tag=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv_v2.sb_disp1_tag,
+                     u_adam_riscv_v2.dec1_rd,
+                     u_adam_riscv_v2.dec1_tid,
+                     $time);
+        end
+        // Monitor exec_pipe1 memory requests
+        if (u_adam_riscv_v2.p1_mem_req_valid) begin
+            $display("[P1 MEM REQ] addr=0x%08h wen=%0b wdata=0x%08h tag=%0d @%0t",
+                     u_adam_riscv_v2.p1_mem_req_addr,
+                     u_adam_riscv_v2.p1_mem_req_wen,
+                     u_adam_riscv_v2.p1_mem_req_wdata,
+                     u_adam_riscv_v2.p1_mem_req_tag,
+                     $time);
+        end
+        // Monitor WB0
+        if (u_adam_riscv_v2.wb0_valid) begin
+            $display("[WB0] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
+                     u_adam_riscv_v2.wb0_tag,
+                     u_adam_riscv_v2.wb0_rd,
+                     u_adam_riscv_v2.wb0_tid,
+                     u_adam_riscv_v2.wb0_fu,
+                     $time);
+        end
+        // Monitor WB1
+        if (u_adam_riscv_v2.wb1_valid) begin
+            $display("[WB1] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
+                     u_adam_riscv_v2.wb1_tag,
+                     u_adam_riscv_v2.wb1_rd,
+                     u_adam_riscv_v2.wb1_tid,
+                     u_adam_riscv_v2.wb1_fu,
+                     $time);
+        end
+        // Monitor ROB state (every 100 cycles)
+        if ($time % 1000 == 0) begin
+            $display("[ROB STATE] T0: head=%0d tail=%0d count=%0d | T1: head=%0d tail=%0d count=%0d @%0t",
+                     u_adam_riscv_v2.u_rob_lite.rob_head[0],
+                     u_adam_riscv_v2.u_rob_lite.rob_tail[0],
+                     u_adam_riscv_v2.u_rob_lite.rob_count[0],
+                     u_adam_riscv_v2.u_rob_lite.rob_head[1],
+                     u_adam_riscv_v2.u_rob_lite.rob_tail[1],
+                     u_adam_riscv_v2.u_rob_lite.rob_count[1],
+                     $time);
+        end
+        // Monitor store buffer write attempts
+        if (u_adam_riscv_v2.sb_mem_write_valid) begin
+            $display("[SB WRITE] addr=0x%08h data=0x%08h wen=0x%h @%0t",
+                     u_adam_riscv_v2.sb_mem_write_addr,
+                     u_adam_riscv_v2.sb_mem_write_data,
+                     u_adam_riscv_v2.sb_mem_write_wen,
+                     $time);
+        end
+        // Monitor TUBE write
+        if (u_adam_riscv_v2.legacy_tube_write) begin
+            $display("[TUBE WRITE] status=0x%02h @%0t",
+                     u_adam_riscv_v2.sb_mem_write_data[7:0],
+                     $time);
+        end
+        // Monitor ROB commits
+        if (u_adam_riscv_v2.rob_commit0_valid) begin
+            $display("[ROB COMMIT0] tag=%0d rd=%0d is_store=%0b @%0t",
+                     u_adam_riscv_v2.rob_commit0_tag,
+                     u_adam_riscv_v2.rob_commit0_rd,
+                     u_adam_riscv_v2.rob_commit0_is_store,
+                     $time);
+        end
+        if (u_adam_riscv_v2.rob_commit1_valid) begin
+            $display("[ROB COMMIT1] tag=%0d rd=%0d is_store=%0b @%0t",
+                     u_adam_riscv_v2.rob_commit1_tag,
+                     u_adam_riscv_v2.rob_commit1_rd,
+                     u_adam_riscv_v2.rob_commit1_is_store,
+                     $time);
+        end
+    end
 end
 
 //---------------------------------------------------------------------------------------------
