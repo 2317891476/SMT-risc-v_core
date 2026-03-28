@@ -152,7 +152,17 @@ bpu_bimodal #(
     .update_target (bpu_update_target )
 );
 
-assign ext_mem_bypass_addr = pc_out;
+// Bypass address needs to be delayed by 1 cycle to match mem_subsys RAM read latency
+// When pc_out presents addr_N, mem_subsys reads ram[addr_N] and outputs data on next cycle
+// So bypass_addr should be addr_N when bypass_data is for addr_N
+reg [31:0] pc_out_r;
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        pc_out_r <= 32'd0;
+    else
+        pc_out_r <= pc_out;
+end
+assign ext_mem_bypass_addr = pc_out_r;
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
 // CRITICAL FIX: Synchronous RAM has 1-cycle latency
@@ -213,6 +223,8 @@ wire       response_stale = (resp_epoch_latched != expected_epoch);
 wire       final_valid = valid_latched && resp_valid_latched && !response_stale;
 
 // Use latched values for output (matches RAM timing)
+// Note: inst_from_mem already has 1-cycle latency from icache (registered output)
+// so it aligns with pc_latched which is also delayed 1 cycle.
 assign if_pc         = pc_latched;
 assign if_tid        = tid_latched;
 assign if_valid      = final_valid;

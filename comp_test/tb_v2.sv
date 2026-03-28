@@ -66,6 +66,24 @@ initial begin : init_irom
 end
 
 //------------------------------------------------------------------------------------------------
+// Initialize mem_subsys RAM (for external refill bypass) - MUST match IROM content
+//------------------------------------------------------------------------------------------------
+initial begin : init_mem_subsys
+    integer i;
+    // Wait for inst_bytes to be loaded by init_irom
+    #10;
+    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
+        `TB_MEM_SUBSYS[i] = {inst_bytes[i*4+3], inst_bytes[i*4+2], inst_bytes[i*4+1], inst_bytes[i*4+0]};
+    end
+    // Verify key words including the TUBE write area
+    $display("[MEM_SUBSYS_INIT] ram[24]=%h ram[25]=%h ram[26]=%h ram[27]=%h ram[28]=%h ram[29]=%h", 
+             `TB_MEM_SUBSYS[24], `TB_MEM_SUBSYS[25], `TB_MEM_SUBSYS[26],
+             `TB_MEM_SUBSYS[27], `TB_MEM_SUBSYS[28], `TB_MEM_SUBSYS[29]);
+end
+
+
+
+//------------------------------------------------------------------------------------------------
 // Initialize legacy data memory (from data.hex)
 //------------------------------------------------------------------------------------------------
 initial begin : init_dram
@@ -366,11 +384,13 @@ always @(posedge clk) begin
     if (rst) begin
         heartbeat_counter <= heartbeat_counter + 32'd1;
         if (heartbeat_counter % 1000 == 0) begin
-            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h dec0_valid=%b sb_disp_stall=%b rst=%b @%0t", 
-                     heartbeat_counter, 
+            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b rst=%b @%0t",
+                     heartbeat_counter,
                      u_adam_riscv_v2.dec0_pc,
+                     u_adam_riscv_v2.if_valid,
+                     u_adam_riscv_v2.if_inst,
                      u_adam_riscv_v2.dec0_valid,
-                     u_adam_riscv_v2.sb_disp_stall,
+                     u_adam_riscv_v2.fb_pop0_valid,
                      rst,
                      $time);
         end

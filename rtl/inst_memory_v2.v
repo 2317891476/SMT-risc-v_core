@@ -44,7 +44,15 @@ wire [31:0] icache_resp_data;
 wire [0:0]  icache_resp_tid;
 wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
+wire [31:0] backing_store_data_raw;
 wire [31:0] backing_store_data;
+
+// Backing store has 1-cycle read latency (synchronous RAM).
+// When icache detects a miss on cycle N+1 for address presented on cycle N,
+// the backing_store_data_raw IS the data for that address (1-cycle delayed).
+// No additional register needed - the raw output aligns with miss detection.
+assign backing_store_data = backing_store_data_raw;
+
 wire [31:0] miss_bypass_data = use_external_refill ? ext_mem_bypass_data : backing_store_data;
 
 // ICache memory interface signals
@@ -137,13 +145,24 @@ icache_mem_adapter #(
 
 // Backing Store (preserved hierarchy for testbench compatibility)
 // This provides both the bypass data and the fill data
+// Note: icache uses registered address internally, so we need to match that timing
+// The icache presents address in cycle N, detects miss in cycle N+1 on registered addr
+// So backing_store should also use registered address for bypass to align
+reg [31:0] inst_addr_r;
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        inst_addr_r <= 32'd0;
+    else
+        inst_addr_r <= inst_addr;
+end
+
 inst_backing_store #(
     .IROM_SPACE (IROM_SPACE)
 ) u_inst_backing_store (
     .clk       (clk               ),
     .rstn      (rstn              ),
-    .inst_addr (inst_addr         ),  // Direct read address
-    .inst_o    (backing_store_data)
+    .inst_addr (inst_addr_r     ),  // Registered address to match icache internal timing
+    .inst_o    (backing_store_data_raw)
 );
 
 // Output assignment

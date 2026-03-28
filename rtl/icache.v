@@ -129,9 +129,10 @@ always @(posedge clk or negedge rstn) begin
         resp_tid_r   <= req_tid_r;
         resp_epoch_r <= req_epoch_r;
         
-        // Response is valid if epochs match (not stale)
-        // This check happens when we output the response
-        resp_valid_r <= !response_stale && (hit || (state != S_IDLE));
+        // Response valid on hit OR during fill (bypass data available)
+        // Also valid on first cycle of miss (state transition happens after this)
+        // Note: stale check is done downstream in stage_if_v2 using per-thread epochs
+        resp_valid_r <= hit || (state != S_IDLE) || (!hit && state == S_IDLE);
         
         // Output data
         if (hit) begin
@@ -144,7 +145,8 @@ always @(posedge clk or negedge rstn) begin
         // Output tags (registered from request)
         cpu_resp_tid   <= resp_tid_r;
         cpu_resp_epoch <= resp_epoch_r;
-        cpu_resp_valid <= resp_valid_r && !response_stale;
+        // Pass through valid - stale check done by caller
+        cpu_resp_valid <= resp_valid_r;
     end
 end
 
