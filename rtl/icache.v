@@ -131,7 +131,7 @@ always @(posedge clk or negedge rstn) begin
         
         // Response valid on hit OR during fill (bypass data available)
         // Also valid on first cycle of miss (state transition happens after this)
-        // Note: stale check is done downstream in stage_if_v2 using per-thread epochs
+        // Note: stale check is done downstream in stage_if using per-thread epochs
         resp_valid_r <= hit || (state != S_IDLE) || (!hit && state == S_IDLE);
         
         // Output data

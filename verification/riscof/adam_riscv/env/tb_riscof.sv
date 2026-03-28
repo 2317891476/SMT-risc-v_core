@@ -1,6 +1,6 @@
 `timescale 1ns/1ns
 
-// RISCOF Testbench for AdamRiscv V2
+// RISCOF Testbench for AdamRiscv
 // This testbench loads hex files, runs simulation, and extracts signature
 
 module tb_riscof;
@@ -21,7 +21,7 @@ reg [31:0] irom [0:4095];
 reg [31:0] dram [0:4095];
 
 // Instantiate DUT
-adam_riscv_v2 u_dut (
+adam_riscv u_dut (
     .sys_clk  (clk),
     .sys_rstn (rst)
 );
@@ -57,7 +57,7 @@ initial begin
     
     // Initialize DUT memories
     for (i = 0; i < 4096; i = i + 1) begin
-        u_dut.u_stage_if_v2.u_inst_memory.u_ram_data.mem[i] = irom[i];
+        u_dut.u_stage_if.u_inst_memory.u_ram_data.mem[i] = irom[i];
     end
     for (i = 0; i < 4096; i = i + 1) begin
         u_dut.u_stage_mem.u_data_memory.u_ram_data.mem[i] = dram[i];

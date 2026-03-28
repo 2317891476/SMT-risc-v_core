@@ -3,7 +3,7 @@ integer test_id;
 reg pass;
 
 // RoCC test status extraction from x3 (STATUS.READ writes here)
-// Per define_v2.v: STATUS.READ returns {29'b0, error, done, busy}
+// Per define.v: STATUS.READ returns {29'b0, error, done, busy}
 `define ROCC_STATUS_BUSY_BIT  0
 `define ROCC_STATUS_DONE_BIT  1
 `define ROCC_STATUS_ERROR_BIT 2

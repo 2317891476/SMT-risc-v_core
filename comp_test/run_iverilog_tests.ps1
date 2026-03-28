@@ -1,12 +1,10 @@
 [CmdletBinding()]
 param(
     [string[]]$Tests,
-    [ValidateSet("V1", "V2")]
-    [string]$Flow = "V2",
     [switch]$NoGtkWave,
     [switch]$StopOnError,
     [switch]$DryRun,
-    [string]$DryRunReportPath = ".sisyphus/evidence/task-2-v2-sim-entrypoint.md"
+    [string]$DryRunReportPath = ".sisyphus/evidence/task-2-sim-entrypoint.md"
 )
 
 Set-StrictMode -Version Latest
@@ -121,35 +119,16 @@ function Format-CommandLine {
 }
 
 function Get-FlowConfig {
-    param([Parameter(Mandatory = $true)][ValidateSet("V1", "V2")][string]$Name)
-
-    switch ($Name) {
-        "V1" {
-            return [PSCustomObject]@{
-                Name           = "V1"
-                TestbenchPath  = Resolve-FromCompDir -PathText "tb.sv"
-                ModuleListPath = Resolve-FromCompDir -PathText "module_list"
-                TopModule      = "tb"
-                TmpVcdPath     = Join-Path $CompDir "tb.vcd"
-                DefaultIncDirs = @(
-                    (Resolve-FromCompDir -PathText "."),
-                    (Resolve-FromCompDir -PathText "../rtl/")
-                )
-            }
-        }
-        "V2" {
-            return [PSCustomObject]@{
-                Name           = "V2"
-                TestbenchPath  = Resolve-FromCompDir -PathText "tb_v2.sv"
-                ModuleListPath = Resolve-FromCompDir -PathText "module_list_v2"
-                TopModule      = "tb_v2"
-                TmpVcdPath     = Join-Path $CompDir "tb_v2.vcd"
-                DefaultIncDirs = @(
-                    (Resolve-FromCompDir -PathText "."),
-                    (Resolve-FromCompDir -PathText "../rtl/")
-                )
-            }
-        }
+    return [PSCustomObject]@{
+        Name           = "Standard"
+        TestbenchPath  = Resolve-FromCompDir -PathText "tb.sv"
+        ModuleListPath = Resolve-FromCompDir -PathText "module_list"
+        TopModule      = "tb"
+        TmpVcdPath     = Join-Path $CompDir "tb.vcd"
+        DefaultIncDirs = @(
+            (Resolve-FromCompDir -PathText "."),
+            (Resolve-FromCompDir -PathText "../rtl/")
+        )
     }
 }
 
@@ -387,7 +366,7 @@ function Write-DryRunReport {
     Set-Content -Path $ReportPath -Value $lines -Encoding utf8
 }
 
-$flowConfig = Get-FlowConfig -Name $Flow
+$flowConfig = Get-FlowConfig
 Assert-PathExists -Path $flowConfig.TestbenchPath -Description "Testbench"
 Assert-PathExists -Path $flowConfig.ModuleListPath -Description "Module list"
 

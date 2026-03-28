@@ -20,7 +20,7 @@
 `define ROCC_INST_PATH tb.u_adam_riscv.u_rocc_ai_accelerator
 `endif
 
-// RoCC STATUS.READ result bits (per define_v2.v)
+// RoCC STATUS.READ result bits (per define.v)
 `define ROCC_STATUS_BUSY  0
 `define ROCC_STATUS_DONE  1
 `define ROCC_STATUS_ERROR 2
@@ -99,7 +99,7 @@ initial begin : init_dram
 end
 
 initial begin
-    $display ($time, "<<Starting V2 simulation>>");
+    $display ($time, "<<Starting simulation>>");
     for(j=0; j<50; j=j+1)
         $display("%d: %h", j, `TB_IROM.mem[j]);
     clk = 1'b1;
@@ -408,7 +408,7 @@ task    TEST_PASS;
     $display("=========    P        A         A        S        S    ===========");
     $display("=========    P       A           A  SSSSS    SSSSS     ===========");
     $display("==================================================================");
-    $display("========= V2 case PASS !!! %d",$time);
+    $display("========= Test PASS !!! %d",$time);
     $display("==================================================================");
     $finish;
 endtask
@@ -419,7 +419,7 @@ task    TEST_FAIL;
     $display("=========     FFFFFFF    AAAAAAA       I    L         ============");
     $display("=========     F       A           A   III   LLLLLLL   ============");
     $display("==================================================================");
-    $display("========= V2 case FAILED !!! %d",$time);
+    $display("========= Test FAILED !!! %d",$time);
     $display("==================================================================");
     $finish;
 endtask

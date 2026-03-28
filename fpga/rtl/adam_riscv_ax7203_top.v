@@ -10,7 +10,7 @@
 //   - Handles reset synchronization
 //   - Exposes UART TX/RX for CP2102 USB-UART bridge
 //   - Transmits "AdamRiscv AX7203 Boot\r\n" on startup via UART
-//   - Instantiates adam_riscv_v2 core with FPGA_MODE enabled
+//   - Instantiates adam_riscv core with FPGA_MODE enabled
 // =============================================================================
 
 `ifndef FPGA_MODE

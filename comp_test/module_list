@@ -7,7 +7,7 @@
 // ─── Defines (define_v2.v includes define.v) ─────────────────────────────────
 // Note: define_v2.v is included by adam_riscv.v via `include
 
-// ─── V2 Frontend ─────────────────────────────────────────────────────────────
+// ─── Frontend ─────────────────────────────────────────────────────────────
 ../rtl/stage_if.v
 ../rtl/bpu_bimodal.v
 ../rtl/fetch_buffer.v
@@ -17,7 +17,7 @@
 ../rtl/icache_mem_adapter.v
 ../rtl/inst_backing_store.v
 
-// ─── V2 OoO Engine ───────────────────────────────────────────────────────────
+// ─── OoO Engine ───────────────────────────────────────────────────────────
 ../rtl/scoreboard.v
 ../rtl/rob_lite.v
 ../rtl/bypass_network.v
@@ -25,15 +25,15 @@
 ../rtl/exec_pipe1.v
 ../rtl/mul_unit.v
 
-// ─── V2 Memory Pipeline ──────────────────────────────────────────────────────
+// ─── Memory Pipeline ──────────────────────────────────────────────────────
 ../rtl/lsu_shell.v
 ../rtl/store_buffer.v
 ../rtl/data_memory.v
 
-// ─── V2 Control ──────────────────────────────────────────────────────────────
+// ─── Control ──────────────────────────────────────────────────────────────
 ../rtl/csr_unit.v
 
-// ─── V2 Extensions ───────────────────────────────────────────────────────────
+// ─── Extensions ───────────────────────────────────────────────────────────
 ../rtl/rocc_ai_accelerator.v
 ../rtl/mem_subsys.v
 ../rtl/l2_cache.v
