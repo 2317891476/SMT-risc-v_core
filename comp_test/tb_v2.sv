@@ -358,6 +358,26 @@ end
 `include "test_content.sv"
 
 //---------------------------------------------------------------------------------------------
+// Heartbeat counter - verify simulation is advancing
+//---------------------------------------------------------------------------------------------
+reg [31:0] heartbeat_counter;
+initial heartbeat_counter = 32'd0;
+always @(posedge clk) begin
+    if (rst) begin
+        heartbeat_counter <= heartbeat_counter + 32'd1;
+        if (heartbeat_counter % 1000 == 0) begin
+            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h dec0_valid=%b sb_disp_stall=%b rst=%b @%0t", 
+                     heartbeat_counter, 
+                     u_adam_riscv_v2.dec0_pc,
+                     u_adam_riscv_v2.dec0_valid,
+                     u_adam_riscv_v2.sb_disp_stall,
+                     rst,
+                     $time);
+        end
+    end
+end
+
+//---------------------------------------------------------------------------------------------
 // show test result
 //---------------------------------------------------------------------------------------------
 task    TEST_PASS;
