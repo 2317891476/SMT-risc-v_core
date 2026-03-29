@@ -49,7 +49,7 @@ class TestRunner:
         self.start_time = None
         
     def log(self, msg, level="INFO"):
-        prefix = "  " if level != "ERROR" else "  ✗ "
+        prefix = "  " if level != "ERROR" else "  [ERR] "
         print(f"{prefix}{msg}")
     
     def run_command(self, cmd, cwd=None, timeout=300):
@@ -144,6 +144,13 @@ riscv-none-elf-objcopy -j .data -O verilog {test_name}.elf data.hex
             ret, out, err = self.run_command(build_cmd, cwd=ROM_DIR)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))
+                self.log(f"{test_name}: BUILD_FAIL - {err[:100] if err else 'Unknown error'}", "ERROR")
+                # Clean up stale hex files to prevent subsequent tests from using wrong ROM
+                for stale_file in ["inst.hex", "data.hex"]:
+                    stale_path = ROM_DIR / stale_file
+                    if stale_path.exists():
+                        stale_path.unlink()
+                        self.log(f"Cleaned up stale {stale_file}", "INFO")
                 continue
             
             # Compile V2 testbench
