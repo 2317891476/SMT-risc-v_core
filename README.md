@@ -270,21 +270,26 @@ $env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;E:\iverilo
 ### 运行全部回归测试 
 
 ```powershell
-cd .\comp_test
-$env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;" + $env:PATH
-.\run_iverilog_tests.ps1 -Tests @("test1.s","test2.S","test_rv32i_full.s","test_smt.s") -NoGtkWave
+python verification/run_all_tests.py --basic
 ```
 
 期望输出:
 
 ```
-========== Summary ==========
-Test              Status
-----              ------
-test1.s           PASS
-test2.S           PASS
-test_rv32i_full.s PASS
-test_smt.s        PASS
+============================================================
+  AdamRiscv Unified Test Runner
+  2026-03-29 13:59:12
+============================================================
+  Running basic tests...
+  Testing test1...
+  test1: PASS
+  Testing test2...
+  test2: PASS
+  ...
+============================================================
+  Test Summary
+============================================================
+  Total: 18 passed, 0 failed, 0 skipped
 ```
 
 ### 运行 RoCC 协处理器测试
@@ -397,12 +402,10 @@ python verification/run_riscv_tests.py --suite all                   # 运行所
 ### 运行 管线仿真（Canonical Entrypoint）
 
 ```powershell
-cd .\comp_test
-$env:PATH = "E:\iverilog\bin;E:\xpack-riscv-none-elf-gcc-15.2.0-1\bin;" + $env:PATH
-.\run_iverilog_tests.ps1 -Tests @("test1.s","test2.S","test_smt.s") -NoGtkWave
+python verification/run_all_tests.py --basic
 ```
 
-`run_iverilog_tests.ps1` 是 AX7203 / 仿真的规范入口；它会显式解析 `tb.sv`、`module_list` 和 `..\rtl\`，不再文档化裸 `iverilog` 命令。
+`run_all_tests.py` 是 AX7203 / 仿真的规范入口；它会自动处理 ROM 编译、仿真运行和结果验证，为每个测试独立生成 `inst.hex` 和 `data.hex`。
 
 ---
 
@@ -735,4 +738,4 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 ### 编译选项
 
-仿真编译/运行统一由 `comp_test/run_iverilog_tests.ps1` 处理；测试差异通过 `-Tests` 选择，不再维护单独的裸 `iverilog` 编译命令。
+仿真编译/运行统一由 `verification/run_all_tests.py` 处理；测试差异通过 `--tests` 选择，不再维护单独的裸 `iverilog` 编译命令。
