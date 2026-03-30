@@ -289,24 +289,24 @@ python verification/run_all_tests.py --basic
 ============================================================
   Test Summary
 ============================================================
-  Total: 18 passed, 0 failed, 0 skipped
+  Total: 26 passed, 0 failed, 0 skipped
 ```
 
 ### 运行 RoCC 协处理器测试
 
-RoCC 测试已集成到基础测试套件中，包含 3 个专项测试：
+RoCC 目前已经改成**可配置开关**；默认 `--basic` 回归**不启用** RoCC RTL，也**不包含** 3 个 RoCC 专项测试。需要显式加 `--enable-rocc` 才会打开加速器并纳入回归。
 
 ```powershell
-# 运行所有 RoCC 测试（包含在 --basic 中）
-python verification/run_all_tests.py --basic
+# 运行基础回归 + RoCC 测试（26 个基础测试 + 3 个 RoCC 测试）
+python verification/run_all_tests.py --basic --enable-rocc
 
 # 单独运行特定 RoCC 测试
-python verification/run_all_tests.py --basic --tests test_rocc_dma.s
-python verification/run_all_tests.py --basic --tests test_rocc_status.s
-python verification/run_all_tests.py --basic --tests test_rocc_gemm.s
+python verification/run_all_tests.py --basic --enable-rocc --tests test_rocc_dma.s
+python verification/run_all_tests.py --basic --enable-rocc --tests test_rocc_status.s
+python verification/run_all_tests.py --basic --enable-rocc --tests test_rocc_gemm.s
 
 # 一次运行所有 RoCC 测试
-python verification/run_all_tests.py --basic --tests test_rocc_dma.s test_rocc_status.s test_rocc_gemm.s
+python verification/run_all_tests.py --basic --enable-rocc --tests test_rocc_dma.s test_rocc_status.s test_rocc_gemm.s
 ```
 
 RoCC 测试说明：
@@ -367,7 +367,8 @@ python verification/run_riscv_tests.py --suite riscv-tests
 python verification/run_all_tests.py --basic --riscv-tests --riscv-arch-test
 
 # 单独运行各测试集
-python verification/run_all_tests.py --basic              # 基础测试 (8个测试，包含 Store Buffer 测试)
+python verification/run_all_tests.py --basic              # 基础测试 (默认 26 个测试，不含 RoCC)
+python verification/run_all_tests.py --basic --enable-rocc  # 基础测试 + 3 个 RoCC 测试
 python verification/run_all_tests.py --riscv-tests        # 经典 riscv-tests (自动下载)
 python verification/run_all_tests.py --riscv-arch-test    # 官方 arch-test (自动下载)
 
@@ -392,11 +393,14 @@ python verification/run_riscv_tests.py --suite all                   # 运行所
   [PASS] test_store_buffer_forwarding: PASS
   [PASS] test_store_buffer_hazard: PASS
   [PASS] test_commit_flush_store: PASS
+  [PASS] test_store_buffer_stream_multiline: PASS
+  [PASS] test_l2_mmio_ping_pong: PASS
+  [PASS] test_plic_retrigger: PASS
   [PASS] riscv-tests: PASS (46/50 passed)
   [PASS] riscv-arch-test: PASS (47/47 passed)
 
 ------------------------------------------------------------
-  Total: 10 passed, 0 failed, 0 skipped
+  Total: 28 passed, 0 failed, 0 skipped
 ```
 
 ### 运行 管线仿真（Canonical Entrypoint）
@@ -407,30 +411,47 @@ python verification/run_all_tests.py --basic
 
 `run_all_tests.py` 是 AX7203 / 仿真的规范入口；它会自动处理 ROM 编译、仿真运行和结果验证，为每个测试独立生成 `inst.hex` 和 `data.hex`。
 
+当前脚本行为已经同步到 Windows 仿真环境：
+- ROM 构建使用**顺序、无 shell 拼接**的命令调用，避免 `cmd.exe` 多行命令吞掉后续 `objcopy`
+- 每个测试前都会清理并重建 `inst.hex` / `data.hex`，避免陈旧镜像污染后续回归
+- PASS/FAIL 判定以 testbench 的明确结果标记为准，不再依赖宽松的字符串包含判断
+
 ---
 
 ## 7. 测试集说明
 
 ### 7.1 基础测试 (Basic Tests)
 
+当前 `--basic` 默认包含 **26** 个测试；RoCC 的 3 个专项测试默认关闭，需要 `--enable-rocc` 才会纳入回归。`test_smt.s` 仍可通过 `--tests test_smt.s` 单独运行，但不在当前默认 basic 集合内。
+
 | 测试文件 | 覆盖内容 | 验证方式 |
 |---------|---------|---------|
 | `test1.s` | ADD/SUB/AND/OR/XOR/LW/SW | 寄存器 x1-x9 + DRAM 黄金值 |
 | `test2.S` | Scoreboard RAW 冒险链 (ADD→SUB→LW→SW→LW) | 寄存器 x1-x9 + DRAM 黄金值 |
-| `test_smt.s` | SMT: T0 求和 1+..+10=55, T1 乘法 10×3=30 | DRAM[1152]=0x37, DRAM[1153]=0x1E |
 | `test_rv32i_full.s` | **RV32I 全部 47 条指令** (详见下表) | 9 个 DRAM 检查点 + TUBE 标记 |
 | `test_store_buffer_simple.s` | Store Buffer 基础功能测试 | 存储-加载验证 |
 | `test_store_buffer_commit.s` | Store Buffer 提交边界测试 | ROB 提交时序验证 |
 | `test_store_buffer_forwarding.s` | Store-Load 转发测试 | 数据前递验证 |
 | `test_store_buffer_hazard.s` | Store Buffer 冒险检测测试 | RAW/WAW 冒险处理 |
 | `test_commit_flush_store.s` | Flush 时 Store 提交测试 | 投机执行回滚验证 |
+| `test_store_buffer_wraparound.s` | Store Buffer 环回与重复覆盖测试 | head/tail 回卷、后写覆盖前写 |
+| `test_store_buffer_subword_merge.s` | 子字节/半字写合并测试 | byte/halfword lane 对齐与读回 |
+| `test_store_buffer_flush_preserve.s` | trap/flush 后已提交 store 保留测试 | 已提交项继续排空，未提交项回滚 |
+| `test_store_buffer_latest_write_wins.s` | 同地址连续覆盖测试 | latest-write-wins、partial/full store 叠加 |
+| `test_store_buffer_stream_multiline.s` | 跨多 cache line 连续写压力测试 | 长串流 store 提交与整段回读 |
 | `test_l2_icache_refill.s` | ★ L2 I-Cache 填充测试 | 指令缓存缺失处理 |
 | `test_l2_i_d_arbiter.s` | ★ L2 I/D 仲裁器测试 | 指令/数据仲裁验证 |
 | `test_l2_mmio_bypass.s` | ★ L2 MMIO 旁路测试 | 非缓存内存映射访问 |
+| `test_l2_subword_store_hit.s` | ★ L2 子字节写命中测试 | byte lane 更新与相邻字隔离 |
+| `test_l2_line_boundary_rw.s` | ★ L2 行边界读写测试 | 相邻 cache line 边界稳定性 |
+| `test_l2_mmio_cache_isolation.s` | ★ L2/MMIO 隔离测试 | cacheable RAM 与 MMIO 流量隔离 |
+| `test_l2_mmio_ping_pong.s` | ★ L2/MMIO 交错压力测试 | cacheable 数据在 CLINT/PLIC 交错访问下保持稳定 |
 | `test_csr_mret_smoke.s` | ★ CSR/MRET 基础测试 | CSR 读写、MRET 指令 |
 | `test_clint_timer_interrupt.s` | ★ CLINT 定时器中断 | 定时器中断 (mcause=0x80000007) |
 | `test_plic_external_interrupt.s` | ★ PLIC 外部中断 | 外部中断 (mcause=0x8000000B) |
 | `test_interrupt_mask_mret.s` | ★ 中断掩码/MRET | 中断使能/屏蔽/MRET 返回 |
+| `test_clint_timer_rearm.s` | ★ CLINT 定时器重装测试 | 多次 mtimecmp 触发与重新 armed |
+| `test_plic_retrigger.s` | ★ PLIC pending/重触发测试 | threshold mask、pending 保留与再次投递 |
 
 **注：** `test_rv32i_full.s` 包含 17 条分支指令，用于验证分支预测单元 (BPU)。
 
@@ -475,6 +496,11 @@ python verification/run_all_tests.py --basic
 | `test_store_buffer_forwarding.s` | Store-Load 转发 | 同地址 Store-Load 数据前递 |
 | `test_store_buffer_hazard.s` | 冒险检测 | RAW/WAW 冒险识别与处理 |
 | `test_commit_flush_store.s` | Flush 回滚 | 投机执行失败时 Store 缓冲区清理 |
+| `test_store_buffer_wraparound.s` | 队列环回 | 超过队列深度后的 head/tail 回卷正确性 |
+| `test_store_buffer_subword_merge.s` | 子字节写合并 | `sb/sh` 地址偏移、lane 合并与符号/零扩展 |
+| `test_store_buffer_flush_preserve.s` | flush 保留已提交项 | 已 commit store 不被 trap/global flush 误删 |
+| `test_store_buffer_latest_write_wins.s` | 同地址覆盖 | newer store 必须覆盖 older store 的可见值 |
+| `test_store_buffer_stream_multiline.s` | 长串流写入 | 跨多行连续 store、排空与整段读回 |
 
 **运行方式：**
 ```powershell
@@ -701,18 +727,17 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 ## 14. 验证状态
 
-### 基础测试
+### 基础测试（截至 2026-03-30，本地 `--basic` 回归）
 
 | 测试 | 结果 |
 |------|---------|
-| test1.s | ✅ PASS |
-| test2.S | ✅ PASS |
-| test_rv32i_full.s | ✅ PASS |
-| test_smt.s | ✅ PASS (SMT模式) |
-| **Store Buffer 测试 (5个)** | ✅ PASS |
-| **L2 缓存测试 (3个)** | ✅ PASS |
-| **中断测试 (4个)** | ✅ PASS |
-| **总计** | **15/15** |
+| 核心功能测试 (`test1` / `test2` / `test_rv32i_full`) | ✅ PASS |
+| **Store Buffer 测试 (10个)** | ✅ PASS |
+| **L2/Cache/MMIO 测试 (7个)** | ✅ PASS |
+| **CSR/中断测试 (6个)** | ✅ PASS |
+| **默认 basic 总计** | **26/26 PASS** |
+| `test_smt.s` | 可单独运行，不在当前默认 `--basic` 集合中 |
+| `test_rocc_*.s` (3个) | 默认关闭；需 `--enable-rocc` 显式打开 |
 
 ### riscv-tests (经典测试集)
 
