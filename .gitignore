@@ -17,13 +17,23 @@
 *.cgf
 
 # Build artifacts
-*.s
 *.map
 *.dump
 *.verilog
 
 # Verilog hex files (generated from assembly)
 *.hex
+rom/inst.hex
+rom/data.hex
+
+# Generated assembly is ignored by default, but ROM tests are source files.
+*.s
+!rom/*.s
+!rom/*.S
+
+# Simulation/debug outputs
+comp_test/out_iverilog/
+comp_test/ghostbug*.txt
 
 # RISCOF work directories
 verification/riscof/dut/
