@@ -36,6 +36,7 @@ module stage_is(
 wire[6:0] opcode;
 wire[2:0] func3;
 wire      func7_code;
+wire      ctrl_regs_write;
 
 assign opcode        = is_inst[6:0];
 assign func3         = is_inst[14:12];
@@ -68,8 +69,10 @@ ctrl u_ctrl(
     .alu_src1     (is_alu_src1    ),
     .alu_src2     (is_alu_src2    ),
     .br_addr_mode (is_br_addr_mode),
-    .regs_write   (is_regs_write  )
+    .regs_write   (ctrl_regs_write)
 );
+
+assign is_regs_write = ctrl_regs_write || is_csr;
 
 imm_gen u_imm_gen(
     .inst  (is_inst),

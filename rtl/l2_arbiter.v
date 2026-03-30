@@ -103,6 +103,12 @@ wire m2_cacheable = addr_is_ram_m2;
 reg [1:0] last_grant;
 reg active;             // Transaction in progress
 reg [1:0] master_select; // 2'b00=M0, 2'b01=M1, 2'b10=M2
+reg [31:0] req_addr_r;
+reg        req_write_r;
+reg [31:0] req_wdata_r;
+reg [3:0]  req_wen_r;
+reg        req_uncached_r;
+reg        req_issued;
 
 // Request detection
 wire m0_requesting = m0_req_valid && m0_cacheable;
@@ -156,26 +162,63 @@ always @(posedge clk or negedge rstn) begin
         last_grant <= 2'b00;
         active <= 1'b0;
         master_select <= 2'b00;
+        req_addr_r <= 32'd0;
+        req_write_r <= 1'b0;
+        req_wdata_r <= 32'd0;
+        req_wen_r <= 4'd0;
+        req_uncached_r <= 1'b0;
+        req_issued <= 1'b0;
     end else begin
         if (!active) begin
             // Start new transaction
             if (next_grant_m0) begin
+                `ifndef SYNTHESIS
+                $display("[L2 ARB] grant M0 addr=%h", m0_req_addr);
+                `endif
                 active <= 1'b1;
                 master_select <= 2'b00;
                 last_grant <= 2'b00;
+                req_addr_r <= m0_req_addr;
+                req_write_r <= 1'b0;
+                req_wdata_r <= 32'd0;
+                req_wen_r <= 4'd0;
+                req_uncached_r <= 1'b0;
+                req_issued <= 1'b0;
             end else if (next_grant_m1) begin
+                `ifndef SYNTHESIS
+                $display("[L2 ARB] grant M1 addr=%h write=%0b wdata=%h", m1_req_addr, m1_req_write, m1_req_wdata);
+                `endif
                 active <= 1'b1;
                 master_select <= 2'b01;
                 last_grant <= 2'b01;
+                req_addr_r <= m1_req_addr;
+                req_write_r <= m1_req_write;
+                req_wdata_r <= m1_req_wdata;
+                req_wen_r <= m1_req_wen;
+                req_uncached_r <= addr_is_uncached_m1;
+                req_issued <= 1'b0;
             end else if (next_grant_m2) begin
                 active <= 1'b1;
                 master_select <= 2'b10;
                 last_grant <= 2'b10;
+                req_addr_r <= m2_req_addr;
+                req_write_r <= m2_req_write;
+                req_wdata_r <= m2_req_wdata;
+                req_wen_r <= m2_req_wen;
+                req_uncached_r <= 1'b0;
+                req_issued <= 1'b0;
             end
         end else begin
+            if (!req_issued && l2_req_ready) begin
+                req_issued <= 1'b1;
+            end
             // Transaction in progress - check for completion
-            if (l2_resp_valid && l2_resp_last) begin
+            if (req_issued && l2_resp_valid && l2_resp_last) begin
+                `ifndef SYNTHESIS
+                $display("[L2 ARB] resp master=%0d data=%h", master_select, l2_resp_data);
+                `endif
                 active <= 1'b0;
+                req_issued <= 1'b0;
             end
         end
     end
@@ -185,36 +228,29 @@ end
 // Request Muxing to L2 Cache
 // ═════════════════════════════════════════════════════════════════════════════
 
-assign l2_req_valid = active;
+assign l2_req_valid = active && !req_issued;
 
-// 3-way mux using master_select
-// master_select: 2'b00=M0, 2'b01=M1, 2'b10=M2
-assign l2_req_addr  = (master_select == 2'b10) ? m2_req_addr  :
-                      (master_select == 2'b01) ? m1_req_addr  : m0_req_addr;
-assign l2_req_write = (master_select == 2'b10) ? m2_req_write :
-                      (master_select == 2'b01) ? m1_req_write : 1'b0;  // M0 never writes
-assign l2_req_wdata = (master_select == 2'b10) ? m2_req_wdata :
-                      (master_select == 2'b01) ? m1_req_wdata : 32'd0;
-assign l2_req_wen   = (master_select == 2'b10) ? m2_req_wen   :
-                      (master_select == 2'b01) ? m1_req_wen   : 4'd0;
-// Only M1 can have uncached MMIO accesses
-assign l2_req_uncached = (master_select == 2'b01) ? addr_is_uncached_m1 : 1'b0;
+assign l2_req_addr  = req_addr_r;
+assign l2_req_write = req_write_r;
+assign l2_req_wdata = req_wdata_r;
+assign l2_req_wen   = req_wen_r;
+assign l2_req_uncached = req_uncached_r;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Response Demuxing from L2 Cache
 // ═════════════════════════════════════════════════════════════════════════════
 
 // M0 response
-assign m0_resp_valid = l2_resp_valid && (master_select == 2'b00) && active;
+assign m0_resp_valid = l2_resp_valid && req_issued && (master_select == 2'b00) && active;
 assign m0_resp_data  = l2_resp_data;
 assign m0_resp_last  = l2_resp_last && (master_select == 2'b00);
 
 // M1 response
-assign m1_resp_valid = l2_resp_valid && (master_select == 2'b01) && active;
+assign m1_resp_valid = l2_resp_valid && req_issued && (master_select == 2'b01) && active;
 assign m1_resp_data  = l2_resp_data;
 
 // M2 response (RoCC DMA)
-assign m2_resp_valid = l2_resp_valid && (master_select == 2'b10) && active;
+assign m2_resp_valid = l2_resp_valid && req_issued && (master_select == 2'b10) && active;
 assign m2_resp_data  = l2_resp_data;
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -222,13 +258,13 @@ assign m2_resp_data  = l2_resp_data;
 // ═════════════════════════════════════════════════════════════════════════════
 
 // M0 ready when not active or when completing M0 transaction
-assign m0_req_ready = !active ? next_grant_m0 : (master_select == 2'b00 && l2_req_ready);
+assign m0_req_ready = !active ? next_grant_m0 : (master_select == 2'b00 && !req_issued && l2_req_ready);
 
 // M1 ready when not active or when completing M1 transaction  
-assign m1_req_ready = !active ? next_grant_m1 : (master_select == 2'b01 && l2_req_ready);
+assign m1_req_ready = !active ? next_grant_m1 : (master_select == 2'b01 && !req_issued && l2_req_ready);
 
 // M2 ready when not active or when completing M2 transaction  
-assign m2_req_ready = !active ? next_grant_m2 : (master_select == 2'b10 && l2_req_ready);
+assign m2_req_ready = !active ? next_grant_m2 : (master_select == 2'b10 && !req_issued && l2_req_ready);
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Status Outputs

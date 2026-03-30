@@ -103,6 +103,13 @@ wire [L2_TAG_W-1:0]     req_tag    = addr[31:L2_SET_IDX_W+L2_OFFSET_W];
 wire [L2_SET_IDX_W-1:0] req_set    = addr[L2_SET_IDX_W+L2_OFFSET_W-1:L2_OFFSET_W];
 wire [L2_OFFSET_W-1:0]  req_offset = addr[L2_OFFSET_W-1:0];
 wire [2:0]              req_word   = addr[4:2]; // Word index within line
+wire [31:0]             hit_word_data = data_array[req_set][hit_way][req_word];
+wire [31:0]             update_word_data = {
+    wen[3] ? wdata[31:24] : hit_word_data[31:24],
+    wen[2] ? wdata[23:16] : hit_word_data[23:16],
+    wen[1] ? wdata[15:8]  : hit_word_data[15:8],
+    wen[0] ? wdata[7:0]   : hit_word_data[7:0]
+};
 
 // Tag comparison results
 wire [L2_TAG_W-1:0] tag_way [0:L2_WAYS-1];
@@ -174,6 +181,8 @@ reg        resp_last_r;
 
 integer init_idx;
 integer wb_idx;
+integer init_way;
+integer init_word;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -190,6 +199,12 @@ always @(posedge clk or negedge rstn) begin
         resp_last_r <= 1'b0;
         for (init_idx = 0; init_idx < L2_SETS; init_idx = init_idx + 1) begin
             plru[init_idx] <= 3'd0;
+            for (init_way = 0; init_way < L2_WAYS; init_way = init_way + 1) begin
+                tag_array[init_idx][init_way] <= {(L2_TAG_W+2){1'b0}};
+                for (init_word = 0; init_word < L2_WORDS_PER_LINE; init_word = init_word + 1) begin
+                    data_array[init_idx][init_way][init_word] <= 32'd0;
+                end
+            end
         end
     end else begin
         // Default: clear response valid
@@ -201,6 +216,10 @@ always @(posedge clk or negedge rstn) begin
                 refill_cnt <= 4'd0;
                 
                 if (req_valid) begin
+                    `ifndef SYNTHESIS
+                    $display("[L2 CACHE] accept addr=%h write=%0b uncached=%0b state=%0d",
+                             req_addr, req_write, req_uncached, state);
+                    `endif
                     if (req_uncached) begin
                         state <= UNCACHED;
                         active <= 1'b1;
@@ -222,6 +241,12 @@ always @(posedge clk or negedge rstn) begin
             end
             
             LOOKUP: begin
+                `ifndef SYNTHESIS
+                $display("[L2 CACHE] lookup addr=%h hit=%0b hit_way=%0d valid=%b%b%b%b tag=%h/%h/%h/%h",
+                         addr, hit, hit_way,
+                         way_valid[3], way_valid[2], way_valid[1], way_valid[0],
+                         tag_way[0], tag_way[1], tag_way[2], tag_way[3]);
+                `endif
                 if (hit) begin
                     // Cache hit - update PLRU and return data
                     case (hit_way)
@@ -242,6 +267,10 @@ always @(posedge clk or negedge rstn) begin
                         active <= 1'b0;
                     end
                 end else begin
+                    `ifndef SYNTHESIS
+                    $display("[L2 CACHE] miss addr=%h victim=%0d dirty=%0b",
+                             addr, victim_way, way_dirty[victim_way]);
+                    `endif
                     state <= MISS;
                 end
             end
@@ -253,8 +282,9 @@ always @(posedge clk or negedge rstn) begin
                 if (wen[2]) data_array[req_set][hit_way][req_word][23:16] <= wdata[23:16];
                 if (wen[3]) data_array[req_set][hit_way][req_word][31:24] <= wdata[31:24];
                 
-                // Set dirty bit
-                tag_array[req_set][hit_way][L2_TAG_W+1] <= 1'b1;
+                // Keep the backing RAM coherent on store hits so the shared
+                // mem_subsys image reflects architecturally committed memory.
+                tag_array[req_set][hit_way][L2_TAG_W+1] <= 1'b0;
                 
                 resp_data_r <= wdata;
                 resp_valid_r <= 1'b1;
@@ -280,6 +310,10 @@ always @(posedge clk or negedge rstn) begin
             REFILL: begin
                 // Refill from RAM
                 data_array[req_set][victim_way][refill_cnt[2:0]] <= ram_rdata;
+                `ifndef SYNTHESIS
+                $display("[L2 CACHE] refill cnt=%0d ram_addr=%h ram_rdata=%h victim=%0d",
+                         refill_cnt, ram_addr, ram_rdata, victim_way);
+                `endif
                 
                 if (refill_done) begin
                     tag_array[req_set][victim_way] <= {1'b0, 1'b1, req_tag};
@@ -312,9 +346,11 @@ assign resp_data = resp_data_r;
 assign resp_last = resp_last_r;
 
 // RAM interface
-assign ram_addr = {req_tag, req_set, 5'b0} + {26'd0, refill_cnt[2:0], 2'b0};
-assign ram_write = (state == WRITE_BACK);
-assign ram_wdata = data_array[req_set][victim_way][ram_word_idx];
+assign ram_addr = (state == UPDATE)
+    ? {req_tag, req_set, req_word, 2'b0}
+    : ({req_tag, req_set, 5'b0} + {26'd0, refill_cnt[2:0], 2'b0});
+assign ram_write = (state == WRITE_BACK) || (state == UPDATE);
+assign ram_wdata = (state == UPDATE) ? update_word_data : data_array[req_set][victim_way][ram_word_idx];
 assign ram_word_idx = refill_cnt[2:0];
 
 // Status outputs

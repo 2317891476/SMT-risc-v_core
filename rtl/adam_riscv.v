@@ -36,6 +36,13 @@ module adam_riscv(
 `endif
 wire smt_mode = `SMT_MODE;
 
+// RoCC accelerator integration is optional during bring-up. Keep it disabled by
+// default so the core/basic test flow can stabilize independently.
+`ifndef ENABLE_ROCC_ACCEL
+    `define ENABLE_ROCC_ACCEL 0
+`endif
+localparam ROCC_ACCEL_ENABLE = `ENABLE_ROCC_ACCEL;
+
 // ─── Clock / Reset ───────────────────────────────────────────────────────────
 wire rstn;
 wire clk;
@@ -66,6 +73,7 @@ wire       flush_any;
 wire       pipe0_br_ctrl;
 wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
+wire [15:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
 
 // CSR from Pipe0
@@ -118,10 +126,14 @@ assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
 assign flush_any    = pipe0_br_ctrl;
 
-// Stall from scoreboard
+// Stall from scoreboard / ROB. The ROB can fill before the scoreboard does;
+// if we don't reflect that backpressure to the front-end, the scoreboard may
+// accept an instruction that the ROB silently drops.
+wire rob0_full, rob1_full;
 wire sb_disp_stall;
+wire rob_disp_stall;
 wire stall;
-assign stall       = sb_disp_stall;
+assign stall       = sb_disp_stall || rob_disp_stall;
 assign smt_stall   = {stall, stall};
 
 // ─── Thread Scheduler ──────────────────────────────────────────────────────
@@ -243,7 +255,7 @@ wire [31:0] fb_pop0_pc,    fb_pop1_pc;
 wire [0:0]  fb_pop0_tid,   fb_pop1_tid;
 wire        fb_consume_0,  fb_consume_1;
 
-fetch_buffer #(.DEPTH(4)) u_fetch_buffer(
+fetch_buffer #(.DEPTH(16)) u_fetch_buffer(
     .clk        (clk            ),
     .rstn       (rstn           ),
     .flush      (combined_flush ),
@@ -295,6 +307,7 @@ wire        dec0_is_rocc, dec1_is_rocc;
 wire [6:0]  dec0_rocc_funct7, dec1_rocc_funct7;
 
 decoder_dual u_decoder_dual(
+    .stall           (stall           ),
     .inst0_valid     (fb_pop0_valid    ),
     .inst0_word      (fb_pop0_inst     ),
     .inst0_pc        (fb_pop0_pc       ),
@@ -360,8 +373,12 @@ decoder_dual u_decoder_dual(
 );
 
 // Squash dispatches if flush active
-wire disp0_valid_gated = dec0_valid && !smt_flush[dec0_tid];
-wire disp1_valid_gated = dec1_valid && !smt_flush[dec1_tid];
+wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
+wire disp1_valid_pre_rob = dec1_valid && !smt_flush[dec1_tid];
+assign rob_disp_stall = (disp0_valid_pre_rob && rob0_full) ||
+                        (disp1_valid_pre_rob && rob1_full);
+wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall;
+wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall;
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
 // disp0 gets current order_id for its thread
@@ -384,6 +401,7 @@ wire [2:0]  iss0_func3;
 wire        iss0_func7;
 wire [4:0]  iss0_rd, iss0_rs1, iss0_rs2;
 wire        iss0_rs1_used, iss0_rs2_used;
+wire [4:0]  iss0_src1_tag, iss0_src2_tag;
 wire        iss0_br, iss0_mem_read, iss0_mem2reg;
 wire [2:0]  iss0_alu_op;
 wire        iss0_mem_write;
@@ -400,6 +418,7 @@ wire [2:0]  iss1_func3;
 wire        iss1_func7;
 wire [4:0]  iss1_rd, iss1_rs1, iss1_rs2;
 wire        iss1_rs1_used, iss1_rs2_used;
+wire [4:0]  iss1_src1_tag, iss1_src2_tag;
 wire        iss1_br, iss1_mem_read, iss1_mem2reg;
 wire [2:0]  iss1_alu_op;
 wire        iss1_mem_write;
@@ -407,6 +426,7 @@ wire [1:0]  iss1_alu_src1, iss1_alu_src2;
 wire        iss1_br_addr_mode, iss1_regs_write;
 wire [2:0]  iss1_fu;
 wire [0:0]  iss1_tid;
+wire        sb_branch_pending_any;
 
 // Issue metadata wires
 wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id;
@@ -429,6 +449,8 @@ scoreboard #(
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),
     .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
+    .flush_order_valid(!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_id(pipe0_br_order_id),
 
     // Dispatch 0
     .disp0_valid       (disp0_valid_gated ),
@@ -452,6 +474,7 @@ scoreboard #(
     .disp0_rs2_used    (dec0_rs2_used     ),
     .disp0_fu          (dec0_fu           ),
     .disp0_tid         (dec0_tid          ),
+    .disp0_is_mret     (dec0_is_mret      ),
 
     // Dispatch 1
     .disp1_valid       (disp1_valid_gated ),
@@ -475,6 +498,7 @@ scoreboard #(
     .disp1_rs2_used    (dec1_rs2_used     ),
     .disp1_fu          (dec1_fu           ),
     .disp1_tid         (dec1_tid          ),
+    .disp1_is_mret     (dec1_is_mret      ),
 
     .disp_stall  (sb_disp_stall    ),
 
@@ -500,6 +524,8 @@ scoreboard #(
     .iss0_rs2          (iss0_rs2          ),
     .iss0_rs1_used     (iss0_rs1_used     ),
     .iss0_rs2_used     (iss0_rs2_used     ),
+    .iss0_src1_tag     (iss0_src1_tag     ),
+    .iss0_src2_tag     (iss0_src2_tag     ),
     .iss0_br           (iss0_br           ),
     .iss0_mem_read     (iss0_mem_read     ),
     .iss0_mem2reg      (iss0_mem2reg      ),
@@ -526,6 +552,8 @@ scoreboard #(
     .iss1_rs2          (iss1_rs2          ),
     .iss1_rs1_used     (iss1_rs1_used     ),
     .iss1_rs2_used     (iss1_rs2_used     ),
+    .iss1_src1_tag     (iss1_src1_tag     ),
+    .iss1_src2_tag     (iss1_src2_tag     ),
     .iss1_br           (iss1_br           ),
     .iss1_mem_read     (iss1_mem_read     ),
     .iss1_mem2reg      (iss1_mem2reg      ),
@@ -537,6 +565,7 @@ scoreboard #(
     .iss1_regs_write   (iss1_regs_write   ),
     .iss1_fu           (iss1_fu           ),
     .iss1_tid          (iss1_tid          ),
+    .branch_pending_any(sb_branch_pending_any),
     .iss1_order_id     (iss1_order_id     ),
     .iss1_epoch        (iss1_epoch        ),
 
@@ -553,6 +582,14 @@ scoreboard #(
     .wb1_regs_write  (wb1_regs_write  ),
     .wb1_fu          (wb1_fu          ),
     .wb1_tid         (wb1_tid         ),
+    .commit0_valid   (rob_commit0_valid),
+    .commit0_tag     (rob_commit0_tag  ),
+    .commit0_tid     (1'b0             ),
+    .commit0_order_id(rob_commit0_order_id),
+    .commit1_valid   (rob_commit1_valid),
+    .commit1_tag     (rob_commit1_tag  ),
+    .commit1_tid     (1'b1             ),
+    .commit1_order_id(rob_commit1_order_id),
 
     // Branch completion
     .br_complete     (pipe0_br_complete),
@@ -567,10 +604,11 @@ scoreboard #(
 // ════════════════════════════════════════════════════════════════════════════
 
 // ROB wires
-wire        rob0_full, rob1_full;
 wire        rob_commit0_valid, rob_commit1_valid;
 wire [4:0]  rob_commit0_rd, rob_commit1_rd;
 wire [4:0]  rob_commit0_tag, rob_commit1_tag;
+wire        rob_commit0_has_result, rob_commit1_has_result;
+wire [31:0] rob_commit0_data, rob_commit1_data;
 wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
 wire        rob_commit0_is_store, rob_commit1_is_store;
 wire [1:0]  rob_instr_retired;
@@ -606,9 +644,11 @@ rob_lite #(
     .flush              (combined_flush_any),
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
     .flush_new_epoch    ((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
+    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_id     (pipe0_br_order_id),
 
     // Dispatch Port 0
-    .disp0_valid        (disp0_valid_gated),
+    .disp0_valid        (disp0_accepted),
     .disp0_tag          (sb_disp0_tag),
     .disp0_tid          (dec0_tid),
     .disp0_order_id     (disp0_order_id),
@@ -618,7 +658,7 @@ rob_lite #(
     .rob0_full          (rob0_full),
 
     // Dispatch Port 1
-    .disp1_valid        (disp1_valid_gated),
+    .disp1_valid        (disp1_accepted),
     .disp1_tag          (sb_disp1_tag),
     .disp1_tid          (dec1_tid),
     .disp1_order_id     (disp1_order_id),
@@ -631,11 +671,15 @@ rob_lite #(
     .wb0_valid          (wb0_valid),
     .wb0_tag            (wb0_tag),
     .wb0_tid            (wb0_tid),
+    .wb0_data           (wb0_result_data),
+    .wb0_regs_write     (wb0_regs_write),
 
     // Writeback Port 1
     .wb1_valid          (wb1_valid),
     .wb1_tag            (wb1_tag),
     .wb1_tid            (wb1_tid),
+    .wb1_data           (wb1_result_data),
+    .wb1_regs_write     (wb1_regs_write),
 
     // Commit Outputs
     .commit0_valid      (rob_commit0_valid),
@@ -647,6 +691,10 @@ rob_lite #(
     // Commit Data Outputs
     .commit0_tag        (rob_commit0_tag),
     .commit1_tag        (rob_commit1_tag),
+    .commit0_has_result (rob_commit0_has_result),
+    .commit1_has_result (rob_commit1_has_result),
+    .commit0_data       (rob_commit0_data),
+    .commit1_data       (rob_commit1_data),
 
     // Store Buffer Commit Outputs
     .commit0_order_id   (rob_commit0_order_id),
@@ -726,19 +774,22 @@ wire disp0_accepted = disp0_valid_gated && !sb_disp_stall;
 wire disp1_accepted = disp1_valid_gated && !sb_disp_stall;
 
 // Best-effort trap resume PC for interrupt entry.
-// Prefer the oldest visible in-flight PC over the current fetch PC.
+// Prefer the oldest visible in-flight PC, and avoid overwriting it with
+// speculative control-flow fall-through PCs from decode/fetch.
 reg [31:0] trap_pc_r;
+wire trap_pc_speculative = sb_branch_pending_any || pipe0_br_ctrl || pipe0_br_complete;
+wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         trap_pc_r <= 32'd0;
-    end else if (iss0_valid) begin
+    end else if (iss0_valid && !iss0_br && !trap_pc_speculative) begin
         trap_pc_r <= iss0_pc;
-    end else if (dec0_valid) begin
+    end else if (dec0_valid && !dec0_br && !trap_pc_speculative) begin
         trap_pc_r <= dec0_pc;
-    end else if (fb_pop0_valid) begin
+    end else if (fb_pop0_valid && trap_pc_fetch_safe) begin
         trap_pc_r <= fb_pop0_pc;
-    end else if (if_valid) begin
+    end else if (if_valid && trap_pc_fetch_safe) begin
         trap_pc_r <= if_pc;
     end
 end
@@ -843,6 +894,8 @@ wire [31:0] mem_wb_data;
 // Bypass Network for Pipe 0 operands
 wire [31:0] byp0_op_a, byp0_op_b;
 wire [1:0]  byp0_fwd_a, byp0_fwd_b;
+wire        p0_tagbuf_a_valid, p0_tagbuf_b_valid;
+wire [31:0] p0_tagbuf_a_data,  p0_tagbuf_b_data;
 
 bypass_network u_bypass0(
     .ro_rs1_addr     (iss0_rs1       ),
@@ -850,6 +903,10 @@ bypass_network u_bypass0(
     .ro_rs1_regdata  (ro0_data1      ),
     .ro_rs2_regdata  (ro0_data2      ),
     .ro_tid          (iss0_tid       ),
+    .tagbuf_rs1_valid(p0_tagbuf_a_valid),
+    .tagbuf_rs1_data (p0_tagbuf_a_data ),
+    .tagbuf_rs2_valid(p0_tagbuf_b_valid),
+    .tagbuf_rs2_data (p0_tagbuf_b_data ),
     .pipe0_valid     (p0_ex_valid    ),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
@@ -874,6 +931,8 @@ bypass_network u_bypass0(
 // Bypass Network for Pipe 1 operands
 wire [31:0] byp1_op_a, byp1_op_b;
 wire [1:0]  byp1_fwd_a, byp1_fwd_b;
+wire        p1_tagbuf_a_valid, p1_tagbuf_b_valid;
+wire [31:0] p1_tagbuf_a_data,  p1_tagbuf_b_data;
 
 bypass_network u_bypass1(
     .ro_rs1_addr     (iss1_rs1       ),
@@ -881,6 +940,10 @@ bypass_network u_bypass1(
     .ro_rs1_regdata  (ro1_data1      ),
     .ro_rs2_regdata  (ro1_data2      ),
     .ro_tid          (iss1_tid       ),
+    .tagbuf_rs1_valid(p1_tagbuf_a_valid),
+    .tagbuf_rs1_data (p1_tagbuf_a_data ),
+    .tagbuf_rs2_valid(p1_tagbuf_b_valid),
+    .tagbuf_rs2_data (p1_tagbuf_b_data ),
     .pipe0_valid     (p0_ex_valid    ),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
@@ -981,7 +1044,9 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .in_pc            (iss0_pc          ),
     .in_op_a          (byp0_op_a        ),
     .in_op_b          (byp0_op_b        ),
+    .in_rs1_idx       (iss0_rs1         ),
     .in_imm           (iss0_imm         ),
+    .in_order_id      (iss0_order_id    ),
     .in_func3         (iss0_func3       ),
     .in_func7         (iss0_func7       ),
     .in_alu_op        (iss0_alu_op      ),
@@ -1012,6 +1077,7 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
     .br_tid           (pipe0_br_tid     ),
+    .br_order_id      (pipe0_br_order_id),
     .br_complete      (pipe0_br_complete)
 );
 
@@ -1070,6 +1136,7 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .alu_out_fu         (p1_alu_fu        ),
     .alu_out_tid        (p1_alu_tid       ),
     .mem_req_valid      (p1_mem_req_valid     ),
+    .mem_req_accept     (lsu_req_accept       ),
     .mem_req_wen        (p1_mem_req_wen       ),
     .mem_req_addr       (p1_mem_req_addr      ),
     .mem_req_wdata      (p1_mem_req_wdata     ),
@@ -1133,6 +1200,8 @@ lsu_shell #(
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
+    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_id     (pipe0_br_order_id    ),
 
     // Request from exec_pipe1
     .req_valid          (p1_mem_req_valid     ),
@@ -1282,12 +1351,6 @@ always @(posedge clk or negedge rstn) begin
             result_valid[i]  <= 1'b0;
         end
     end else begin
-        // Clear entries on commit ( consumed )
-        if (rob_commit0_valid && rob_commit0_tag < 32)
-            result_valid[rob_commit0_tag] <= 1'b0;
-        if (rob_commit1_valid && rob_commit1_tag < 32)
-            result_valid[rob_commit1_tag] <= 1'b0;
-
         // Write WB0 result (highest priority if same tag)
         if (wb0_valid && wb0_regs_write) begin
             result_buffer[wb0_tag] <= wb0_result_data;
@@ -1302,20 +1365,31 @@ always @(posedge clk or negedge rstn) begin
     end
 end
 
+assign p0_tagbuf_a_valid = (iss0_src1_tag != 5'd0) && result_valid[iss0_src1_tag];
+assign p0_tagbuf_a_data  = result_buffer[iss0_src1_tag];
+assign p0_tagbuf_b_valid = (iss0_src2_tag != 5'd0) && result_valid[iss0_src2_tag];
+assign p0_tagbuf_b_data  = result_buffer[iss0_src2_tag];
+assign p1_tagbuf_a_valid = (iss1_src1_tag != 5'd0) && result_valid[iss1_src1_tag];
+assign p1_tagbuf_a_data  = result_buffer[iss1_src1_tag];
+assign p1_tagbuf_b_valid = (iss1_src2_tag != 5'd0) && result_valid[iss1_src2_tag];
+assign p1_tagbuf_b_data  = result_buffer[iss1_src2_tag];
+
 // ════════════════════════════════════════════════════════════════════════════
 // Register File Write: Drive from ROB commit (not WB)
 // ════════════════════════════════════════════════════════════════════════════
-// ROB commit0 is for Thread 0, commit1 is for Thread 1
+// ROB commit0 is for Thread 0, commit1 is for Thread 1.
+// Only architectural writers leave a result behind in result_buffer; branch/store
+// commits must not drive arbitrary rd fields back into the register file.
 // Port 0: ROB commit 0 (Thread 0)
-assign w_regs_en_0   = rob_commit0_valid;
+assign w_regs_en_0   = rob_commit0_valid && rob_commit0_has_result;
 assign w_regs_addr_0 = rob_commit0_rd;
-assign w_regs_data_0 = result_buffer[rob_commit0_tag];
+assign w_regs_data_0 = rob_commit0_data;
 assign w_regs_tid_0  = 1'b0;  // Thread 0
 
 // Port 1: ROB commit 1 (Thread 1)
-assign w_regs_en_1   = rob_commit1_valid;
+assign w_regs_en_1   = rob_commit1_valid && rob_commit1_has_result;
 assign w_regs_addr_1 = rob_commit1_rd;
-assign w_regs_data_1 = result_buffer[rob_commit1_tag];
+assign w_regs_data_1 = rob_commit1_data;
 assign w_regs_tid_1  = 1'b1;  // Thread 1
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1353,47 +1427,64 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
 // RoCC AI Accelerator Instantiation
 // ════════════════════════════════════════════════════════════════════════════
 
-rocc_ai_accelerator #(
-    .SA_SIZE   (8),
-    .VEC_WIDTH (128),
-    .SCRATCH_KB(4),
-    .TAG_W     (5)
-) u_rocc_ai_accelerator (
-    .clk              (clk),
-    .rstn             (rstn),
+generate
+if (ROCC_ACCEL_ENABLE) begin : gen_rocc_accel
+    rocc_ai_accelerator #(
+        .SA_SIZE   (8),
+        .VEC_WIDTH (128),
+        .SCRATCH_KB(4),
+        .TAG_W     (5)
+    ) u_rocc_ai_accelerator (
+        .clk              (clk),
+        .rstn             (rstn),
 
-    // Command interface (from scoreboard issue port 0)
-    .cmd_valid        (rocc_cmd_valid),
-    .cmd_ready        (rocc_cmd_ready),
-    .cmd_funct7       (rocc_cmd_funct7),
-    .cmd_funct3       (rocc_cmd_funct3),
-    .cmd_rd           (rocc_cmd_rd),
-    .cmd_rs1_data     (rocc_cmd_rs1_data),
-    .cmd_rs2_data     (rocc_cmd_rs2_data),
-    .cmd_tag          (rocc_cmd_tag),
-    .cmd_tid          (rocc_cmd_tid),
+        // Command interface (from scoreboard issue port 0)
+        .cmd_valid        (rocc_cmd_valid),
+        .cmd_ready        (rocc_cmd_ready),
+        .cmd_funct7       (rocc_cmd_funct7),
+        .cmd_funct3       (rocc_cmd_funct3),
+        .cmd_rd           (rocc_cmd_rd),
+        .cmd_rs1_data     (rocc_cmd_rs1_data),
+        .cmd_rs2_data     (rocc_cmd_rs2_data),
+        .cmd_tag          (rocc_cmd_tag),
+        .cmd_tid          (rocc_cmd_tid),
 
-    // Response interface (to WB0)
-    .resp_valid       (rocc_resp_valid),
-    .resp_ready       (rocc_resp_ready),
-    .resp_rd          (rocc_resp_rd),
-    .resp_data        (rocc_resp_data),
-    .resp_tag         (rocc_resp_tag),
-    .resp_tid         (rocc_resp_tid),
+        // Response interface (to WB0)
+        .resp_valid       (rocc_resp_valid),
+        .resp_ready       (rocc_resp_ready),
+        .resp_rd          (rocc_resp_rd),
+        .resp_data        (rocc_resp_data),
+        .resp_tag         (rocc_resp_tag),
+        .resp_tid         (rocc_resp_tid),
 
-    // DMA memory interface (to M2 port)
-    .mem_req_valid    (rocc_mem_req_valid),
-    .mem_req_ready    (rocc_mem_req_ready),
-    .mem_req_addr     (rocc_mem_req_addr),
-    .mem_req_wdata    (rocc_mem_req_wdata),
-    .mem_req_wen      (rocc_mem_req_wen),
-    .mem_resp_valid   (rocc_mem_resp_valid),
-    .mem_resp_rdata   (rocc_mem_resp_rdata),
+        // DMA memory interface (to M2 port)
+        .mem_req_valid    (rocc_mem_req_valid),
+        .mem_req_ready    (rocc_mem_req_ready),
+        .mem_req_addr     (rocc_mem_req_addr),
+        .mem_req_wdata    (rocc_mem_req_wdata),
+        .mem_req_wen      (rocc_mem_req_wen),
+        .mem_resp_valid   (rocc_mem_resp_valid),
+        .mem_resp_rdata   (rocc_mem_resp_rdata),
 
-    // Status
-    .accel_busy       (rocc_busy),
-    .accel_interrupt  (rocc_interrupt)
-);
+        // Status
+        .accel_busy       (rocc_busy),
+        .accel_interrupt  (rocc_interrupt)
+    );
+end else begin : gen_rocc_stub
+    assign rocc_cmd_ready     = 1'b0;
+    assign rocc_resp_valid    = 1'b0;
+    assign rocc_resp_rd       = 5'd0;
+    assign rocc_resp_data     = 32'd0;
+    assign rocc_resp_tag      = 5'd0;
+    assign rocc_resp_tid      = 1'b0;
+    assign rocc_mem_req_valid = 1'b0;
+    assign rocc_mem_req_addr  = 32'd0;
+    assign rocc_mem_req_wdata = 32'd0;
+    assign rocc_mem_req_wen   = 1'b0;
+    assign rocc_busy          = 1'b0;
+    assign rocc_interrupt     = 1'b0;
+end
+endgenerate
 
 // ════════════════════════════════════════════════════════════════════════════
 // Task 4: Memory Subsystem Integration

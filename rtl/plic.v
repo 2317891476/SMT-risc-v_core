@@ -30,6 +30,7 @@ module plic (
     input  wire [31:0] req_wdata,
     output reg  [31:0] resp_rdata,
     output reg         resp_valid,
+    output wire [31:0] read_data,
 
     // External interrupt input (from devices)
     input  wire        ext_irq_src,    // External interrupt source (ID=1)
@@ -78,6 +79,14 @@ wire source_active = pending[1] && enable[0][1] &&
                      (source_priority[1] > threshold[0]) && 
                      !claimed[0][1];
 assign external_irq = source_active;
+
+assign read_data =
+    addr_priority1 ? source_priority[1] :
+    addr_pending   ? {31'd0, pending[1]} :
+    addr_enable    ? {31'd0, enable[0][1]} :
+    addr_threshold ? threshold[0] :
+    addr_claim     ? (source_active ? 32'd1 : 32'd0) :
+    32'd0;
 
 // ─── Sequential logic ───────────────────────────────────────────────────────
 integer i, j;
@@ -135,28 +144,22 @@ always @(posedge clk or negedge rstn) begin
             end else begin
                 // Read access
                 case (1'b1)
-                    addr_priority1: begin
-                        resp_rdata <= source_priority[1];
-                    end
-                    addr_pending: begin
-                        resp_rdata <= {31'd0, pending[1]};
-                    end
-                    addr_enable: begin
-                        resp_rdata <= {31'd0, enable[0][1]};
-                    end
-                    addr_threshold: begin
-                        resp_rdata <= threshold[0];
-                    end
                     addr_claim: begin
                         // Claim: return highest priority pending interrupt ID
                         // Per PLIC spec, claim clears the pending bit
                         if (source_active) begin
-                            resp_rdata <= 32'd1;  // Source 1
+                            resp_rdata <= read_data;
                             claimed[0][1] <= 1'b1; // Mark as claimed
                             pending[1] <= 1'b0;    // Clear pending on claim
                         end else begin
-                            resp_rdata <= 32'd0;  // No interrupt
+                            resp_rdata <= read_data;
                         end
+                    end
+                    addr_priority1,
+                    addr_pending,
+                    addr_enable,
+                    addr_threshold: begin
+                        resp_rdata <= read_data;
                     end
                     default: resp_rdata <= 32'd0;
                 endcase

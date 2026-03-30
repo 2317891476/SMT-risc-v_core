@@ -232,6 +232,7 @@ wire        m1_mmio_req = m1_req_valid && addr_is_uncached_m1;
 wire        clint_req_valid = addr_is_clint_m1 && m1_mmio_req;
 wire [31:0] clint_resp_rdata;
 wire        clint_resp_valid;
+wire [31:0] clint_read_data;
 wire        clint_timer_irq;
 
 clint u_clint (
@@ -243,6 +244,7 @@ clint u_clint (
     .req_wdata   (m1_req_wdata),
     .resp_rdata  (clint_resp_rdata),
     .resp_valid  (clint_resp_valid),
+    .read_data   (clint_read_data),
     .timer_irq   (clint_timer_irq)
 );
 
@@ -250,6 +252,7 @@ clint u_clint (
 wire        plic_req_valid = addr_is_plic_m1 && m1_mmio_req;
 wire [31:0] plic_resp_rdata;
 wire        plic_resp_valid;
+wire [31:0] plic_read_data;
 wire        plic_ext_irq;
 
 plic u_plic (
@@ -261,6 +264,7 @@ plic u_plic (
     .req_wdata   (m1_req_wdata),
     .resp_rdata  (plic_resp_rdata),
     .resp_valid  (plic_resp_valid),
+    .read_data   (plic_read_data),
     .ext_irq_src (ext_irq_src),
     .external_irq(plic_ext_irq)
 );
@@ -274,27 +278,37 @@ assign ext_external_irq = plic_ext_irq;
 
 wire        m1_resp_valid_int;
 wire [31:0] m1_resp_data_int;
+reg         mmio_resp_valid_r;
+reg  [31:0] mmio_resp_data_r;
 
 // Handle TUBE MMIO - deterministic bypass
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         tube_status <= 8'd0;
+        mmio_resp_valid_r <= 1'b0;
+        mmio_resp_data_r  <= 32'd0;
     end else begin
+        mmio_resp_valid_r <= 1'b0;
         if (addr_is_tube_m1 && m1_mmio_req && m1_req_write) begin
             tube_status <= m1_req_wdata[7:0];
+        end
+        if (m1_mmio_req && m1_req_ready) begin
+            mmio_resp_valid_r <= 1'b1;
+            if (addr_is_clint_m1) begin
+                mmio_resp_data_r <= m1_req_write ? 32'd0 : clint_read_data;
+            end else if (addr_is_plic_m1) begin
+                mmio_resp_data_r <= m1_req_write ? 32'd0 : plic_read_data;
+            end else begin
+                mmio_resp_data_r <= 32'd0;
+            end
         end
     end
 end
 
-// Response mux - MMIO valid immediately (no L2 latency)
-wire        tube_resp_valid = addr_is_tube_m1 && m1_mmio_req;
-wire [31:0] tube_resp_data  = 32'd0;
-
-assign m1_resp_valid = m1_mmio_req ? (clint_resp_valid || plic_resp_valid || tube_resp_valid) : m1_resp_valid_int;
-assign m1_resp_data  = clint_resp_valid ? clint_resp_rdata :
-                       plic_resp_valid  ? plic_resp_rdata  :
-                       tube_resp_valid  ? tube_resp_data   :
-                       m1_resp_data_int;
+// Response mux - MMIO returns a registered single-cycle response so LSU_REQ can
+// handshake the request first and then observe the completion in LSU_WAIT_RESP.
+assign m1_resp_valid = mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
+assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RAM Preload Interface (for testbench)

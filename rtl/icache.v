@@ -1,249 +1,190 @@
 // =============================================================================
 // Module : icache
-// Description: Single-outstanding-miss nonblocking instruction cache.
-//   - Direct-mapped for simplicity (configurable)
-//   - Synchronous read interface: returns data on next cycle
-//   - Hit-under-miss: accepts new requests during miss handling
-//   - Internal epoch tracking for stale response detection
-//   - On miss: returns data directly from backing store while filling cache
-//
-//   Address decomposition (default: 2KB, 32B line, direct-mapped):
-//     [31 : offset+index] = TAG
-//     [offset+index-1 : offset] = INDEX (set select)
-//     [offset-1 : 0] = OFFSET (byte within line)
+// Description: Simple direct-mapped instruction cache with one background refill.
+//   - IF provides an explicit request-valid pulse for each launched fetch.
+//   - Response is aligned 1 cycle later with the registered request metadata.
+//   - On miss, the requested word is returned from bypass_data while the line
+//     refills in the background.
+//   - Only one line refill is tracked at a time, which is sufficient for the
+//     serialized fetch path used by stage_if in this project.
 // =============================================================================
 module icache #(
-    parameter CACHE_SIZE = 2048,      // Total cache size in bytes
-    parameter LINE_SIZE  = 32,        // Cache line size in bytes
-    parameter WAYS       = 1,         // Associativity (1 = direct-mapped for I$)
+    parameter CACHE_SIZE = 2048,
+    parameter LINE_SIZE  = 32,
+    parameter WAYS       = 1,
     parameter ADDR_WIDTH = 32,
-    parameter TID_WIDTH  = 1          // Thread ID width (1 = 2 threads)
+    parameter TID_WIDTH  = 1
 )(
     input  wire                     clk,
     input  wire                     rstn,
 
-    // ─── Synchronous Read Interface ─────────────────────────────
-    // Matches inst_backing_store interface
+    // Synchronous fetch request/response
+    input  wire                     cpu_req_valid,
     input  wire [ADDR_WIDTH-1:0]    cpu_req_addr,
-    input  wire [TID_WIDTH-1:0]     cpu_req_tid,       // Thread ID for request
+    input  wire [TID_WIDTH-1:0]     cpu_req_tid,
     output reg  [31:0]              cpu_resp_data,
-    output reg  [TID_WIDTH-1:0]     cpu_resp_tid,      // Thread ID for response
-    output reg  [3:0]               cpu_resp_epoch,    // Epoch for response (for stale detection)
-    output reg                      cpu_resp_valid,    // Response is valid (not stale)
+    output reg  [TID_WIDTH-1:0]     cpu_resp_tid,
+    output reg  [3:0]               cpu_resp_epoch,
+    output reg                      cpu_resp_valid,
 
-    // ─── Epoch Interface (for stale detection) ──────────────────
+    // Epoch tracking for stale-fill suppression
     input  wire [3:0]               current_epoch,
     input  wire                     flush,
 
-    // ─── Backing Store Interface ────────────────────────────────
+    // Refill interface
     output reg                      mem_req_valid,
     input  wire                     mem_req_ready,
     output reg  [ADDR_WIDTH-1:0]    mem_req_addr,
-
     input  wire                     mem_resp_valid,
     input  wire [31:0]              mem_resp_data,
     input  wire                     mem_resp_last,
     output wire                     mem_resp_ready,
 
-    // ─── Direct backing store bypass (for immediate miss data) ───
-    input  wire [31:0]              bypass_data     // Data from direct backing store read
+    // Direct backing-store word for the requested address
+    input  wire [31:0]              bypass_data
 );
 
-// ─── Derived parameters ─────────────────────────────────────────────────────
-localparam SETS         = CACHE_SIZE / (LINE_SIZE * WAYS);
-localparam OFFSET_W     = $clog2(LINE_SIZE);
-localparam INDEX_W      = $clog2(SETS);
-localparam TAG_W        = ADDR_WIDTH - OFFSET_W - INDEX_W;
-localparam WORDS_PER_LINE = LINE_SIZE / 4;  // 32-bit words per line
+localparam SETS           = CACHE_SIZE / (LINE_SIZE * WAYS);
+localparam OFFSET_W       = $clog2(LINE_SIZE);
+localparam INDEX_W        = $clog2(SETS);
+localparam TAG_W          = ADDR_WIDTH - OFFSET_W - INDEX_W;
+localparam WORDS_PER_LINE = LINE_SIZE / 4;
 
-// ─── Cache storage ──────────────────────────────────────────────────────────
-reg [TAG_W-1:0]              tag_array  [0:SETS-1][0:WAYS-1];
-reg                          valid_array[0:SETS-1][0:WAYS-1];
-reg [LINE_SIZE*8-1:0]        data_array [0:SETS-1][0:WAYS-1];
-
-// ─── Address decomposition ──────────────────────────────────────────────────
-wire [TAG_W-1:0]    req_tag    = cpu_req_addr[ADDR_WIDTH-1 : OFFSET_W+INDEX_W];
-wire [INDEX_W-1:0]  req_index  = cpu_req_addr[OFFSET_W+INDEX_W-1 : OFFSET_W];
-wire [OFFSET_W-1:0] req_offset = cpu_req_addr[OFFSET_W-1 : 0];
-
-// ─── Registered request (for synchronous read) ──────────────────────────────
-reg [ADDR_WIDTH-1:0] req_addr_r;
-reg [INDEX_W-1:0]    req_index_r;
-reg [TAG_W-1:0]      req_tag_r;
-reg [OFFSET_W-1:0]   req_offset_r;
-reg [TID_WIDTH-1:0]  req_tid_r;           // Registered thread ID
-reg [3:0]            req_epoch_r;         // Registered epoch
-
-// Current epoch at request time (for tagging response)
-wire [3:0] req_epoch_current = current_epoch;
-
-// ─── Hit detection on registered address ────────────────────────────────────
-wire hit = valid_array[req_index_r][0] && (tag_array[req_index_r][0] == req_tag_r);
-
-wire [31:0] cached_data = data_array[req_index_r][0][req_offset_r*8 +: 32];
-
-// ─── Miss handling FSM ──────────────────────────────────────────────────────
 localparam S_IDLE      = 2'd0;
 localparam S_MISS_REQ  = 2'd1;
 localparam S_MISS_DATA = 2'd2;
 localparam S_REFILL    = 2'd3;
 
-reg [1:0]  state;
+reg [1:0] state;
 
-// Miss tracking
-reg [ADDR_WIDTH-1:0] miss_addr;
-reg [INDEX_W-1:0]    miss_index;
-reg [TAG_W-1:0]      miss_tag;
-reg [3:0]            miss_epoch;
+reg [TAG_W-1:0]       tag_array   [0:SETS-1][0:WAYS-1];
+reg                   valid_array [0:SETS-1][0:WAYS-1];
+reg [LINE_SIZE*8-1:0] data_array  [0:SETS-1][0:WAYS-1];
 
-// Fill buffer
-reg [LINE_SIZE*8-1:0] fill_line;
-reg [$clog2(WORDS_PER_LINE):0] fill_cnt;
+reg [ADDR_WIDTH-1:0] req_addr_r;
+reg [INDEX_W-1:0]    req_index_r;
+reg [TAG_W-1:0]      req_tag_r;
+reg [OFFSET_W-1:0]   req_offset_r;
+reg [TID_WIDTH-1:0]  req_tid_r;
+reg [3:0]            req_epoch_r;
+reg                  req_valid_r;
 
-// ─── Response tagging logic ─────────────────────────────────────────────────
-// Track the request metadata for response tagging
-reg [TID_WIDTH-1:0] resp_tid_r;
-reg [3:0]           resp_epoch_r;
-reg                 resp_valid_r;
+reg [INDEX_W-1:0]      miss_index_r;
+reg [TAG_W-1:0]        miss_tag_r;
+reg [3:0]              miss_epoch_r;
+reg [LINE_SIZE*8-1:0]  fill_line_r;
+reg [$clog2(WORDS_PER_LINE):0] fill_cnt_r;
 
-// Determine if response is stale based on epoch mismatch
-// A response is stale if the epoch has changed since the request was made
-wire response_stale = (resp_epoch_r != current_epoch);
+wire [TAG_W-1:0]    req_tag    = cpu_req_addr[ADDR_WIDTH-1 : OFFSET_W + INDEX_W];
+wire [INDEX_W-1:0]  req_index  = cpu_req_addr[OFFSET_W + INDEX_W - 1 : OFFSET_W];
+wire [OFFSET_W-1:0] req_offset = cpu_req_addr[OFFSET_W - 1 : 0];
 
-// ─── Output assignment ──────────────────────────────────────────────────────
-// On hit: return cached data
-// On miss: return bypass data (direct from backing store)
-// Always tag with {tid, epoch} for stale detection downstream
+wire hit = valid_array[req_index_r][0] && (tag_array[req_index_r][0] == req_tag_r);
+wire [31:0] cached_data = data_array[req_index_r][0][req_offset_r * 8 +: 32];
+wire [31:0] resp_data_sel =
+    (hit && ((cached_data != 32'd0) || (bypass_data == 32'd0))) ? cached_data : bypass_data;
+
+assign mem_resp_ready = 1'b1;
+
+integer i;
+integer j;
+
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         cpu_resp_data  <= 32'd0;
         cpu_resp_tid   <= {TID_WIDTH{1'b0}};
         cpu_resp_epoch <= 4'd0;
         cpu_resp_valid <= 1'b0;
-        resp_tid_r     <= {TID_WIDTH{1'b0}};
-        resp_epoch_r   <= 4'd0;
-        resp_valid_r   <= 1'b0;
-    end
-    else begin
-        // Capture request metadata for next cycle response
-        resp_tid_r   <= req_tid_r;
-        resp_epoch_r <= req_epoch_r;
-        
-        // Response valid on hit OR during fill (bypass data available)
-        // Also valid on first cycle of miss (state transition happens after this)
-        // Note: stale check is done downstream in stage_if using per-thread epochs
-        resp_valid_r <= hit || (state != S_IDLE) || (!hit && state == S_IDLE);
-        
-        // Output data
-        if (hit) begin
-            cpu_resp_data <= cached_data;
-        end
-        else begin
-            cpu_resp_data <= bypass_data;  // Direct from backing store
-        end
-        
-        // Output tags (registered from request)
-        cpu_resp_tid   <= resp_tid_r;
-        cpu_resp_epoch <= resp_epoch_r;
-        // Pass through valid - stale check done by caller
-        cpu_resp_valid <= resp_valid_r;
-    end
-end
 
-assign mem_resp_ready = 1'b1;
+        mem_req_valid  <= 1'b0;
+        mem_req_addr   <= {ADDR_WIDTH{1'b0}};
+        state          <= S_IDLE;
 
-// ─── Sequential logic for cache state and miss handling ─────────────────────
-integer i, j;
+        req_addr_r     <= {ADDR_WIDTH{1'b0}};
+        req_index_r    <= {INDEX_W{1'b0}};
+        req_tag_r      <= {TAG_W{1'b0}};
+        req_offset_r   <= {OFFSET_W{1'b0}};
+        req_tid_r      <= {TID_WIDTH{1'b0}};
+        req_epoch_r    <= 4'd0;
+        req_valid_r    <= 1'b0;
 
-always @(posedge clk or negedge rstn) begin
-    if (!rstn) begin
-        state       <= S_IDLE;
-        mem_req_valid <= 1'b0;
-        mem_req_addr  <= {ADDR_WIDTH{1'b0}};
-        
-        miss_addr   <= {ADDR_WIDTH{1'b0}};
-        miss_index  <= {INDEX_W{1'b0}};
-        miss_tag    <= {TAG_W{1'b0}};
-        miss_epoch  <= 4'd0;
-        
-        fill_line   <= {(LINE_SIZE*8){1'b0}};
-        fill_cnt    <= 0;
-        
-        req_addr_r  <= {ADDR_WIDTH{1'b0}};
-        req_index_r <= {INDEX_W{1'b0}};
-        req_tag_r   <= {TAG_W{1'b0}};
-        req_offset_r<= {OFFSET_W{1'b0}};
-        req_tid_r   <= {TID_WIDTH{1'b0}};
-        req_epoch_r <= 4'd0;
-        
-        // Initialize cache arrays
+        miss_index_r   <= {INDEX_W{1'b0}};
+        miss_tag_r     <= {TAG_W{1'b0}};
+        miss_epoch_r   <= 4'd0;
+        fill_line_r    <= {(LINE_SIZE * 8){1'b0}};
+        fill_cnt_r     <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
+
         for (i = 0; i < SETS; i = i + 1) begin
             for (j = 0; j < WAYS; j = j + 1) begin
                 valid_array[i][j] <= 1'b0;
                 tag_array[i][j]   <= {TAG_W{1'b0}};
-                data_array[i][j]  <= {(LINE_SIZE*8){1'b0}};
+                data_array[i][j]  <= {(LINE_SIZE * 8){1'b0}};
             end
         end
     end
     else begin
-        // Register the request address (synchronous read)
-        req_addr_r   <= cpu_req_addr;
-        req_index_r  <= req_index;
-        req_tag_r    <= req_tag;
-        req_offset_r <= req_offset;
-        req_tid_r    <= cpu_req_tid;
-        req_epoch_r  <= current_epoch;
-        
+        cpu_resp_data  <= resp_data_sel;
+        cpu_resp_tid   <= req_tid_r;
+        cpu_resp_epoch <= req_epoch_r;
+        cpu_resp_valid <= req_valid_r;
+
+        req_valid_r <= cpu_req_valid;
+        if (cpu_req_valid) begin
+            req_addr_r   <= cpu_req_addr;
+            req_index_r  <= req_index;
+            req_tag_r    <= req_tag;
+            req_offset_r <= req_offset;
+            req_tid_r    <= cpu_req_tid;
+            req_epoch_r  <= current_epoch;
+        end
+
         case (state)
             S_IDLE: begin
-                // Check for miss on the registered request
-                if (!hit && rstn) begin
-                    // Start miss handling
-                    miss_addr   <= req_addr_r;
-                    miss_index  <= req_index_r;
-                    miss_tag    <= req_tag_r;
-                    miss_epoch  <= current_epoch;
-                    
-                    mem_req_addr  <= {req_addr_r[ADDR_WIDTH-1:OFFSET_W], {OFFSET_W{1'b0}}};
+                if (req_valid_r && !hit) begin
+                    miss_index_r <= req_index_r;
+                    miss_tag_r   <= req_tag_r;
+                    miss_epoch_r <= req_epoch_r;
+                    fill_line_r  <= {(LINE_SIZE * 8){1'b0}};
+                    fill_cnt_r   <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
+                    mem_req_addr <= {req_addr_r[ADDR_WIDTH-1:OFFSET_W], {OFFSET_W{1'b0}}};
                     mem_req_valid <= 1'b1;
-                    state         <= S_MISS_REQ;
+                    state <= S_MISS_REQ;
                 end
             end
-            
+
             S_MISS_REQ: begin
                 if (mem_req_ready) begin
                     mem_req_valid <= 1'b0;
-                    fill_cnt      <= 0;
-                    fill_line     <= {(LINE_SIZE*8){1'b0}};
+                    fill_line_r   <= {(LINE_SIZE * 8){1'b0}};
+                    fill_cnt_r    <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
                     state         <= S_MISS_DATA;
                 end
             end
-            
+
             S_MISS_DATA: begin
                 if (mem_resp_valid) begin
-                    fill_line[fill_cnt*32 +: 32] <= mem_resp_data;
+                    fill_line_r[fill_cnt_r * 32 +: 32] <= mem_resp_data;
                     if (mem_resp_last) begin
                         state <= S_REFILL;
                     end
                     else begin
-                        fill_cnt <= fill_cnt + 1;
+                        fill_cnt_r <= fill_cnt_r + 1'b1;
                     end
                 end
             end
-            
+
             S_REFILL: begin
-                // Only install if epoch matches (not stale)
-                if (miss_epoch == current_epoch) begin
-                    valid_array[miss_index][0] <= 1'b1;
-                    tag_array[miss_index][0]   <= miss_tag;
-                    data_array[miss_index][0]  <= fill_line;
+                if (!flush && (miss_epoch_r == current_epoch)) begin
+                    valid_array[miss_index_r][0] <= 1'b1;
+                    tag_array[miss_index_r][0]   <= miss_tag_r;
+                    data_array[miss_index_r][0]  <= fill_line_r;
                 end
-                // else: stale fill, don't install
-                
                 state <= S_IDLE;
             end
-            
-            default: state <= S_IDLE;
+
+            default: begin
+                state <= S_IDLE;
+            end
         endcase
     end
 end

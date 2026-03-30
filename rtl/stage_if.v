@@ -59,10 +59,17 @@ module stage_if (
 // ─── PC management ──────────────────────────────────────────────────────────
 wire [31:0] pc_out;
 wire [0:0]  tid_out;
+reg         fetch_req_active;
+reg [31:0]  fetch_pc_pending;
+reg [0:0]   fetch_tid_pending;
+reg         fetch_pred_pending;
 
-// Stall PC when: pipeline stall OR fetch buffer full
+// Stall PC when: pipeline stall, fetch buffer full, or a previous fetch
+// request is still waiting for its response.
 wire pc_stall_combined;
-assign pc_stall_combined = pc_stall || !fb_ready;
+assign pc_stall_combined = pc_stall || !fb_ready || fetch_req_active;
+wire fetch_req_launch = rstn && !pc_stall && fb_ready && !fetch_req_active && (if_flush == 2'b00);
+wire [1:0] pc_advance = fetch_req_launch ? (tid_out == 1'b0 ? 2'b01 : 2'b10) : 2'b00;
 
 pc_mt #(
     .N_T             (2             ),
@@ -75,6 +82,7 @@ pc_mt #(
     .br_addr_t1  (br_addr_t1          ),
     .pc_stall    ({pc_stall_combined, pc_stall_combined}),
     .flush       (if_flush            ),
+    .pc_advance  (pc_advance          ),
     .fetch_tid   (fetch_tid           ),
     .if_pc       (pc_out              ),
     .if_tid      (tid_out             )
@@ -110,6 +118,7 @@ inst_memory #(
 ) u_inst_memory (
     .clk            (clk               ),
     .rstn           (rstn              ),
+    .req_valid      (fetch_req_launch   ),
     .inst_addr      (pc_out            ),
     .req_tid        (tid_out           ),
     .inst_o         (inst_from_mem     ),
@@ -155,14 +164,33 @@ bpu_bimodal #(
 // Bypass address needs to be delayed by 1 cycle to match mem_subsys RAM read latency
 // When pc_out presents addr_N, mem_subsys reads ram[addr_N] and outputs data on next cycle
 // So bypass_addr should be addr_N when bypass_data is for addr_N
-reg [31:0] pc_out_r;
+
 always @(posedge clk or negedge rstn) begin
-    if (!rstn)
-        pc_out_r <= 32'd0;
-    else
-        pc_out_r <= pc_out;
+    if (!rstn) begin
+        fetch_req_active   <= 1'b0;
+        fetch_pc_pending   <= 32'd0;
+        fetch_tid_pending  <= 1'b0;
+        fetch_pred_pending <= 1'b0;
+    end
+    else begin
+        if (|if_flush) begin
+            fetch_req_active <= 1'b0;
+        end
+        else begin
+            if (fetch_req_launch) begin
+                fetch_req_active   <= 1'b1;
+                fetch_pc_pending   <= pc_out;
+                fetch_tid_pending  <= tid_out;
+                fetch_pred_pending <= bpu_pred_taken;
+            end
+
+            if (fetch_req_active && resp_valid_from_mem) begin
+                fetch_req_active <= 1'b0;
+            end
+        end
+    end
 end
-assign ext_mem_bypass_addr = pc_out_r;
+assign ext_mem_bypass_addr = fetch_req_active ? fetch_pc_pending : pc_out;
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
 // CRITICAL FIX: Synchronous RAM has 1-cycle latency
@@ -173,62 +201,17 @@ assign ext_mem_bypass_addr = pc_out_r;
 // Additionally: Stale response detection
 // - Response includes {tid, epoch} from ICache
 // - Drop response if epoch doesn't match current epoch (stale)
-reg [31:0] pc_latched;
-reg [0:0]  tid_latched;
-reg        valid_latched;
-reg        pred_taken_latched;
-wire       fetch_in_progress;
-
-assign fetch_in_progress = rstn && !pc_stall_combined;
-
-// Stale response detection signals (registered to align with data)
-reg [0:0]  resp_tid_latched;
-reg [3:0]  resp_epoch_latched;
-reg        resp_valid_latched;
-reg        fetch_tid_latched;     // Thread that made the request
-
-always @(posedge clk or negedge rstn) begin
-    if (!rstn) begin
-        pc_latched         <= 32'd0;
-        tid_latched        <= 1'b0;
-        valid_latched      <= 1'b0;
-        pred_taken_latched <= 1'b0;
-        resp_tid_latched   <= 1'b0;
-        resp_epoch_latched <= 4'd0;
-        resp_valid_latched <= 1'b0;
-        fetch_tid_latched  <= 1'b0;
-    end
-    else begin
-        // Latch PC, prediction, and request metadata when we send address to RAM
-        // These values will align with RAM output data next cycle
-        pc_latched         <= pc_out;
-        tid_latched        <= tid_out;
-        valid_latched      <= fetch_in_progress;
-        pred_taken_latched <= bpu_pred_taken;
-        fetch_tid_latched  <= tid_out;
-
-        // Capture response metadata from ICache (1 cycle later)
-        resp_tid_latched   <= resp_tid_from_mem;
-        resp_epoch_latched <= resp_epoch_from_mem;
-        resp_valid_latched <= resp_valid_from_mem;
-    end
-end
-
 // Determine if response is stale by comparing epochs
 // Current epoch depends on which thread made the request
-wire [3:0] expected_epoch = (resp_tid_latched == 1'b0) ? epoch_t0 : epoch_t1;
-wire       response_stale = (resp_epoch_latched != expected_epoch);
+wire [3:0] expected_epoch = (resp_tid_from_mem == 1'b0) ? epoch_t0 : epoch_t1;
+wire       response_stale = resp_valid_from_mem && (resp_epoch_from_mem != expected_epoch);
 
-// Final valid signal: must be valid from ICache AND not stale AND epochs match
-wire       final_valid = valid_latched && resp_valid_latched && !response_stale;
+wire       final_valid = fetch_req_active && resp_valid_from_mem && !response_stale;
 
-// Use latched values for output (matches RAM timing)
-// Note: inst_from_mem already has 1-cycle latency from icache (registered output)
-// so it aligns with pc_latched which is also delayed 1 cycle.
-assign if_pc         = pc_latched;
-assign if_tid        = tid_latched;
+assign if_pc         = fetch_pc_pending;
+assign if_tid        = fetch_tid_pending;
 assign if_valid      = final_valid;
 assign if_inst       = inst_from_mem;
-assign if_pred_taken = pred_taken_latched;
+assign if_pred_taken = fetch_pred_pending;
 
 endmodule

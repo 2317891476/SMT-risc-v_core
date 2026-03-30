@@ -21,7 +21,9 @@ module exec_pipe0 #(
     input  wire [31:0]        in_pc,
     input  wire [31:0]        in_op_a,       // rs1 data (after bypass)
     input  wire [31:0]        in_op_b,       // rs2 data (after bypass)
+    input  wire [4:0]         in_rs1_idx,    // rs1 index (used for CSR zimm ops)
     input  wire [31:0]        in_imm,
+    input  wire [15:0]        in_order_id,   // per-thread order id for flush bookkeeping
     input  wire [2:0]         in_func3,
     input  wire               in_func7,
     input  wire [2:0]         in_alu_op,
@@ -60,6 +62,7 @@ module exec_pipe0 #(
     output wire               br_ctrl,       // branch taken
     output wire [31:0]        br_addr,       // branch target address
     output wire [0:0]         br_tid,        // which thread branched
+    output wire [15:0]        br_order_id,   // branch order id when redirecting
     output wire               br_complete    // branch execution complete (taken or not)
 );
 
@@ -86,6 +89,8 @@ assign op_B = (in_alu_src2 == `PC_PLUS4) ? 32'd4  :
 // ─── ALU ────────────────────────────────────────────────────────────────────
 wire [31:0] alu_out;
 wire        br_mark;
+wire        csr_is_imm = in_is_csr && in_func3[2];
+wire [31:0] csr_write_data = csr_is_imm ? {27'd0, in_rs1_idx} : in_op_a;
 
 alu u_alu (
     .alu_ctrl (alu_ctrl),
@@ -106,12 +111,14 @@ reg [0:0]         out_tid_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
+reg [15:0]        br_order_id_r;
 reg               br_complete_r;   // branch execution complete
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
 reg [31:0]        stored_imm;
 reg [31:0]        stored_op_a;     // for JALR
+reg [15:0]        stored_order_id;
 reg               stored_br;
 reg               stored_br_addr_mode;
 reg               stored_valid;
@@ -129,10 +136,12 @@ always @(posedge clk or negedge rstn) begin
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
         br_tid_r            <= 1'b0;
+        br_order_id_r       <= 16'd0;
         br_complete_r       <= 1'b0;
         stored_pc           <= 32'd0;
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
+        stored_order_id     <= 16'd0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
         stored_valid        <= 1'b0;
@@ -142,6 +151,7 @@ always @(posedge clk or negedge rstn) begin
         stored_pc           <= in_pc;
         stored_imm          <= in_imm;
         stored_op_a         <= op_A_pre;   // for JALR (rs1 value)
+        stored_order_id     <= in_order_id;
         stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
         stored_valid        <= in_valid;
@@ -166,6 +176,7 @@ always @(posedge clk or negedge rstn) begin
         br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
         br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
         br_tid_r      <= out_tid_r;  // use output register's tid
+        br_order_id_r <= stored_order_id;
         br_complete_r <= stored_valid && stored_br;
     end
 end
@@ -179,7 +190,7 @@ assign out_fu         = out_fu_r;
 assign out_tid        = out_tid_r;
 
 assign csr_valid  = in_valid && in_is_csr;
-assign csr_wdata  = in_op_a;     // rs1 value for CSR ops
+assign csr_wdata  = csr_write_data;
 assign csr_op     = in_func3;    // funct3 encodes CSR operation
 assign csr_addr   = in_csr_addr;
 assign mret_valid = in_valid && in_is_mret;
@@ -187,6 +198,7 @@ assign mret_valid = in_valid && in_is_mret;
 assign br_ctrl     = br_ctrl_r;
 assign br_addr     = br_addr_r;
 assign br_tid      = br_tid_r;
+assign br_order_id = br_order_id_r;
 assign br_complete = br_complete_r;
 
 endmodule

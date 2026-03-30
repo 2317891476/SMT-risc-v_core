@@ -42,6 +42,8 @@ module lsu_shell #(
     input  wire [0:0]         flush_tid,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t0,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t1,
+    input  wire               flush_order_valid,
+    input  wire [ORDER_ID_W-1:0] flush_order_id,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Request Interface (from exec_pipe1)
@@ -154,6 +156,7 @@ wire                     sb_load_hazard;
 // Load vs Store classification
 wire is_load  = req_valid && !req_wen;
 wire is_store = req_valid && req_wen;
+wire store_enqueue_fire;
 
 
 
@@ -178,6 +181,7 @@ wire store_accept = sb_store_accept && state_machine_idle;
 wire load_accept = !sb_load_hazard && state_machine_idle;
 
 assign req_accept = is_store ? store_accept : load_accept;
+assign store_enqueue_fire = is_store && req_accept;
 
 // Export load hazard signal for scoreboard stalling
 assign load_hazard = is_load && sb_load_hazard;
@@ -201,9 +205,15 @@ store_buffer #(
     .flush_tid              (flush_tid),
     .flush_new_epoch_t0     (flush_new_epoch_t0),
     .flush_new_epoch_t1     (flush_new_epoch_t1),
+    .flush_order_valid      (flush_order_valid),
+    .flush_order_id         (flush_order_id),
 
     // Store request interface
-    .store_req_valid        (is_store),
+    // Only enqueue a store when the LSU request handshake succeeds. Using the
+    // raw store request here lets a busy LSU leak stores into the buffer before
+    // the ROB/writeback path sees them, which wedges commit behind an
+    // incomplete store entry.
+    .store_req_valid        (store_enqueue_fire),
     .store_req_accept       (sb_store_accept),
     .store_tid              (req_tid),
     .store_order_id         (req_order_id),
@@ -277,6 +287,12 @@ reg [31:0]        pending_forward_data;   // Forwarded data
 // Raw memory data register (for mem_subsys mode)
 reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
+wire              flush_hits_pending =
+                    pending_valid && (pending_tid == flush_tid);
+wire              flush_kills_pending =
+                    !pending_valid ||
+                    (flush_hits_pending &&
+                     (!flush_order_valid || (pending_order_id > flush_order_id)));
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
                                 ((lsu_state == LSU_IDLE) && !req_valid) :
@@ -290,20 +306,30 @@ always @(posedge clk or negedge rstn) begin
         m1_req_valid      <= 1'b0;
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
-    end else if (flush) begin
-        // On flush, abort speculative load requests, but never discard a
-        // committed store-buffer drain that has already been handed off.
-        if (!m1_txn_is_drain && (pending_tid == flush_tid || !pending_valid)) begin
+    end else begin
+        if (flush && !m1_txn_is_drain && flush_kills_pending) begin
+            // On flush, abort speculative load requests, but never discard a
+            // committed store-buffer drain that has already been handed off.
+            // Branch redirects only kill younger requests from the flushed thread.
+            `ifndef SYNTHESIS
+            $display("[LSU FLUSH] pending_valid=%0b pending_tid=%0d pending_order=%0d flush_tid=%0d flush_order_valid=%0b flush_order=%0d @%0t",
+                     pending_valid, pending_tid, pending_order_id,
+                     flush_tid, flush_order_valid, flush_order_id, $time);
+            `endif
             lsu_state       <= LSU_IDLE;
             pending_valid   <= 1'b0;
             m1_req_valid    <= 1'b0;
             m1_txn_is_drain <= 1'b0;
-        end
-    end else begin
+        end else begin
         case (lsu_state)
             LSU_IDLE: begin
                 // Ready to accept new request
                 if (req_valid && req_accept) begin
+                    `ifndef SYNTHESIS
+                    $display("[LSU ACCEPT] kind=%s tid=%0d order=%0d tag=%0d func3=%0d addr=%h wdata=%h rd=%0d",
+                             req_wen ? "STORE" : "LOAD ", req_tid, req_order_id, req_tag,
+                             req_func3, req_addr, req_wdata, req_rd);
+                    `endif
                     // Capture request metadata
                     pending_valid         <= 1'b1;
                     pending_tid           <= req_tid;
@@ -360,6 +386,10 @@ always @(posedge clk or negedge rstn) begin
             LSU_WAIT_RESP: begin
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
+                    `ifndef SYNTHESIS
+                    $display("[LSU RESP] drain=%0d addr=%h raw=%h shaped=%h",
+                             m1_txn_is_drain, pending_addr, m1_resp_data, mem_data_shaped);
+                    `endif
                     if (m1_txn_is_drain) begin
                         lsu_state       <= LSU_IDLE;
                         m1_txn_is_drain <= 1'b0;
@@ -381,6 +411,7 @@ always @(posedge clk or negedge rstn) begin
                 lsu_state <= LSU_IDLE;
             end
         endcase
+        end
     end
 end
 

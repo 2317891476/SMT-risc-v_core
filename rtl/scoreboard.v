@@ -38,6 +38,8 @@ module scoreboard #(
     // ─── Flush ──────────────────────────────────────────────────
     input  wire                    flush,
     input  wire [0:0]              flush_tid,
+    input  wire                    flush_order_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
 
     // ─── Dispatch Port 0 ────────────────────────────────────────
     input  wire                    disp0_valid,
@@ -61,6 +63,7 @@ module scoreboard #(
     input  wire                    disp0_rs2_used,
     input  wire [2:0]              disp0_fu,
     input  wire [0:0]              disp0_tid,
+    input  wire                    disp0_is_mret,
 
     // ─── Dispatch Port 1 ────────────────────────────────────────
     input  wire                    disp1_valid,
@@ -84,6 +87,7 @@ module scoreboard #(
     input  wire                    disp1_rs2_used,
     input  wire [2:0]              disp1_fu,
     input  wire [0:0]              disp1_tid,
+    input  wire                    disp1_is_mret,
 
     // ─── Dispatch Stall ─────────────────────────────────────────
     output wire                    disp_stall,   // cannot accept either dispatch
@@ -104,6 +108,8 @@ module scoreboard #(
     output reg  [4:0]              iss0_rs2,
     output reg                     iss0_rs1_used,
     output reg                     iss0_rs2_used,
+    output reg  [RS_TAG_W-1:0]     iss0_src1_tag,
+    output reg  [RS_TAG_W-1:0]     iss0_src2_tag,
     output reg                     iss0_br,
     output reg                     iss0_mem_read,
     output reg                     iss0_mem2reg,
@@ -128,6 +134,8 @@ module scoreboard #(
     output reg  [4:0]              iss1_rs2,
     output reg                     iss1_rs1_used,
     output reg                     iss1_rs2_used,
+    output reg  [RS_TAG_W-1:0]     iss1_src1_tag,
+    output reg  [RS_TAG_W-1:0]     iss1_src2_tag,
     output reg                     iss1_br,
     output reg                     iss1_mem_read,
     output reg                     iss1_mem2reg,
@@ -139,6 +147,7 @@ module scoreboard #(
     output reg                     iss1_regs_write,
     output reg  [2:0]              iss1_fu,
     output reg  [0:0]              iss1_tid,
+    output wire                    branch_pending_any,
 
     // ─── Writeback Port 0 ───────────────────────────────────────
     input  wire                    wb0_valid,
@@ -155,6 +164,14 @@ module scoreboard #(
     input  wire                    wb1_regs_write,
     input  wire [2:0]              wb1_fu,
     input  wire [0:0]              wb1_tid,
+    input  wire                    commit0_valid,
+    input  wire [RS_TAG_W-1:0]     commit0_tag,
+    input  wire [0:0]              commit0_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] commit0_order_id,
+    input  wire                    commit1_valid,
+    input  wire [RS_TAG_W-1:0]     commit1_tag,
+    input  wire [0:0]              commit1_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
 
     // ─── Branch completion signal ───────────────────────────────
     input  wire                    br_complete,     // branch execution complete (taken or not)
@@ -191,6 +208,8 @@ reg  [0:0]              win_tid         [0:RS_DEPTH-1];
 reg  [RS_TAG_W-1:0]     win_qj          [0:RS_DEPTH-1];
 reg  [RS_TAG_W-1:0]     win_qk          [0:RS_DEPTH-1];
 reg  [RS_TAG_W-1:0]     win_qd          [0:RS_DEPTH-1];
+reg  [RS_TAG_W-1:0]     win_src1_tag    [0:RS_DEPTH-1];
+reg  [RS_TAG_W-1:0]     win_src2_tag    [0:RS_DEPTH-1];
 reg                     win_ready       [0:RS_DEPTH-1];
 
 // Instruction payload
@@ -200,6 +219,7 @@ reg [2:0]              win_func3       [0:RS_DEPTH-1];
 reg                    win_func7       [0:RS_DEPTH-1];
 reg [4:0]              win_rd          [0:RS_DEPTH-1];
 reg                    win_br          [0:RS_DEPTH-1];
+reg                    win_is_mret     [0:RS_DEPTH-1];
 reg                    win_mem_read    [0:RS_DEPTH-1];
 reg                    win_mem2reg     [0:RS_DEPTH-1];
 reg [2:0]              win_alu_op      [0:RS_DEPTH-1];
@@ -223,6 +243,9 @@ reg                     fu_busy         [1:NUM_FU-1];
 
 // ═══════════════ Register Result Status (per-thread) ════════════════════════
 reg  [RS_TAG_W-1:0]     reg_result      [0:NUM_THREAD-1][0:31];
+reg  [`METADATA_ORDER_ID_W-1:0] reg_result_order [0:NUM_THREAD-1][0:31];
+reg                     tag_result_ready[0:31];
+reg  [`METADATA_ORDER_ID_W-1:0] tag_live_order[0:31];
 
 // ═══════════════ Allocation Pointer ════════════════════════════════════════
 reg  [15:0]             alloc_seq;
@@ -306,17 +329,10 @@ always @(*) begin
     if (disp0_regs_write && (disp0_rd != 5'd0))
         d0_dst_tag  = reg_result[disp0_tid][disp0_rd];
 
-    // CDB bypass: if wb is clearing a tag this cycle, clear it here too
-    if (wb0_valid && wb0_regs_write && (wb0_tag != {RS_TAG_W{1'b0}})) begin
-        if (d0_src1_tag == wb0_tag) d0_src1_tag = {RS_TAG_W{1'b0}};
-        if (d0_src2_tag == wb0_tag) d0_src2_tag = {RS_TAG_W{1'b0}};
-        if (d0_dst_tag  == wb0_tag) d0_dst_tag  = {RS_TAG_W{1'b0}};
-    end
-    if (wb1_valid && wb1_regs_write && (wb1_tag != {RS_TAG_W{1'b0}})) begin
-        if (d0_src1_tag == wb1_tag) d0_src1_tag = {RS_TAG_W{1'b0}};
-        if (d0_src2_tag == wb1_tag) d0_src2_tag = {RS_TAG_W{1'b0}};
-        if (d0_dst_tag  == wb1_tag) d0_dst_tag  = {RS_TAG_W{1'b0}};
-    end
+    if ((d0_src1_tag != {RS_TAG_W{1'b0}}) && tag_result_ready[d0_src1_tag])
+        d0_src1_tag = {RS_TAG_W{1'b0}};
+    if ((d0_src2_tag != {RS_TAG_W{1'b0}}) && tag_result_ready[d0_src2_tag])
+        d0_src2_tag = {RS_TAG_W{1'b0}};
 end
 
 always @(*) begin
@@ -344,17 +360,10 @@ always @(*) begin
             d1_dst_tag  = alloc0_tag;
     end
 
-    // CDB bypass
-    if (wb0_valid && wb0_regs_write && (wb0_tag != {RS_TAG_W{1'b0}})) begin
-        if (d1_src1_tag == wb0_tag) d1_src1_tag = {RS_TAG_W{1'b0}};
-        if (d1_src2_tag == wb0_tag) d1_src2_tag = {RS_TAG_W{1'b0}};
-        if (d1_dst_tag  == wb0_tag) d1_dst_tag  = {RS_TAG_W{1'b0}};
-    end
-    if (wb1_valid && wb1_regs_write && (wb1_tag != {RS_TAG_W{1'b0}})) begin
-        if (d1_src1_tag == wb1_tag) d1_src1_tag = {RS_TAG_W{1'b0}};
-        if (d1_src2_tag == wb1_tag) d1_src2_tag = {RS_TAG_W{1'b0}};
-        if (d1_dst_tag  == wb1_tag) d1_dst_tag  = {RS_TAG_W{1'b0}};
-    end
+    if ((d1_src1_tag != {RS_TAG_W{1'b0}}) && tag_result_ready[d1_src1_tag])
+        d1_src1_tag = {RS_TAG_W{1'b0}};
+    if ((d1_src2_tag != {RS_TAG_W{1'b0}}) && tag_result_ready[d1_src2_tag])
+        d1_src2_tag = {RS_TAG_W{1'b0}};
 end
 
 // ═══════════════ Dual-Issue Selection (combinational) ══════════════════════
@@ -362,6 +371,9 @@ reg                     sel0_found, sel1_found;
 reg  [RS_IDX_W-1:0]     sel0_idx,   sel1_idx;
 reg  [15:0]             sel0_seq,   sel1_seq;
 reg                     sel0_is_br, sel1_is_br;  // Track if selected instruction is a branch
+reg                     sel1_blocked_by_store;
+reg                     sel0_is_ctrl;
+reg                     sel0_blocked_by_store;
 
 // Captured issue info (for use in sequential logic)
 reg                     sel0_issued_br_r, sel1_issued_br_r;  // Registered versions
@@ -376,6 +388,8 @@ reg  [0:0]              sel0_issued_tid_r, sel1_issued_tid_r;
 reg  [RS_IDX_W-1:0]     br_idx_t0,  br_idx_t1;
 reg  [15:0]             br_seq_t0,  br_seq_t1;  // Min seq of pending branch
 reg                     br_found_t0, br_found_t1;
+reg  [15:0]             ready_store_seq_t0, ready_store_seq_t1;
+reg                     ready_store_found_t0, ready_store_found_t1;
 
 always @(*) begin
     br_found_t0 = 1'b0;
@@ -384,6 +398,10 @@ always @(*) begin
     br_idx_t1   = {RS_IDX_W{1'b0}};
     br_seq_t0   = 16'hffff;
     br_seq_t1   = 16'hffff;
+    ready_store_found_t0 = 1'b0;
+    ready_store_found_t1 = 1'b0;
+    ready_store_seq_t0   = 16'hffff;
+    ready_store_seq_t1   = 16'hffff;
 
     // Find the oldest pending branch (even if not ready yet)
     for (i = 0; i < RS_DEPTH; i = i + 1) begin
@@ -402,6 +420,20 @@ always @(*) begin
                 end
             end
         end
+        if (win_valid[i] && !win_issued[i] && win_ready[i] &&
+            (win_fu[i] == `FU_STORE) && !fu_busy[`FU_STORE]) begin
+            if (win_tid[i] == 1'b0) begin
+                if (!ready_store_found_t0 || (win_seq[i] < ready_store_seq_t0)) begin
+                    ready_store_found_t0 = 1'b1;
+                    ready_store_seq_t0   = win_seq[i];
+                end
+            end else begin
+                if (!ready_store_found_t1 || (win_seq[i] < ready_store_seq_t1)) begin
+                    ready_store_found_t1 = 1'b1;
+                    ready_store_seq_t1   = win_seq[i];
+                end
+            end
+        end
     end
 end
 
@@ -415,6 +447,7 @@ reg  [15:0]            last_br_seq_t0, last_br_seq_t1;
 
 wire pending_branch_t0 = br_found_t0 || branch_in_flight_t0;
 wire pending_branch_t1 = br_found_t1 || branch_in_flight_t1;
+assign branch_pending_any = pending_branch_t0 || pending_branch_t1;
 // Effective branch seq: use the branch being selected this cycle (if any), otherwise use saved seq
 wire [15:0] effective_br_seq_t0 = (sel0_found && sel0_is_br && win_tid[sel0_idx] == 1'b0) ? win_seq[sel0_idx] :
                                   (sel1_found && sel1_is_br && win_tid[sel1_idx] == 1'b0) ? win_seq[sel1_idx] :
@@ -432,11 +465,15 @@ always @(*) begin
     sel1_seq    = 16'hffff;
     sel0_is_br  = 1'b0;
     sel1_is_br  = 1'b0;
+    sel1_blocked_by_store = 1'b0;
+    sel0_is_ctrl = 1'b0;
+    sel0_blocked_by_store = 1'b0;
 
     // ── Default issue outputs ───────────────────────────────────
     iss0_valid = 1'b0; iss0_tag = 0; iss0_pc = 0; iss0_imm = 0;
     iss0_func3 = 0; iss0_func7 = 0; iss0_rd = 0;
     iss0_rs1 = 0; iss0_rs2 = 0; iss0_rs1_used = 0; iss0_rs2_used = 0;
+    iss0_src1_tag = 0; iss0_src2_tag = 0;
     iss0_br = 0; iss0_mem_read = 0; iss0_mem2reg = 0;
     iss0_alu_op = 0; iss0_mem_write = 0;
     iss0_alu_src1 = 0; iss0_alu_src2 = 0;
@@ -446,6 +483,7 @@ always @(*) begin
     iss1_valid = 1'b0; iss1_tag = 0; iss1_pc = 0; iss1_imm = 0;
     iss1_func3 = 0; iss1_func7 = 0; iss1_rd = 0;
     iss1_rs1 = 0; iss1_rs2 = 0; iss1_rs1_used = 0; iss1_rs2_used = 0;
+    iss1_src1_tag = 0; iss1_src2_tag = 0;
     iss1_br = 0; iss1_mem_read = 0; iss1_mem2reg = 0;
     iss1_alu_op = 0; iss1_mem_write = 0;
     iss1_alu_src1 = 0; iss1_alu_src2 = 0;
@@ -480,6 +518,17 @@ always @(*) begin
         if (win_valid[i] && !win_issued[i] && win_ready[i] &&
             (win_fu[i] != `FU_NOP) && 
             (win_fu[i] == `FU_INT0 || win_fu[i] == `FU_INT1)) begin
+            sel0_blocked_by_store = 1'b0;
+            if (win_is_mret[i]) begin
+                for (j = 0; j < RS_DEPTH; j = j + 1) begin
+                    if (win_valid[j] &&
+                        win_mem_write[j] &&
+                        (win_tid[j] == win_tid[i]) &&
+                        (win_seq[j] < win_seq[i])) begin
+                        sel0_blocked_by_store = 1'b1;
+                    end
+                end
+            end
 
             // Branch serialization: if pending branch or branch in flight, only issue:
             // 1. The pending branch itself (if pending), or
@@ -505,11 +554,24 @@ always @(*) begin
                 (win_tid[i] == 1'b1 && pending_branch_t1 && !win_br[i] && win_seq[i] >= effective_br_seq_t1)) begin
                 // Skip - this instruction is after the pending branch
             end
+            else if (sel0_blocked_by_store) begin
+                // MRET redirects immediately via trap_return. If an older
+                // store is still sitting in the RS, issuing MRET here can
+                // flush that store before exec_pipe1/LSU ever accepts it.
+            end
+            else if (win_br[i] &&
+                     ((win_tid[i] == 1'b0 && ready_store_found_t0 && (ready_store_seq_t0 < win_seq[i])) ||
+                      (win_tid[i] == 1'b1 && ready_store_found_t1 && (ready_store_seq_t1 < win_seq[i])))) begin
+                // Do not let a younger branch starve an older ready store on
+                // port 1. The store must issue before the branch can lock the
+                // thread into branch-in-flight serialization.
+            end
             else if (!sel0_found || (win_seq[i] < sel0_seq)) begin
                 sel0_found = 1'b1;
                 sel0_idx   = i[RS_IDX_W-1:0];
                 sel0_seq   = win_seq[i];
                 sel0_is_br = win_br[i];  // Track if this is a branch
+                sel0_is_ctrl = win_br[i] || win_is_mret[i];
                 `ifndef SYNTHESIS
                 $display("SB SELECT: idx=%0d PC=%h br=%b seq=%0d bif_t0=%b", 
                          i, win_pc[i], win_br[i], win_seq[i], branch_in_flight_t0);
@@ -539,11 +601,27 @@ always @(*) begin
             !(sel0_found && (win_mem_read[sel0_idx]||win_mem_write[sel0_idx])  // at most 1 mem
                          && (win_mem_read[i]||win_mem_write[i]))) begin
 
+            sel1_blocked_by_store = 1'b0;
+            if (win_fu[i] == `FU_LOAD) begin
+                for (j = 0; j < RS_DEPTH; j = j + 1) begin
+                    if (win_valid[j] &&
+                        win_mem_write[j] &&
+                        (win_tid[j] == win_tid[i]) &&
+                        (win_seq[j] < win_seq[i])) begin
+                        sel1_blocked_by_store = 1'b1;
+                    end
+                end
+            end
+
             // Branch serialization: don't issue if branch is in flight or port 0 is issuing branch
             if ((win_tid[i] == 1'b0 && branch_in_flight_t0) ||
                 (win_tid[i] == 1'b1 && branch_in_flight_t1) ||
-                sel0_is_br) begin
+                sel0_is_ctrl) begin
                 // Skip - a branch is in flight or will be in flight next cycle
+            end
+            else if (sel1_blocked_by_store) begin
+                // Conservative ordering: keep younger loads behind any older
+                // same-thread store until that store retires from the RS.
             end
             else if ((win_tid[i] == 1'b0 && pending_branch_t0 && win_seq[i] >= effective_br_seq_t0) ||
                 (win_tid[i] == 1'b1 && pending_branch_t1 && win_seq[i] >= effective_br_seq_t1)) begin
@@ -570,6 +648,8 @@ always @(*) begin
         iss0_rs2          = win_rs2[sel0_idx];
         iss0_rs1_used     = win_rs1_used[sel0_idx];
         iss0_rs2_used     = win_rs2_used[sel0_idx];
+        iss0_src1_tag     = win_src1_tag[sel0_idx];
+        iss0_src2_tag     = win_src2_tag[sel0_idx];
         iss0_br           = win_br[sel0_idx];
         iss0_mem_read     = win_mem_read[sel0_idx];
         iss0_mem2reg      = win_mem2reg[sel0_idx];
@@ -598,6 +678,8 @@ always @(*) begin
         iss1_rs2          = win_rs2[sel1_idx];
         iss1_rs1_used     = win_rs1_used[sel1_idx];
         iss1_rs2_used     = win_rs2_used[sel1_idx];
+        iss1_src1_tag     = win_src1_tag[sel1_idx];
+        iss1_src2_tag     = win_src2_tag[sel1_idx];
         iss1_br           = win_br[sel1_idx];
         iss1_mem_read     = win_mem_read[sel1_idx];
         iss1_mem2reg      = win_mem2reg[sel1_idx];
@@ -635,6 +717,10 @@ always @(posedge clk or negedge rstn) begin
         for (i = 0; i < 32; i = i + 1) begin
             reg_result[0][i] <= {RS_TAG_W{1'b0}};
             reg_result[1][i] <= {RS_TAG_W{1'b0}};
+            reg_result_order[0][i] <= {`METADATA_ORDER_ID_W{1'b0}};
+            reg_result_order[1][i] <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_result_ready[i] <= 1'b0;
+            tag_live_order[i] <= {`METADATA_ORDER_ID_W{1'b0}};
         end
         for (i = 0; i < RS_DEPTH; i = i + 1) begin
             win_valid[i]  <= 1'b0;
@@ -645,10 +731,13 @@ always @(posedge clk or negedge rstn) begin
             win_qj[i]     <= {RS_TAG_W{1'b0}};
             win_qk[i]     <= {RS_TAG_W{1'b0}};
             win_qd[i]     <= {RS_TAG_W{1'b0}};
+            win_src1_tag[i] <= {RS_TAG_W{1'b0}};
+            win_src2_tag[i] <= {RS_TAG_W{1'b0}};
             win_ready[i]  <= 1'b0;
             win_pc[i]     <= 32'd0; win_imm[i]    <= 32'd0;
             win_func3[i]  <= 3'd0;  win_func7[i]  <= 1'b0;
             win_rd[i]     <= 5'd0;  win_br[i]     <= 1'b0;
+            win_is_mret[i] <= 1'b0;
             win_mem_read[i]     <= 1'b0; win_mem2reg[i]     <= 1'b0;
             win_alu_op[i]       <= 3'd0; win_mem_write[i]   <= 1'b0;
             win_alu_src1[i]     <= 2'd0; win_alu_src2[i]    <= 2'd0;
@@ -712,7 +801,9 @@ always @(posedge clk or negedge rstn) begin
         // ── CDB Wakeup + FU release (WB port 0) ────────────────
         if (wb0_valid && (wb0_fu != 3'd0))
             fu_busy[wb0_fu] <= 1'b0;
-        if (wb0_valid && wb0_regs_write && (wb0_rd != 5'd0) &&
+        if (wb0_valid && wb0_regs_write && (wb0_tag != {RS_TAG_W{1'b0}}))
+            tag_result_ready[wb0_tag] <= 1'b1;
+        if (1'b0 && wb0_valid && wb0_regs_write && (wb0_rd != 5'd0) &&
             (wb0_tag != {RS_TAG_W{1'b0}}) &&
             (reg_result[wb0_tid][wb0_rd] == wb0_tag))
             reg_result[wb0_tid][wb0_rd] <= {RS_TAG_W{1'b0}};
@@ -720,12 +811,41 @@ always @(posedge clk or negedge rstn) begin
         // ── CDB Wakeup + FU release (WB port 1) ────────────────
         if (wb1_valid && (wb1_fu != 3'd0))
             fu_busy[wb1_fu] <= 1'b0;
-        if (wb1_valid && wb1_regs_write && (wb1_rd != 5'd0) &&
+        if (wb1_valid && wb1_regs_write && (wb1_tag != {RS_TAG_W{1'b0}}))
+            tag_result_ready[wb1_tag] <= 1'b1;
+        if (1'b0 && wb1_valid && wb1_regs_write && (wb1_rd != 5'd0) &&
             (wb1_tag != {RS_TAG_W{1'b0}}) &&
             (reg_result[wb1_tid][wb1_rd] == wb1_tag))
             reg_result[wb1_tid][wb1_rd] <= {RS_TAG_W{1'b0}};
 
         // ── Wakeup RS entries: clear matching qj/qk/qd ─────────
+        if (commit0_valid && (commit0_tag != {RS_TAG_W{1'b0}})) begin
+            if (tag_live_order[commit0_tag] == commit0_order_id) begin
+                tag_result_ready[commit0_tag] <= 1'b0;
+                tag_live_order[commit0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+            end
+            for (i = 1; i < 32; i = i + 1) begin
+                if ((reg_result[commit0_tid][i] == commit0_tag) &&
+                    (reg_result_order[commit0_tid][i] == commit0_order_id)) begin
+                    reg_result[commit0_tid][i] <= {RS_TAG_W{1'b0}};
+                    reg_result_order[commit0_tid][i] <= {`METADATA_ORDER_ID_W{1'b0}};
+                end
+            end
+        end
+        if (commit1_valid && (commit1_tag != {RS_TAG_W{1'b0}})) begin
+            if (tag_live_order[commit1_tag] == commit1_order_id) begin
+                tag_result_ready[commit1_tag] <= 1'b0;
+                tag_live_order[commit1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+            end
+            for (i = 1; i < 32; i = i + 1) begin
+                if ((reg_result[commit1_tid][i] == commit1_tag) &&
+                    (reg_result_order[commit1_tid][i] == commit1_order_id)) begin
+                    reg_result[commit1_tid][i] <= {RS_TAG_W{1'b0}};
+                    reg_result_order[commit1_tid][i] <= {`METADATA_ORDER_ID_W{1'b0}};
+                end
+            end
+        end
+
         for (i = 0; i < RS_DEPTH; i = i + 1) begin
             if (win_valid[i]) begin : wakeup_logic
                 reg [RS_TAG_W-1:0] nqj, nqk, nqd;
@@ -741,7 +861,12 @@ always @(posedge clk or negedge rstn) begin
                     if (nqk == wb1_tag) nqk = {RS_TAG_W{1'b0}};
                     if (nqd == wb1_tag) nqd = {RS_TAG_W{1'b0}};
                 end
-
+                if ((nqj != {RS_TAG_W{1'b0}}) && tag_result_ready[nqj])
+                    nqj = {RS_TAG_W{1'b0}};
+                if ((nqk != {RS_TAG_W{1'b0}}) && tag_result_ready[nqk])
+                    nqk = {RS_TAG_W{1'b0}};
+                if ((nqd != {RS_TAG_W{1'b0}}) && tag_result_ready[nqd])
+                    nqd = {RS_TAG_W{1'b0}};
                 win_qj[i]    <= nqj;
                 win_qk[i]    <= nqk;
                 win_qd[i]    <= nqd;
@@ -754,25 +879,44 @@ always @(posedge clk or negedge rstn) begin
         // ── Deallocate completed entries (match wb tag) ─────────
         for (i = 0; i < RS_DEPTH; i = i + 1) begin
             if (win_valid[i]) begin
-                if ((wb0_valid && (wb0_tag != {RS_TAG_W{1'b0}}) && (win_tag[i] == wb0_tag)) ||
-                    (wb1_valid && (wb1_tag != {RS_TAG_W{1'b0}}) && (win_tag[i] == wb1_tag))) begin
+                if ((commit0_valid && (commit0_tag != {RS_TAG_W{1'b0}}) &&
+                     (win_tid[i] == commit0_tid) && (win_tag[i] == commit0_tag) &&
+                     (win_order_id[i] == commit0_order_id)) ||
+                    (commit1_valid && (commit1_tag != {RS_TAG_W{1'b0}}) &&
+                     (win_tid[i] == commit1_tid) && (win_tag[i] == commit1_tag) &&
+                     (win_order_id[i] == commit1_order_id))) begin
                     win_valid[i]  <= 1'b0;
                     win_issued[i] <= 1'b0;
+                    win_is_mret[i] <= 1'b0;
+                    win_src1_tag[i] <= {RS_TAG_W{1'b0}};
+                    win_src2_tag[i] <= {RS_TAG_W{1'b0}};
                 end
             end
         end
 
         // ── Flush ───────────────────────────────────────────────
         if (flush) begin
-            alloc_seq <= 16'd0;
             for (i = 0; i < RS_DEPTH; i = i + 1) begin
-                if (win_valid[i] && (win_tid[i] == flush_tid)) begin
+                if (win_valid[i] && (win_tid[i] == flush_tid) &&
+                    (!flush_order_valid || (win_order_id[i] > flush_order_id))) begin
+                    tag_result_ready[win_tag[i]] <= 1'b0;
+                    `ifndef SYNTHESIS
+                    $display("[SB FLUSH] tid=%0d order=%0d flush_order_valid=%0b flush_order=%0d issued=%0b pc=%h @%0t",
+                             flush_tid, win_order_id[i], flush_order_valid, flush_order_id,
+                             win_issued[i], win_pc[i], $time);
+                    `endif
                     if (win_regs_write[i] && (win_rd[i] != 5'd0) &&
-                        (reg_result[win_tid[i]][win_rd[i]] == win_tag[i]))
+                        (reg_result[win_tid[i]][win_rd[i]] == win_tag[i]) &&
+                        (reg_result_order[win_tid[i]][win_rd[i]] == win_order_id[i])) begin
                         reg_result[win_tid[i]][win_rd[i]] <= {RS_TAG_W{1'b0}};
+                        reg_result_order[win_tid[i]][win_rd[i]] <= {`METADATA_ORDER_ID_W{1'b0}};
+                    end
                     win_valid[i]  <= 1'b0;
                     win_issued[i] <= 1'b0;
                     win_seq[i]    <= 16'd0;
+                    win_is_mret[i] <= 1'b0;
+                    win_src1_tag[i] <= {RS_TAG_W{1'b0}};
+                    win_src2_tag[i] <= {RS_TAG_W{1'b0}};
                 end
             end
         end
@@ -795,6 +939,8 @@ always @(posedge clk or negedge rstn) begin
 
             // ── Dispatch 0: allocate RS entry ───────────────────
             if (disp0_valid && !disp_stall && free0_found) begin
+                tag_result_ready[alloc0_tag] <= 1'b0;
+                tag_live_order[alloc0_tag] <= disp0_order_id;
                 win_valid[free0_idx]        <= 1'b1;
                 win_issued[free0_idx]       <= 1'b0;
                 win_seq[free0_idx]          <= alloc_seq;
@@ -805,6 +951,7 @@ always @(posedge clk or negedge rstn) begin
                 win_func7[free0_idx]        <= disp0_func7;
                 win_rd[free0_idx]           <= disp0_rd;
                 win_br[free0_idx]           <= disp0_br;
+                win_is_mret[free0_idx]      <= disp0_is_mret;
                 win_mem_read[free0_idx]     <= disp0_mem_read;
                 win_mem2reg[free0_idx]      <= disp0_mem2reg;
                 win_alu_op[free0_idx]       <= disp0_alu_op;
@@ -823,17 +970,27 @@ always @(posedge clk or negedge rstn) begin
                 win_qj[free0_idx]           <= d0_src1_tag;
                 win_qk[free0_idx]           <= d0_src2_tag;
                 win_qd[free0_idx]           <= d0_dst_tag;
+                win_src1_tag[free0_idx]     <= (disp0_rs1_used && (disp0_rs1 != 5'd0)) ?
+                                               reg_result[disp0_tid][disp0_rs1] :
+                                               {RS_TAG_W{1'b0}};
+                win_src2_tag[free0_idx]     <= (disp0_rs2_used && (disp0_rs2 != 5'd0)) ?
+                                               reg_result[disp0_tid][disp0_rs2] :
+                                               {RS_TAG_W{1'b0}};
                 // Note: win_qd is for WAW tracking, NOT a readiness condition
                 // Only source operand dependencies (qj, qk) determine readiness
                 win_ready[free0_idx]        <= (d0_src1_tag == {RS_TAG_W{1'b0}}) &&
                                                (d0_src2_tag == {RS_TAG_W{1'b0}});
-                if (disp0_regs_write && (disp0_rd != 5'd0))
+                if (disp0_regs_write && (disp0_rd != 5'd0)) begin
                     reg_result[disp0_tid][disp0_rd] <= alloc0_tag;
+                    reg_result_order[disp0_tid][disp0_rd] <= disp0_order_id;
+                end
                 alloc_seq <= alloc_seq + 16'd1;
             end
 
             // ── Dispatch 1: allocate second RS entry ────────────
             if (disp1_valid && !disp_stall && free1_found) begin
+                tag_result_ready[alloc1_tag] <= 1'b0;
+                tag_live_order[alloc1_tag] <= disp1_order_id;
                 win_valid[free1_idx]        <= 1'b1;
                 win_issued[free1_idx]       <= 1'b0;
                 win_seq[free1_idx]          <= alloc_seq + (disp0_valid ? 16'd1 : 16'd0);
@@ -844,6 +1001,7 @@ always @(posedge clk or negedge rstn) begin
                 win_func7[free1_idx]        <= disp1_func7;
                 win_rd[free1_idx]           <= disp1_rd;
                 win_br[free1_idx]           <= disp1_br;
+                win_is_mret[free1_idx]      <= disp1_is_mret;
                 win_mem_read[free1_idx]     <= disp1_mem_read;
                 win_mem2reg[free1_idx]      <= disp1_mem2reg;
                 win_alu_op[free1_idx]       <= disp1_alu_op;
@@ -862,12 +1020,26 @@ always @(posedge clk or negedge rstn) begin
                 win_qj[free1_idx]           <= d1_src1_tag;
                 win_qk[free1_idx]           <= d1_src2_tag;
                 win_qd[free1_idx]           <= d1_dst_tag;
+                win_src1_tag[free1_idx]     <= (disp0_valid && !disp_stall && disp0_regs_write &&
+                                                (disp0_rd != 5'd0) && (disp0_tid == disp1_tid) &&
+                                                disp1_rs1_used && (disp1_rs1 == disp0_rd)) ? alloc0_tag :
+                                               ((disp1_rs1_used && (disp1_rs1 != 5'd0)) ?
+                                                reg_result[disp1_tid][disp1_rs1] :
+                                                {RS_TAG_W{1'b0}});
+                win_src2_tag[free1_idx]     <= (disp0_valid && !disp_stall && disp0_regs_write &&
+                                                (disp0_rd != 5'd0) && (disp0_tid == disp1_tid) &&
+                                                disp1_rs2_used && (disp1_rs2 == disp0_rd)) ? alloc0_tag :
+                                               ((disp1_rs2_used && (disp1_rs2 != 5'd0)) ?
+                                                reg_result[disp1_tid][disp1_rs2] :
+                                                {RS_TAG_W{1'b0}});
                 // Note: win_qd is for WAW tracking, NOT a readiness condition
                 // Only source operand dependencies (qj, qk) determine readiness
                 win_ready[free1_idx]        <= (d1_src1_tag == {RS_TAG_W{1'b0}}) &&
                                                (d1_src2_tag == {RS_TAG_W{1'b0}});
-                if (disp1_regs_write && (disp1_rd != 5'd0))
+                if (disp1_regs_write && (disp1_rd != 5'd0)) begin
                     reg_result[disp1_tid][disp1_rd] <= alloc1_tag;
+                    reg_result_order[disp1_tid][disp1_rd] <= disp1_order_id;
+                end
                 alloc_seq <= alloc_seq + (disp0_valid ? 16'd2 : 16'd1);
             end
         end

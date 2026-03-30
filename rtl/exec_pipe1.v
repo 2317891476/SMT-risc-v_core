@@ -51,6 +51,7 @@ module exec_pipe1 #(
 
     // ─── Memory interface (to D-TLB / DCache) ──────────────────
     output wire               mem_req_valid,
+    input  wire               mem_req_accept,
     output wire               mem_req_wen,     // 1=store, 0=load
     output wire [31:0]        mem_req_addr,    // effective address
     output wire [31:0]        mem_req_wdata,   // store data
@@ -145,6 +146,19 @@ reg [2:0]  alu_out_fu_r;
 reg [0:0]  alu_out_tid_r;
 reg [15:0] alu_out_order_id_r;
 reg [7:0]  alu_out_epoch_r;
+reg        mem_req_valid_r;
+reg        mem_req_wen_r;
+reg [31:0] mem_req_addr_r;
+reg [31:0] mem_req_wdata_r;
+reg [2:0]  mem_req_func3_r;
+reg [TAG_W-1:0] mem_req_tag_r;
+reg [4:0]  mem_req_rd_r;
+reg        mem_req_regs_write_r;
+reg [2:0]  mem_req_fu_r;
+reg        mem_req_mem2reg_r;
+reg [0:0]  mem_req_tid_r;
+reg [15:0] mem_req_order_id_r;
+reg [7:0]  mem_req_epoch_r;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -157,6 +171,19 @@ always @(posedge clk or negedge rstn) begin
         alu_out_tid_r        <= 1'b0;
         alu_out_order_id_r   <= 16'd0;
         alu_out_epoch_r      <= 8'd0;
+        mem_req_valid_r      <= 1'b0;
+        mem_req_wen_r        <= 1'b0;
+        mem_req_addr_r       <= 32'd0;
+        mem_req_wdata_r      <= 32'd0;
+        mem_req_func3_r      <= 3'd0;
+        mem_req_tag_r        <= {TAG_W{1'b0}};
+        mem_req_rd_r         <= 5'd0;
+        mem_req_regs_write_r <= 1'b0;
+        mem_req_fu_r         <= 3'd0;
+        mem_req_mem2reg_r    <= 1'b0;
+        mem_req_tid_r        <= 1'b0;
+        mem_req_order_id_r   <= 16'd0;
+        mem_req_epoch_r      <= 8'd0;
     end else begin
         alu_out_valid_r      <= is_alu_op;
         alu_out_tag_r        <= in_tag;
@@ -167,6 +194,26 @@ always @(posedge clk or negedge rstn) begin
         alu_out_tid_r        <= in_tid;
         alu_out_order_id_r   <= in_order_id;
         alu_out_epoch_r      <= in_epoch;
+
+        if (mem_req_valid_r && mem_req_accept) begin
+            mem_req_valid_r <= 1'b0;
+        end
+
+        if (in_valid && is_mem_op) begin
+            mem_req_valid_r      <= 1'b1;
+            mem_req_wen_r        <= in_mem_write;
+            mem_req_addr_r       <= eff_addr;
+            mem_req_wdata_r      <= in_op_b;
+            mem_req_func3_r      <= in_func3;
+            mem_req_tag_r        <= in_tag;
+            mem_req_rd_r         <= in_rd;
+            mem_req_regs_write_r <= in_regs_write;
+            mem_req_fu_r         <= in_fu;
+            mem_req_mem2reg_r    <= in_mem2reg;
+            mem_req_tid_r        <= in_tid;
+            mem_req_order_id_r   <= in_order_id;
+            mem_req_epoch_r      <= in_epoch;
+        end
     end
 end
 
@@ -179,18 +226,20 @@ assign alu_out_fu         = alu_out_fu_r;
 assign alu_out_tid        = alu_out_tid_r;
 
 // ─── Memory request output ─────────────────────────────────────────────────
-assign mem_req_valid      = in_valid && is_mem_op;
-assign mem_req_wen        = in_mem_write;
-assign mem_req_addr       = eff_addr;
-assign mem_req_wdata      = in_op_b;  // rs2 data for store
-assign mem_req_func3      = in_func3;
-assign mem_req_tag        = in_tag;
-assign mem_req_rd         = in_rd;
-assign mem_req_regs_write = in_regs_write;
-assign mem_req_fu         = in_fu;
-assign mem_req_mem2reg    = in_mem2reg;
-assign mem_req_tid        = in_tid;
-assign mem_req_order_id   = in_order_id;
-assign mem_req_epoch      = in_epoch;
+// Hold memory requests until the LSU accepts them. A one-cycle pulse here can be
+// dropped whenever the LSU is busy waiting for an earlier load/store response.
+assign mem_req_valid      = mem_req_valid_r;
+assign mem_req_wen        = mem_req_wen_r;
+assign mem_req_addr       = mem_req_addr_r;
+assign mem_req_wdata      = mem_req_wdata_r;
+assign mem_req_func3      = mem_req_func3_r;
+assign mem_req_tag        = mem_req_tag_r;
+assign mem_req_rd         = mem_req_rd_r;
+assign mem_req_regs_write = mem_req_regs_write_r;
+assign mem_req_fu         = mem_req_fu_r;
+assign mem_req_mem2reg    = mem_req_mem2reg_r;
+assign mem_req_tid        = mem_req_tid_r;
+assign mem_req_order_id   = mem_req_order_id_r;
+assign mem_req_epoch      = mem_req_epoch_r;
 
 endmodule

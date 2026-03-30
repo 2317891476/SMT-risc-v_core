@@ -20,6 +20,10 @@ module bypass_network #(
     input  wire [DATA_W-1:0]   ro_rs1_regdata,   // data from register file
     input  wire [DATA_W-1:0]   ro_rs2_regdata,
     input  wire [0:0]          ro_tid,           // requesting thread ID
+    input  wire                tagbuf_rs1_valid,
+    input  wire [DATA_W-1:0]   tagbuf_rs1_data,
+    input  wire                tagbuf_rs2_valid,
+    input  wire [DATA_W-1:0]   tagbuf_rs2_data,
 
     // ─── Pipe 0 result (EX stage, 1-cycle ALU) ──────────────────
     input  wire                pipe0_valid,
@@ -60,19 +64,25 @@ wire p0_match_b = pipe0_valid && pipe0_rd_wen && (pipe0_rd != 5'd0) && (pipe0_rd
 wire p1_match_b = pipe1_valid && pipe1_rd_wen && (pipe1_rd != 5'd0) && (pipe1_rd == ro_rs2_addr) && (pipe1_tid == ro_tid);
 wire mm_match_b = mem_valid   && mem_rd_wen   && (mem_rd   != 5'd0) && (mem_rd   == ro_rs2_addr) && (mem_tid   == ro_tid);
 
-// ─── Priority MUX: pipe0 > pipe1 > mem > regfile ────────────────────────────
+// ─── Priority MUX: pipe0 > pipe1 > mem > result-buffer > regfile ────────────
 assign op_a = p0_match_a ? pipe0_data :
               p1_match_a ? pipe1_data :
               mm_match_a ? mem_data   :
+              tagbuf_rs1_valid ? tagbuf_rs1_data :
                            ro_rs1_regdata;
 
 assign op_b = p0_match_b ? pipe0_data :
               p1_match_b ? pipe1_data :
               mm_match_b ? mem_data   :
+              tagbuf_rs2_valid ? tagbuf_rs2_data :
                            ro_rs2_regdata;
 
 // Debug indicators
-assign fwd_src_a = p0_match_a ? 2'b01 : p1_match_a ? 2'b10 : mm_match_a ? 2'b11 : 2'b00;
-assign fwd_src_b = p0_match_b ? 2'b01 : p1_match_b ? 2'b10 : mm_match_b ? 2'b11 : 2'b00;
+assign fwd_src_a = p0_match_a ? 2'b01 :
+                   p1_match_a ? 2'b10 :
+                   (mm_match_a || tagbuf_rs1_valid) ? 2'b11 : 2'b00;
+assign fwd_src_b = p0_match_b ? 2'b01 :
+                   p1_match_b ? 2'b10 :
+                   (mm_match_b || tagbuf_rs2_valid) ? 2'b11 : 2'b00;
 
 endmodule

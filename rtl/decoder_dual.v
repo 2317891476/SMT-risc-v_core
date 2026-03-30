@@ -16,6 +16,7 @@
 `include "define.v"
 
 module decoder_dual (
+    input  wire        stall,
     // ─── Input: two instruction words from Fetch Buffer ──────────
     input  wire        inst0_valid,
     input  wire [31:0] inst0_word,      // instruction 0 (older in program order)
@@ -294,12 +295,11 @@ assign dec1_fu           = d1_fu;
 assign dec1_tid          = inst1_tid;
 
 // ─── Consume signals (feedback to fetch_buffer) ─────────────────────────────
-// Important: We always consume from fetch_buffer when we have valid entries.
-// Invalid/illegal instructions are consumed and discarded (not dispatched to scoreboard).
-// This prevents deadlock when buffer contains illegal instructions like 0x00000000.
-// Note: inst0_valid is actually fb_pop0_valid from fetch_buffer (buffer has entry)
-assign consume_0 = inst0_valid;  // Always consume if buffer has entry for slot 0
-assign consume_1 = dec1_valid_int;  // Consume inst1 only if both valid and no conflict
+// Hold fetch-buffer entries in place whenever the downstream pipeline stalls.
+// Otherwise ROB/scoreboard backpressure silently drops instructions that were
+// decoded but never accepted.
+assign consume_0 = inst0_valid && !stall;
+assign consume_1 = dec1_valid_int && !stall;
 
 // ─── CSR/SYSTEM outputs ─────────────────────────────────────────────────────
 assign dec0_is_csr    = d0_is_csr;

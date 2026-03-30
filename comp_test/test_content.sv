@@ -25,7 +25,9 @@ endfunction
 //   0 -> unknown image
 initial begin
     #1ns;
-    if (`TB_IROM.mem[0] === 32'h00100093)
+    if (TB_SELECTED_TEST_ID != 0)
+        test_id = TB_SELECTED_TEST_ID;
+    else if (`TB_IROM.mem[0] === 32'h00100093)
         test_id = 1;
     else if (`TB_IROM.mem[0] === 32'h01500093)
         test_id = 2;
@@ -117,17 +119,6 @@ initial begin
     end
     else if (test_id == 4) begin
         // test_rv32i_full.s — comprehensive RV32I instruction test
-        // Debug output
-        $display("test_rv32i_full Debug:");
-        $display("DRAM[1029] BEQ  = %h, expected 0x01", `TB_MEM_SUBSYS[1029]);
-        $display("DRAM[1030] BNE  = %h, expected 0x02", `TB_MEM_SUBSYS[1030]);
-        $display("DRAM[1031] BLT  = %h, expected 0x03", `TB_MEM_SUBSYS[1031]);
-        $display("DRAM[1032] BGE  = %h, expected 0x04", `TB_MEM_SUBSYS[1032]);
-        $display("DRAM[1033] BLTU = %h, expected 0x05", `TB_MEM_SUBSYS[1033]);
-        $display("DRAM[1034] BGEU = %h, expected 0x06", `TB_MEM_SUBSYS[1034]);
-        $display("DRAM[1035] JAL  = %h, expected 0x07", `TB_MEM_SUBSYS[1035]);
-        $display("DRAM[1036] JALR = %h, expected 0x08", `TB_MEM_SUBSYS[1036]);
-        $display("DRAM[1037] LUI  = %h, expected 0xDEADB000", `TB_MEM_SUBSYS[1037]);
         // Check branch-pass markers stored to DRAM by the test
         pass = pass
             && (`TUBE_STATUS   === 8'h04)        // TUBE end marker

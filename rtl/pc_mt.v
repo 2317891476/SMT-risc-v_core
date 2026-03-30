@@ -18,6 +18,7 @@ module pc_mt #(
     // Per-thread stall / flush
     input  wire [N_T-1:0] pc_stall,         // [t] = stall PC of thread t
     input  wire [N_T-1:0] flush,            // [t] = flush (branch misprediction) for thread t
+    input  wire [N_T-1:0] pc_advance,       // [t] = fetch request launched for thread t
 
     // Thread scheduler selects which thread fetches this cycle
     input  wire [0:0]     fetch_tid,
@@ -57,8 +58,8 @@ always @(posedge clk or negedge rstn) begin
                 pc[t]      <= pc[t];
                 pc_next[t] <= pc_next[t];
             end
-            else if (fetch_tid == t[0:0]) begin
-                // Only advance PC when this thread is the one fetching
+            else if (pc_advance[t]) begin
+                // Advance only when IF actually launches a fetch for this thread.
                 pc[t]      <= pc_next[t];
                 pc_next[t] <= pc_next[t] + 32'h4;
             end

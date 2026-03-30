@@ -34,6 +34,8 @@ module store_buffer #(
     input  wire [0:0]               flush_tid,
     input  wire [EPOCH_W-1:0]       flush_new_epoch_t0,  // Expected epoch after flush
     input  wire [EPOCH_W-1:0]       flush_new_epoch_t1,
+    input  wire                     flush_order_valid,   // 1 for branch redirect, 0 for trap/global flush
+    input  wire [ORDER_ID_W-1:0]    flush_order_id,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Store Request Interface (from LSU shell)
@@ -194,6 +196,36 @@ function [3:0] store_byte_mask;
             2'b01:   store_byte_mask = 4'b0011 << {addr_offset[1], 1'b0};  // SH
             2'b10:   store_byte_mask = 4'b1111;  // SW
             default: store_byte_mask = 4'b0000;
+        endcase
+    end
+endfunction
+
+// Align store payload into the addressed byte lanes so both backing-memory
+// writes and same-address forwarding see the architecturally correct word.
+function [31:0] align_store_data;
+    input [31:0] store_data_in;
+    input [2:0] func3;
+    input [1:0] addr_offset;
+    begin
+        case (func3[1:0])
+            2'b00: begin
+                case (addr_offset)
+                    2'b00: align_store_data = {24'd0, store_data_in[7:0]};
+                    2'b01: align_store_data = {16'd0, store_data_in[7:0], 8'd0};
+                    2'b10: align_store_data = {8'd0, store_data_in[7:0], 16'd0};
+                    2'b11: align_store_data = {store_data_in[7:0], 24'd0};
+                    default: align_store_data = 32'd0;
+                endcase
+            end
+            2'b01: begin
+                case (addr_offset[1])
+                    1'b0: align_store_data = {16'd0, store_data_in[15:0]};
+                    1'b1: align_store_data = {store_data_in[15:0], 16'd0};
+                    default: align_store_data = 32'd0;
+                endcase
+            end
+            2'b10: align_store_data = store_data_in;
+            default: align_store_data = 32'd0;
         endcase
     end
 endfunction
@@ -362,11 +394,15 @@ always @(posedge clk or negedge rstn) begin
         if (flush) begin
             flush_expected_epoch = flush_tid ? flush_new_epoch_t1 : flush_new_epoch_t0;
             
-            // Count entries that will remain valid after flush
+            // Branch redirects only discard younger wrong-path stores. Trap/
+            // global flushes discard speculative stores from the old epoch,
+            // but must preserve already-committed entries so handler-side MMIO
+            // writes can still drain before/after MRET.
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 if (sb_valid_next[flush_tid][j] && 
-                    (sb_epoch[flush_tid][j] != flush_expected_epoch)) begin
-                    // Wrong epoch: invalidate this entry
+                    (sb_epoch[flush_tid][j] != flush_expected_epoch) &&
+                    (flush_order_valid ? (sb_order_id[flush_tid][j] > flush_order_id)
+                                      : !sb_committed_next[flush_tid][j])) begin
                     sb_valid_next[flush_tid][j] = 1'b0;
                     sb_committed_next[flush_tid][j] = 1'b0;
                 end
@@ -378,6 +414,9 @@ always @(posedge clk or negedge rstn) begin
                 if (sb_valid_next[flush_tid][j])
                     sb_count_next[flush_tid] = sb_count_next[flush_tid] + 1;
             end
+
+            if (sb_count_next[flush_tid] == 0)
+                sb_head_next[flush_tid] = sb_tail_next[flush_tid];
         end
 
         // ── Store Allocation ───────────────────────────────────
@@ -386,7 +425,7 @@ always @(posedge clk or negedge rstn) begin
             if (store_tid == 1'b0) begin
                 sb_valid_next[0][sb_tail_next[0]]     = 1'b1;
                 sb_addr[0][sb_tail_next[0]]      <= store_addr;
-                sb_data[0][sb_tail_next[0]]      <= store_data;
+                sb_data[0][sb_tail_next[0]]      <= align_store_data(store_data, store_func3, store_addr[1:0]);
                 sb_func3[0][sb_tail_next[0]]     <= store_func3;
                 sb_order_id[0][sb_tail_next[0]]  <= store_order_id;
                 sb_epoch[0][sb_tail_next[0]]     <= store_epoch;
@@ -396,7 +435,7 @@ always @(posedge clk or negedge rstn) begin
             end else begin
                 sb_valid_next[1][sb_tail_next[1]]     = 1'b1;
                 sb_addr[1][sb_tail_next[1]]      <= store_addr;
-                sb_data[1][sb_tail_next[1]]      <= store_data;
+                sb_data[1][sb_tail_next[1]]      <= align_store_data(store_data, store_func3, store_addr[1:0]);
                 sb_func3[1][sb_tail_next[1]]     <= store_func3;
                 sb_order_id[1][sb_tail_next[1]]  <= store_order_id;
                 sb_epoch[1][sb_tail_next[1]]     <= store_epoch;
@@ -404,6 +443,10 @@ always @(posedge clk or negedge rstn) begin
                 sb_tail_next[1] = sb_tail_next[1] + 1;
                 sb_count_next[1] = sb_count_next[1] + 1;
             end
+            `ifndef SYNTHESIS
+            $display("[SB ENQ] tid=%0d order=%0d addr=%h data=%h func3=%0d",
+                     store_tid, store_order_id, store_addr, store_data, store_func3);
+            `endif
         end
 
         // ── Commit Processing ──────────────────────────────────
@@ -415,6 +458,10 @@ always @(posedge clk or negedge rstn) begin
                 if (sb_valid_next[0][j] && !sb_committed_next[0][j] &&
                     (sb_order_id[0][j] == commit0_order_id)) begin
                     sb_committed_next[0][j] = 1'b1;
+                    `ifndef SYNTHESIS
+                    $display("[SB COMMIT] tid=0 order=%0d idx=%0d addr=%h",
+                             commit0_order_id, j, sb_addr[0][j]);
+                    `endif
                 end
             end
         end
@@ -425,6 +472,10 @@ always @(posedge clk or negedge rstn) begin
                 if (sb_valid_next[1][j] && !sb_committed_next[1][j] &&
                     (sb_order_id[1][j] == commit1_order_id)) begin
                     sb_committed_next[1][j] = 1'b1;
+                    `ifndef SYNTHESIS
+                    $display("[SB COMMIT] tid=1 order=%0d idx=%0d addr=%h",
+                             commit1_order_id, j, sb_addr[1][j]);
+                    `endif
                 end
             end
         end
@@ -432,11 +483,21 @@ always @(posedge clk or negedge rstn) begin
         // ── Store Drain ─────────────────────────────────────────
         // Remove drained stores from buffer (T0 has priority)
         if (drain_fire_t0) begin
+            `ifndef SYNTHESIS
+            $display("[SB DRAIN] tid=0 order=%0d addr=%h data=%h wen=%b",
+                     sb_order_id[0][sb_head_next[0]], sb_addr[0][sb_head_next[0]],
+                     sb_data[0][sb_head_next[0]], mem_write_wen);
+            `endif
             sb_valid_next[0][sb_head_next[0]] = 1'b0;  // Deallocate
             sb_committed_next[0][sb_head_next[0]] = 1'b0;
             sb_head_next[0] = sb_head_next[0] + 1;
             sb_count_next[0] = sb_count_next[0] - 1;
         end else if (drain_fire_t1) begin
+            `ifndef SYNTHESIS
+            $display("[SB DRAIN] tid=1 order=%0d addr=%h data=%h wen=%b",
+                     sb_order_id[1][sb_head_next[1]], sb_addr[1][sb_head_next[1]],
+                     sb_data[1][sb_head_next[1]], mem_write_wen);
+            `endif
             sb_valid_next[1][sb_head_next[1]] = 1'b0;  // Deallocate
             sb_committed_next[1][sb_head_next[1]] = 1'b0;
             sb_head_next[1] = sb_head_next[1] + 1;

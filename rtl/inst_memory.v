@@ -12,6 +12,7 @@ module inst_memory #(
 )(
     input  wire       clk,
     input  wire       rstn,
+    input  wire       req_valid,
     input  wire [31:0] inst_addr,
     input  wire [0:0]  req_tid,           // Thread ID for request
     output wire [31:0] inst_o,
@@ -88,6 +89,7 @@ icache #(
     .rstn             (rstn              ),
 
     // Synchronous interface
+    .cpu_req_valid    (req_valid         ),
     .cpu_req_addr     (inst_addr         ),
     .cpu_req_tid      (req_tid           ),
     .cpu_resp_data    (icache_resp_data  ),
@@ -144,24 +146,15 @@ icache_mem_adapter #(
 );
 
 // Backing Store (preserved hierarchy for testbench compatibility)
-// This provides both the bypass data and the fill data
-// Note: icache uses registered address internally, so we need to match that timing
-// The icache presents address in cycle N, detects miss in cycle N+1 on registered addr
-// So backing_store should also use registered address for bypass to align
-reg [31:0] inst_addr_r;
-always @(posedge clk or negedge rstn) begin
-    if (!rstn)
-        inst_addr_r <= 32'd0;
-    else
-        inst_addr_r <= inst_addr;
-end
-
+// This provides both the bypass data and the fill data.
+// Miss bypass must align with icache's registered req_addr_r on the following
+// cycle, so the synchronous RAM should see the raw request address in cycle N.
 inst_backing_store #(
     .IROM_SPACE (IROM_SPACE)
 ) u_inst_backing_store (
     .clk       (clk               ),
     .rstn      (rstn              ),
-    .inst_addr (inst_addr_r     ),  // Registered address to match icache internal timing
+    .inst_addr (inst_addr         ),
     .inst_o    (backing_store_data_raw)
 );
 

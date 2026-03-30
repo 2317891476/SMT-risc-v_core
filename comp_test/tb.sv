@@ -14,6 +14,10 @@
 `define ROCC_ENABLE 0
 `endif
 
+`ifndef TB_DEBUG
+`define TB_DEBUG 0
+`endif
+
 // RoCC monitoring hooks (for verification when RoCC is integrated)
 // These macros reference RoCC signals for command/response/DMA tracing
 `ifndef ROCC_INST_PATH
@@ -29,6 +33,8 @@ module tb;
 
 reg clk;
 reg rst;
+localparam integer DATA_BASE_WORD = 32'h0000_1000 >> 2;
+localparam integer TB_SELECTED_TEST_ID = `TEST_ID;
 always begin
 #25    clk = ~clk;
 end
@@ -93,9 +99,15 @@ initial begin : init_dram
     end
     $readmemh("../rom/data.hex", data_bytes);
 
-    for (i = 0; i < `RAM_DEEP; i = i + 1) begin
+    // mem_subsys uses a unified RAM image. Load the data segment after the
+    // instruction image has been mirrored into shared RAM so .data overlays
+    // the linker-script region at 0x1000 instead of being clobbered by text.
+    #20;
+    for (i = DATA_BASE_WORD; i < `RAM_DEEP; i = i + 1) begin
         `TB_DATA_MEM[i] = {data_bytes[i*4+3], data_bytes[i*4+2], data_bytes[i*4+1], data_bytes[i*4+0]};
     end
+    $display("[DATA_OVERLAY] ram[1024]=%h ram[1025]=%h ram[1026]=%h ram[1027]=%h",
+             `TB_DATA_MEM[1024], `TB_DATA_MEM[1025], `TB_DATA_MEM[1026], `TB_DATA_MEM[1027]);
 end
 
 initial begin
@@ -120,10 +132,15 @@ initial begin : plic_stimulus
     
     // For PLIC tests, assert external interrupt after some cycles
     // to allow test setup (enable interrupts, configure PLIC)
-    if (`TB_IROM.mem[0] === 32'h00000093) begin  // Detect PLIC test by first instruction
+    if (TB_SELECTED_TEST_ID == 10) begin
         #5000;  // Wait 5us for test setup
         force u_adam_riscv.ext_irq_src = 1'b1;
         #1000;  // Hold for 1us
+        force u_adam_riscv.ext_irq_src = 1'b0;
+    end else if (TB_SELECTED_TEST_ID == 19) begin
+        #5000;  // Wait 5us for test setup
+        force u_adam_riscv.ext_irq_src = 1'b1;
+        #1000;
         force u_adam_riscv.ext_irq_src = 1'b0;
     end
 end
@@ -283,22 +300,70 @@ end
 //---------------------------------------------------------------------------------------------
 // Debug: Monitor WB signals and ROB state
 //---------------------------------------------------------------------------------------------
+generate
+if (`TB_DEBUG) begin : gen_tb_debug
 always @(posedge clk) begin
-    if (!rst) begin
+    if (rst) begin
         // Monitor dispatch
         if (u_adam_riscv.disp0_valid_gated && !u_adam_riscv.sb_disp_stall) begin
-            $display("[DISP0] tag=%0d rd=%0d tid=%0d @%0t",
+            $display("[DISP0] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv.dec0_pc,
+                     u_adam_riscv.dec0_fu,
                      u_adam_riscv.sb_disp0_tag,
+                     u_adam_riscv.disp0_order_id,
                      u_adam_riscv.dec0_rd,
                      u_adam_riscv.dec0_tid,
                      $time);
         end
         if (u_adam_riscv.disp1_valid_gated && !u_adam_riscv.sb_disp_stall) begin
-            $display("[DISP1] tag=%0d rd=%0d tid=%0d @%0t",
+            $display("[DISP1] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv.dec1_pc,
+                     u_adam_riscv.dec1_fu,
                      u_adam_riscv.sb_disp1_tag,
+                     u_adam_riscv.disp1_order_id,
                      u_adam_riscv.dec1_rd,
                      u_adam_riscv.dec1_tid,
                      $time);
+        end
+        if (u_adam_riscv.iss0_valid) begin
+            $display("[ISS0] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv.iss0_pc,
+                     u_adam_riscv.iss0_fu,
+                     u_adam_riscv.iss0_tag,
+                     u_adam_riscv.iss0_order_id,
+                     u_adam_riscv.iss0_rd,
+                     u_adam_riscv.iss0_tid,
+                     $time);
+            $display("[ISS0 SRC DBG] rs1=x%0d used=%0b src1_tag=%0d ro1=0x%08h tagv=%0b tagd=0x%08h byp_a=0x%08h fwd_a=%0d @%0t",
+                     u_adam_riscv.iss0_rs1,
+                     u_adam_riscv.iss0_rs1_used,
+                     u_adam_riscv.iss0_src1_tag,
+                     u_adam_riscv.ro0_data1,
+                     u_adam_riscv.p0_tagbuf_a_valid,
+                     u_adam_riscv.p0_tagbuf_a_data,
+                     u_adam_riscv.byp0_op_a,
+                     u_adam_riscv.byp0_fwd_a,
+                     $time);
+        end
+        if (u_adam_riscv.iss1_valid) begin
+            $display("[ISS1] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
+                     u_adam_riscv.iss1_pc,
+                     u_adam_riscv.iss1_fu,
+                     u_adam_riscv.iss1_tag,
+                     u_adam_riscv.iss1_order_id,
+                     u_adam_riscv.iss1_rd,
+                     u_adam_riscv.iss1_tid,
+                     $time);
+            if (u_adam_riscv.iss1_mem_write) begin
+                $display("[ISS1 STORE DBG] rs2=x%0d used=%0b src2_tag=%0d ro2=0x%08h byp_b=0x%08h fwd_b=%0d @%0t",
+                         u_adam_riscv.iss1_rs2,
+                         u_adam_riscv.iss1_rs2_used,
+                         u_adam_riscv.iss1_src2_tag,
+                         u_adam_riscv.ro1_data2,
+                         u_adam_riscv.byp1_op_b,
+                         u_adam_riscv.byp1_fwd_b,
+                         $time);
+            end
         end
         // Monitor exec_pipe1 memory requests
         if (u_adam_riscv.p1_mem_req_valid) begin
@@ -327,15 +392,44 @@ always @(posedge clk) begin
                      u_adam_riscv.wb1_fu,
                      $time);
         end
-        // Monitor ROB state (every 100 cycles)
-        if ($time % 1000 == 0) begin
-            $display("[ROB STATE] T0: head=%0d tail=%0d count=%0d | T1: head=%0d tail=%0d count=%0d @%0t",
-                     u_adam_riscv.u_rob_lite.rob_head[0],
-                     u_adam_riscv.u_rob_lite.rob_tail[0],
-                     u_adam_riscv.u_rob_lite.rob_count[0],
-                     u_adam_riscv.u_rob_lite.rob_head[1],
-                     u_adam_riscv.u_rob_lite.rob_head[1],
-                     u_adam_riscv.u_rob_lite.rob_count[1],
+        if (u_adam_riscv.w_regs_en_0) begin
+            $display("[RF W0] tid=%0d rd=%0d data=0x%08h @%0t",
+                     u_adam_riscv.w_regs_tid_0,
+                     u_adam_riscv.w_regs_addr_0,
+                     u_adam_riscv.w_regs_data_0,
+                     $time);
+        end
+        if (u_adam_riscv.w_regs_en_1) begin
+            $display("[RF W1] tid=%0d rd=%0d data=0x%08h @%0t",
+                     u_adam_riscv.w_regs_tid_1,
+                     u_adam_riscv.w_regs_addr_1,
+                     u_adam_riscv.w_regs_data_1,
+                     $time);
+        end
+        if (u_adam_riscv.if_valid &&
+            (u_adam_riscv.if_pc >= 32'h00000290) &&
+            (u_adam_riscv.if_pc <= 32'h00000670)) begin
+            $display("[IF] pc=0x%08h inst=0x%08h @%0t",
+                     u_adam_riscv.if_pc,
+                     u_adam_riscv.if_inst,
+                     $time);
+        end
+        if (u_adam_riscv.pipe0_br_complete || u_adam_riscv.pipe0_br_ctrl) begin
+            $display("[BR] complete=%0b taken=%0b tid=%0d order=%0d target=0x%08h @%0t",
+                     u_adam_riscv.pipe0_br_complete,
+                     u_adam_riscv.pipe0_br_ctrl,
+                     u_adam_riscv.pipe0_br_tid,
+                     u_adam_riscv.pipe0_br_order_id,
+                     u_adam_riscv.pipe0_br_addr,
+                     $time);
+        end
+        if (u_adam_riscv.u_stage_if.fetch_req_launch || (u_adam_riscv.combined_flush != 2'b00)) begin
+            $display("[IF CTRL] launch=%0b pc_out=0x%08h pending=0x%08h active=%0b flush=%b @%0t",
+                     u_adam_riscv.u_stage_if.fetch_req_launch,
+                     u_adam_riscv.u_stage_if.pc_out,
+                     u_adam_riscv.u_stage_if.fetch_pc_pending,
+                     u_adam_riscv.u_stage_if.fetch_req_active,
+                     u_adam_riscv.combined_flush,
                      $time);
         end
         // Monitor store buffer write attempts
@@ -354,21 +448,88 @@ always @(posedge clk) begin
         end
         // Monitor ROB commits
         if (u_adam_riscv.rob_commit0_valid) begin
-            $display("[ROB COMMIT0] tag=%0d rd=%0d is_store=%0b @%0t",
+            $display("[ROB C0] tag=%0d rd=%0d ord=%0d st=%0b @%0t",
                      u_adam_riscv.rob_commit0_tag,
                      u_adam_riscv.rob_commit0_rd,
+                     u_adam_riscv.rob_commit0_order_id,
                      u_adam_riscv.rob_commit0_is_store,
                      $time);
         end
         if (u_adam_riscv.rob_commit1_valid) begin
-            $display("[ROB COMMIT1] tag=%0d rd=%0d is_store=%0b @%0t",
+            $display("[ROB C1] tag=%0d rd=%0d ord=%0d st=%0b @%0t",
                      u_adam_riscv.rob_commit1_tag,
                      u_adam_riscv.rob_commit1_rd,
+                     u_adam_riscv.rob_commit1_order_id,
                      u_adam_riscv.rob_commit1_is_store,
+                     $time);
+        end
+        if (($time >= 7000) && ($time <= 7600)) begin
+            $display("[STALL DBG] dec0_valid=%0b dec0_pc=0x%08h dec1_valid=%0b dec1_pc=0x%08h stall=%0b rob_stall=%0b sb_stall=%0b rob0_full=%0b rob1_full=%0b @%0t",
+                     u_adam_riscv.dec0_valid,
+                     u_adam_riscv.dec0_pc,
+                     u_adam_riscv.dec1_valid,
+                     u_adam_riscv.dec1_pc,
+                     u_adam_riscv.stall,
+                     u_adam_riscv.rob_disp_stall,
+                     u_adam_riscv.sb_disp_stall,
+                     u_adam_riscv.rob0_full,
+                     u_adam_riscv.rob1_full,
+                     $time);
+            $display("[ROB WIN DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_flushed=%0b h_tag=%0d h_ord=%0d @%0t",
+                     u_adam_riscv.u_rob_lite.rob_head[0],
+                     u_adam_riscv.u_rob_lite.rob_tail[0],
+                     u_adam_riscv.u_rob_lite.rob_count[0],
+                     u_adam_riscv.u_rob_lite.rob_valid[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_complete[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_flushed[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_tag[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_order_id[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     $time);
+        end
+        if (u_adam_riscv.ext_timer_irq || u_adam_riscv.ext_external_irq ||
+            u_adam_riscv.trap_enter || u_adam_riscv.trap_return) begin
+            $display("[IRQ DBG] mtip=%0b meip=%0b trap_enter=%0b trap_return=%0b trap_pc=0x%08h trap_target=0x%08h mepc=0x%08h mcause=0x%08h mstatus=0x%08h mie=0x%08h mip=0x%08h mtvec=0x%08h @%0t",
+                     u_adam_riscv.ext_timer_irq,
+                     u_adam_riscv.ext_external_irq,
+                     u_adam_riscv.trap_enter,
+                     u_adam_riscv.trap_return,
+                     u_adam_riscv.trap_pc_r,
+                     u_adam_riscv.trap_target,
+                     u_adam_riscv.u_csr_unit.mepc,
+                     u_adam_riscv.u_csr_unit.mcause,
+                     u_adam_riscv.u_csr_unit.mstatus,
+                     u_adam_riscv.u_csr_unit.mie,
+                     u_adam_riscv.u_csr_unit.mip,
+                     u_adam_riscv.u_csr_unit.mtvec,
+                     $time);
+        end
+        if ((u_adam_riscv.dec0_pc >= 32'h00000054) &&
+            (u_adam_riscv.dec0_pc <= 32'h0000005c)) begin
+            $display("[ROB DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_tag=%0d @%0t",
+                     u_adam_riscv.u_rob_lite.rob_head[0],
+                     u_adam_riscv.u_rob_lite.rob_tail[0],
+                     u_adam_riscv.u_rob_lite.rob_count[0],
+                     u_adam_riscv.u_rob_lite.rob_valid[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_complete[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob_lite.rob_tag[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     $time);
+            $display("[SB DBG] tag1 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d | tag2 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d @%0t",
+                     u_adam_riscv.u_scoreboard.win_valid[0],
+                     u_adam_riscv.u_scoreboard.win_issued[0],
+                     u_adam_riscv.u_scoreboard.win_ready[0],
+                     u_adam_riscv.u_scoreboard.win_qj[0],
+                     u_adam_riscv.u_scoreboard.win_qk[0],
+                     u_adam_riscv.u_scoreboard.win_valid[1],
+                     u_adam_riscv.u_scoreboard.win_issued[1],
+                     u_adam_riscv.u_scoreboard.win_ready[1],
+                     u_adam_riscv.u_scoreboard.win_qj[1],
+                     u_adam_riscv.u_scoreboard.win_qk[1],
                      $time);
         end
     end
 end
+end
+endgenerate
 
 //---------------------------------------------------------------------------------------------
 // TEST CONTENT (reuse test_content.sv)

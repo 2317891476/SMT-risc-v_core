@@ -31,6 +31,7 @@ module clint (
     input  wire [31:0] req_wdata,
     output reg  [31:0] resp_rdata,
     output reg         resp_valid,
+    output wire [31:0] read_data,
 
     // Timer interrupt output (to CSR mip.MTIP)
     output wire        timer_irq
@@ -50,6 +51,13 @@ wire addr_mtimecmp_lo = (req_addr == `CLINT_MTIMECMP_LO);
 wire addr_mtimecmp_hi = (req_addr == `CLINT_MTIMECMP_HI);
 wire addr_valid       = addr_mtime_lo || addr_mtime_hi || 
                          addr_mtimecmp_lo || addr_mtimecmp_hi;
+
+assign read_data =
+    addr_mtime_lo    ? mtime[31:0] :
+    addr_mtime_hi    ? mtime[63:32] :
+    addr_mtimecmp_lo ? mtimecmp[31:0] :
+    addr_mtimecmp_hi ? mtimecmp[63:32] :
+    32'd0;
 
 // ─── Sequential logic ───────────────────────────────────────────────────────
 always @(posedge clk or negedge rstn) begin
@@ -78,10 +86,7 @@ always @(posedge clk or negedge rstn) begin
             end else begin
                 // Read access
                 case (1'b1)
-                    addr_mtime_lo:    resp_rdata <= mtime[31:0];
-                    addr_mtime_hi:    resp_rdata <= mtime[63:32];
-                    addr_mtimecmp_lo: resp_rdata <= mtimecmp[31:0];
-                    addr_mtimecmp_hi: resp_rdata <= mtimecmp[63:32];
+                    addr_valid:       resp_rdata <= read_data;
                     default:          resp_rdata <= 32'd0;
                 endcase
             end
