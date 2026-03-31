@@ -28,6 +28,23 @@ wire [ADDR_WIDTH -1 : 0] inst_addr_2;
 
 assign inst_addr_2 = inst_addr[ADDR_WIDTH +2-1 : 2];
 
+`ifdef FPGA_MODE
+(* ram_style = "block" *) reg [31:0] mem [0:IROM_SPACE-1];
+reg [31:0] inst_o_r;
+
+initial begin
+    $readmemh("inst.hex", mem);
+end
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        inst_o_r <= 32'd0;
+    else
+        inst_o_r <= mem[inst_addr_2];
+end
+
+assign inst_o = inst_o_r;
+`else
 // The stable RAM instance - benches should poke this directly
 ram_bfm #(
     .DATA_WHITH     ( 32            ),
@@ -45,5 +62,6 @@ u_ram(
     .wdata                      ( 32'b0             ),
     .rdata                      ( inst_o            )
 );
+`endif
 
 endmodule

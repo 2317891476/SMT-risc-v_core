@@ -1,10 +1,15 @@
 `timescale 1ns/1ns
 `define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_inst_backing_store.u_ram
 `define TB_REGS tb.u_adam_riscv.u_regs_mt
+`ifdef TB_LEGACY_MEM
+`define TB_DATA_MEM tb.u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.data_mem
+`define TB_MEM_SUBSYS tb.u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.data_mem
+`else
 // Data memory path through mem_subsys (when USE_MEM_SUBSYS=1)
-`define TB_DATA_MEM tb.u_adam_riscv.u_mem_subsys.ram
+`define TB_DATA_MEM tb.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ram
 // For backward compatibility with test_content.sv
-`define TB_MEM_SUBSYS tb.u_adam_riscv.u_mem_subsys.ram
+`define TB_MEM_SUBSYS tb.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ram
+`endif
 `define TUBE_STATUS tb.u_adam_riscv.tube_status
 
 `define RAM_DEEP 4096

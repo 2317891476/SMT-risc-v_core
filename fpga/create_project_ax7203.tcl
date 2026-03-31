@@ -3,8 +3,10 @@
 # Usage: vivado -mode batch -source fpga/create_project_ax7203.tcl
 
 set script_dir [file dirname [info script]]
+source "$script_dir/flow_common.tcl"
+
 set project_name "adam_riscv_ax7203"
-set project_dir "$script_dir/../build/ax7203"
+set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set rtl_dir "$script_dir/../rtl"
 set fpga_rtl_dir "$script_dir/rtl"
 set ram_bfm_file "$script_dir/../libs/REG_ARRAY/SRAM/ram_bfm.v"
@@ -15,18 +17,24 @@ set data_hex "$script_dir/../rom/data.hex"
 set inst_coe "$bram_init_dir/inst_mem.coe"
 set data_coe "$bram_init_dir/data_mem.coe"
 
-# Parse arguments for part selection
-set target_part "xc7a200tfbg484-2"
-if {[info exists ::env(TARGET_PART)]} {
-    set target_part $::env(TARGET_PART)
-}
+# Parse build configuration
+set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
+set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
+set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
+set build_threads [ax7203_env_or_default AX7203_MAX_THREADS 4]
 
 puts "Creating project: $project_name"
 puts "Target part: $target_part"
 puts "Project directory: $project_dir"
+puts "AX7203_ENABLE_ROCC: $enable_rocc"
+puts "AX7203_ENABLE_MEM_SUBSYS: $enable_mem_subsys"
+puts "AX7203_SMT_MODE: $smt_mode"
+puts "AX7203_MAX_THREADS: $build_threads"
 
 # Create project
 create_project -force $project_name $project_dir -part $target_part
+set_param general.maxThreads $build_threads
 
 # Set project properties
 set_property board_part "" [current_project]
@@ -153,6 +161,14 @@ if {[file exists $inst_coe]} {
 if {[file exists $data_coe]} {
     add_files -norecurse $data_coe
 }
+if {[file exists $inst_hex]} {
+    add_files -norecurse $inst_hex
+    set_property file_type {Memory File} [get_files $inst_hex]
+}
+if {[file exists $data_hex]} {
+    add_files -norecurse $data_hex
+    set_property file_type {Memory File} [get_files $data_hex]
+}
 
 # Generate Clock Wizard IP (required by adam_riscv when FPGA_MODE is defined)
 set clk_wiz_tcl "$script_dir/ip/create_clk_wiz_ax7203.tcl"
@@ -179,8 +195,18 @@ if {[file exists $bram_ip_tcl]} {
 # Set top module
 set_property top adam_riscv_ax7203_top [get_filesets sources_1]
 
-# Define FPGA_MODE for core (required for clk_wiz_0 and led port)
-set_property verilog_define FPGA_MODE=1 [get_filesets sources_1]
+# Define FPGA build knobs explicitly so board synthesis is reproducible.
+set_property verilog_define [list \
+    FPGA_MODE=1 \
+    ENABLE_ROCC_ACCEL=$enable_rocc \
+    ENABLE_MEM_SUBSYS=$enable_mem_subsys \
+    SMT_MODE=$smt_mode \
+] [get_filesets sources_1]
+
+# Keep FPGA bring-up synthesis biased toward runtime so the batch flow can
+# stay under the board-validation time budget more reliably.
+set_property strategy "Flow_RuntimeOptimized" [get_runs synth_1]
+set_property strategy "Vivado Implementation Defaults" [get_runs impl_1]
 
 # Add constraints
 set constraints_dir "$script_dir/constraints"
@@ -198,15 +224,20 @@ file mkdir $project_dir/checkpoints
 
 puts "Project created successfully!"
 puts "Part: $target_part"
+puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys SMT_MODE=$smt_mode"
 puts "To build: vivado -mode batch -source fpga/build_ax7203_bitstream.tcl"
 
 # Save evidence
 set evidence_file "$script_dir/../.sisyphus/evidence/task-2-create-project.log"
-file mkdir [file dirname $evidence_file]
-set fh [open $evidence_file w]
-puts $fh "Project creation: SUCCESS"
-puts $fh "Part: $target_part"
-puts $fh "Timestamp: [clock format [clock seconds]]"
-close $fh
+ax7203_write_evidence $evidence_file [list \
+    "Project creation: SUCCESS" \
+    "Part: $target_part" \
+    "Project directory: $project_dir" \
+    "ENABLE_ROCC_ACCEL: $enable_rocc" \
+    "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
+    "SMT_MODE: $smt_mode" \
+    "MaxThreads: $build_threads" \
+    "Timestamp: [clock format [clock seconds]]" \
+]
 
 exit 0

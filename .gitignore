@@ -21,6 +21,23 @@
 *.dump
 *.verilog
 
+# Vivado / FPGA generated artifacts
+/.Xil/
+/build/
+vivado*.jou
+vivado*.log
+webtalk*
+fpga/bram_init/*.coe
+fpga/**/*.cache/
+fpga/**/*.gen/
+fpga/**/*.hw/
+fpga/**/*.ip_user_files/
+fpga/**/*.runs/
+fpga/**/*.sim/
+fpga/**/*.srcs/
+fpga/**/*.xpr
+fpga/**/*.xsa
+
 # Verilog hex files (generated from assembly)
 *.hex
 rom/inst.hex

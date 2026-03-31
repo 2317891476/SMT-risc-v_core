@@ -656,9 +656,10 @@ w_regs_en, w_regs_addr, w_regs_data
 | **复位** | ✅ | 按键复位 T6 (active-low) |
 | **BRAM 启动** | ✅ | 32KB/64KB BRAM 初始化 (COE) |
 | **UART 调试** | ✅ | 115200 baud, TX=N15, RX=P20 |
-| **JTAG 编程** | ✅ | Vivado Tcl 脚本 |
+| **JTAG 编程** | ✅ | Vivado Tcl 脚本 + DONE/EOS 校验 |
 | **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
 | **DDR3** | ⏳ | 后续支持 (当前 BRAM-first) |
+| **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=0`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=0` |
 
 **引脚分配 (来自官方资源文档):**
 - 时钟: SYS_CLK_P=R4, SYS_CLK_N=T4
@@ -687,6 +688,8 @@ fpga/
 │  └─ data_mem.coe                  # 数据存储器初始化
 ├─ scripts/
 │  └─ generate_coe.py               # COE 文件生成脚本
+├─ flow_common.tcl                  # ★ Vivado 批处理公共辅助
+├─ run_ax7203_synth.tcl             # ★ 仅综合脚本 (默认 15 分钟超时)
 ├─ build_ax7203_bitstream.tcl       # ★ 综合实现脚本
 ├─ create_project_ax7203.tcl        # ★ 创建工程脚本
 ├─ program_ax7203_jtag.tcl          # ★ JTAG 下载脚本
@@ -696,28 +699,88 @@ fpga/
 ### 13.3 快速开始 (FPGA)
 
 ```powershell
-# 1. 生成 BRAM 初始化文件
-python fpga/scripts/generate_coe.py
+# 1. 先跑仿真 gate
+python verification/run_all_tests.py --basic
 
 # 2. 创建 Vivado 项目
-vivado -mode batch -source fpga/create_project_ax7203.tcl build/ax7203
+vivado -mode batch -source fpga/create_project_ax7203.tcl
 
-# 3. 综合实现
+# 3. 仅综合 (默认 15 分钟超时)
+vivado -mode batch -source fpga/run_ax7203_synth.tcl
+
+# 4. 综合通过后再生成 bitstream
 vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
 
-# 4. JTAG 下载
+# 5. JTAG 下载
 vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
-# 5. 查看串口输出 (Windows)
-python -c "import serial; ser=serial.Serial('COM5',115200); print(ser.read(100))"
+# 6. 查看串口输出 (Windows)
+python -c "import serial; ser=serial.Serial('COM5',115200,timeout=2); print(ser.read(256).decode('ascii','replace'))"
 ```
 
-**当前状态**: UART 启动消息 "AdamRiscv AX7203 Boot" ✅ 已验证
+**当前状态**: 这条流程已经在 AX7203 上闭环验证
 - 波特率: 115200
 - 数据位: 8, 停止位: 1, 无校验
 - 流控: 无
+- `python verification/run_all_tests.py --basic`：`26/26 PASS`
+- `vivado -mode batch -source fpga/run_ax7203_synth.tcl`：综合通过，`synth_design` 实测约 `1分15秒`
+- `vivado -mode batch -source fpga/build_ax7203_bitstream.tcl`：bitstream 生成通过，时序满足
+- `vivado -mode batch -source fpga/program_ax7203_jtag.tcl`：JTAG 下载通过，`DONE=1 / EOS=1`
+- `COM5` 串口已收到 `AdamRiscv AX7203 Boot`
 
-### 13.4 CoreMark 性能测试
+### 13.4 当前固定综合配置（2026-03-31）
+
+当前默认的 FPGA 配置是面向 AX7203 bring-up 的 `BRAM-first` 版本，目标是先固定一条稳定、可复现、可烧录的上板路径，而不是直接上完整的 `mem_subsys/L2/RoCC` 竞赛配置。
+
+| 开关 | 当前值 | 说明 |
+|------|------|------|
+| `FPGA_MODE` | `1` | 启用 AX7203 顶层时钟/复位/板级接口路径 |
+| `ENABLE_MEM_SUBSYS` | `0` | 不综合 `mem_subsys/L2/CLINT/PLIC`，改走轻量 `legacy_mem_subsys` |
+| `ENABLE_ROCC_ACCEL` | `0` | 默认不综合 RoCC 加速器 |
+| `SMT_MODE` | `0` | 当前固定为单线程 bring-up 配置 |
+
+**当前综合进去的主要部件**
+
+- `adam_riscv` 主核：双发射前后端、`scoreboard`、`rob_lite`、两套寄存器堆、`decoder_dual`、`fetch_buffer`、`exec_pipe0/1`、`mul_unit`、`csr_unit`
+- 访存路径：`lsu_shell + store_buffer`
+- 取指路径：`stage_if + bimodal BPU + inst_memory + inst_backing_store`
+- 轻量数据后端：`legacy_mem_subsys`，用于板级 BRAM-first bring-up
+- 板级逻辑：`clk_wiz_0`、`syn_rst`、`uart_tx_simple`、LED heartbeat
+
+**当前没有综合进去的部件**
+
+- `mem_subsys`
+- `L2 cache`
+- `CLINT / PLIC` MMIO 中断子系统
+- `RoCC accelerator`
+- `SMT` 多线程模式
+
+### 13.5 当前综合资源（AX7203, 2026-03-31）
+
+综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；本次实际 `synth_design` 用时约 `1分15秒`。实现后 `WNS=1.296ns`、`WHS=0.228ns`，Vivado 报告 `All user specified timing constraints are met.`。
+
+| 资源 | 使用量 | 可用量 | 利用率 |
+|------|------|------|------|
+| Slice LUTs | 47,558 | 134,600 | 35.33% |
+| Slice Registers | 16,805 | 269,200 | 6.24% |
+| LUT as Memory | 4,096 | 46,200 | 8.87% |
+| RAMB18 | 1 | 730 | 0.14% |
+| DSP48E1 | 4 | 740 | 0.54% |
+
+**主要层级资源分布（综合层级报告）**
+
+| 模块/层级 | Total LUTs | FFs | 备注 |
+|------|------|------|------|
+| `u_scoreboard` | 25,793 | 4,727 | 当前最大 LUT 消耗点 |
+| `gen_legacy_mem.u_legacy_mem_subsys` | 4,563 | 40 | 其中 4,096 LUTRAM |
+| `u_regs_mt` | 3,313 | 1,984 | Pipe0/线程寄存器堆 |
+| `u_regs_mt_p1` | 3,313 | 1,984 | Pipe1/线程寄存器堆 |
+| `u_rob_lite` | 1,800 | 1,278 | 提交/回滚路径 |
+| `u_stage_if` | 1,496 | 2,202 | 含 `bpu_bimodal + inst_memory` |
+| `u_lsu_shell` | 1,195 | 880 | 含 `store_buffer` |
+| `u_uart_tx_simple` | 48 | 38 | 板级启动串口发送器 |
+
+### 13.6 CoreMark 性能测试
 
 ```powershell
 cd benchmarks/coremark

@@ -3,16 +3,14 @@
 # Usage: vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 set script_dir [file dirname [info script]]
-set project_dir "$script_dir/../build/ax7203"
+source "$script_dir/flow_common.tcl"
+
+set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set project_name "adam_riscv_ax7203"
 
 # Parse arguments
-set target_part "xc7a200t-2fbg484i"
-if {[info exists ::env(TARGET_PART)]} {
-    set target_part $::env(TARGET_PART)
-}
-
-set bitstream_file "$project_dir/adam_riscv_ax7203.runs/impl_1/adam_riscv_ax7203_top.bit"
+set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
+set bitstream_file [ax7203_env_or_default BITSTREAM_FILE "$project_dir/adam_riscv_ax7203.runs/impl_1/adam_riscv_ax7203_top.bit"]
 
 # Check if bitstream exists
 if {![file exists $bitstream_file]} {
@@ -95,28 +93,36 @@ if {[catch {program_hw_devices $fpga_device} err]} {
 
 puts "Programming completed successfully!"
 
-# Verify device is programmed
+# Verify configuration-done status using properties that exist on Artix-7 hw_device.
 refresh_hw_device $fpga_device
-set is_programmed [get_property IS_PROGRAMMED $fpga_device]
+set done_ir [get_property REGISTER.IR.BIT5_DONE $fpga_device]
+set done_internal [get_property REGISTER.CONFIG_STATUS.BIT13_DONE_INTERNAL_SIGNAL_STATUS $fpga_device]
+set done_pin [get_property REGISTER.CONFIG_STATUS.BIT14_DONE_PIN $fpga_device]
+set eos_status [get_property REGISTER.CONFIG_STATUS.BIT04_END_OF_STARTUP_(EOS)_STATUS $fpga_device]
+
+set is_programmed [expr {$done_ir eq "1" && $done_internal eq "1" && $done_pin eq "1" && $eos_status eq "1"}]
 
 if {$is_programmed} {
-    puts "Verification: Device is programmed and running"
+    puts "Verification: DONE=1, DONE_PIN=1, EOS=1"
 } else {
-    puts "WARNING: Device may not be properly programmed"
+    puts "WARNING: Configuration status is unexpected"
+    puts "  DONE_IR=$done_ir DONE_INT=$done_internal DONE_PIN=$done_pin EOS=$eos_status"
 }
 
 # Close hardware target
 close_hw_target
 
-# Save evidence
 set evidence_file "$script_dir/../.sisyphus/evidence/task-8-jtag-program.log"
-set fh [open $evidence_file w]
-puts $fh "JTAG Programming: SUCCESS"
-puts $fh "Bitstream: $bitstream_file"
-puts $fh "Device: [get_property NAME $fpga_device]"
-puts $fh "Is Programmed: $is_programmed"
-puts $fh "Timestamp: [clock format [clock seconds]]"
-close $fh
+ax7203_write_evidence $evidence_file [list \
+    "JTAG Programming: SUCCESS" \
+    "Bitstream: $bitstream_file" \
+    "Device: [get_property NAME $fpga_device]" \
+    "Is Programmed: $is_programmed" \
+    "DONE_IR: $done_ir" \
+    "DONE_INTERNAL: $done_internal" \
+    "DONE_PIN: $done_pin" \
+    "EOS: $eos_status" \
+    "Timestamp: [clock format [clock seconds]]"]
 
 puts ""
 puts "Next steps:"

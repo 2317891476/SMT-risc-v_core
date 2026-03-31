@@ -13,6 +13,11 @@
 # 1) 200 MHz differential system clock (SiT9102)
 ################################################################################
 
+# Configuration bank voltage (AX7203 board resources are 3.3V on the relevant
+# configuration rail per board/resource docs).
+set_property CFGBVS VCCO [current_design]
+set_property CONFIG_VOLTAGE 3.3 [current_design]
+
 # Differential clock input pins (from fpga/board_manifest_ax7203.md)
 set_property PACKAGE_PIN R4 [get_ports sys_clk_p]
 set_property PACKAGE_PIN T4 [get_ports sys_clk_n]

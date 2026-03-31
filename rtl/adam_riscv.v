@@ -43,6 +43,13 @@ wire smt_mode = `SMT_MODE;
 `endif
 localparam ROCC_ACCEL_ENABLE = `ENABLE_ROCC_ACCEL;
 
+// The full mem_subsys/L2 path is useful for simulation coverage, but board
+// bring-up can switch to a lighter legacy memory profile when LUT pressure is
+// more important than cache/MMIO feature coverage.
+`ifndef ENABLE_MEM_SUBSYS
+    `define ENABLE_MEM_SUBSYS 1
+`endif
+
 // ─── Clock / Reset ───────────────────────────────────────────────────────────
 wire rstn;
 wire clk;
@@ -162,8 +169,6 @@ always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         epoch_t0   <= 8'd0;
         epoch_t1   <= 8'd0;
-        order_id_t0 <= 16'd0;
-        order_id_t1 <= 16'd0;
     end else begin
         // Increment epoch on flush
         if (pipe0_br_ctrl) begin
@@ -178,8 +183,9 @@ end
 // Order ID update logic moved below after scoreboard is defined
 // Order ID and epoch assignments will be defined after decoder signals
 
-// Memory subsystem mode: keep mem_subsys as the only lower-memory path.
-localparam USE_MEM_SUBSYS = 1'b1;
+// Memory subsystem mode: default to full mem_subsys, but keep a configurable
+// legacy path for FPGA bring-up builds.
+localparam USE_MEM_SUBSYS = `ENABLE_MEM_SUBSYS;
 wire use_mem_subsys = USE_MEM_SUBSYS;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1182,6 +1188,7 @@ wire [31:0] sb_mem_write_addr;
 wire [31:0] sb_mem_write_data;
 wire [3:0]  sb_mem_write_wen;
 wire        sb_mem_write_ready;
+wire [7:0]  legacy_tube_status;
 
 // ROB-driven commit signals for store buffer
 // Stores are committed in-order when they reach ROB head and complete
@@ -1271,8 +1278,29 @@ lsu_shell #(
 // mem_subsys is now the only lower-memory endpoint for both LSU loads and
 // committed store-buffer drains.
 // ════════════════════════════════════════════════════════════════════════════
-assign lsu_mem_rdata      = 32'd0;
-assign sb_mem_write_ready = 1'b0;
+generate
+if (USE_MEM_SUBSYS) begin : gen_disable_legacy_mem
+    assign lsu_mem_rdata      = 32'd0;
+    assign sb_mem_write_ready = 1'b0;
+    assign legacy_tube_status = 8'd0;
+end else begin : gen_legacy_mem
+    legacy_mem_subsys #(
+        .RAM_WORDS(4096)
+    ) u_legacy_mem_subsys (
+        .clk            (clk               ),
+        .rstn           (rstn              ),
+        .load_addr      (lsu_mem_addr      ),
+        .load_read      (lsu_mem_read      ),
+        .load_rdata     (lsu_mem_rdata     ),
+        .sb_write_valid (sb_mem_write_valid),
+        .sb_write_addr  (sb_mem_write_addr ),
+        .sb_write_data  (sb_mem_write_data ),
+        .sb_write_wen   (sb_mem_write_wen  ),
+        .sb_write_ready (sb_mem_write_ready),
+        .tube_status    (legacy_tube_status)
+    );
+end
+endgenerate
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 8: Write-Back (select between ALU result and MEM load data)
@@ -1521,10 +1549,12 @@ wire [3:0]  m2_req_wen;
 wire        m2_resp_valid;
 wire [31:0] m2_resp_data;
 
-// Internal tube status from mem_subsys
+// Internal status/interrupts from the full mem_subsys path
 wire [7:0]  mem_subsys_tube_status;
-wire        ext_timer_irq;     // CLINT timer interrupt (MTIP)
-wire        ext_external_irq;  // PLIC external interrupt (MEIP)
+wire        mem_subsys_ext_timer_irq;     // CLINT timer interrupt (MTIP)
+wire        mem_subsys_ext_external_irq;  // PLIC external interrupt (MEIP)
+wire        ext_timer_irq;
+wire        ext_external_irq;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
 
 // RoCC DMA to M2 port connections
@@ -1537,52 +1567,70 @@ assign rocc_mem_req_ready = m2_req_ready;
 assign rocc_mem_resp_valid = m2_resp_valid;
 assign rocc_mem_resp_rdata = m2_resp_data;
 
-// Mem_subsys instantiation
-mem_subsys u_mem_subsys (
-    .clk               (clk),
-    .rstn              (rstn),
+generate
+if (USE_MEM_SUBSYS) begin : gen_mem_subsys
+    mem_subsys u_mem_subsys (
+        .clk               (clk),
+        .rstn              (rstn),
 
-    // M0: I-side (inst_memory refill)
-    .m0_req_valid      (m0_req_valid),
-    .m0_req_ready      (m0_req_ready),
-    .m0_req_addr       (m0_req_addr),
-    .m0_resp_valid     (m0_resp_valid),
-    .m0_resp_data      (m0_resp_data),
-    .m0_resp_last      (m0_resp_last),
-    .m0_resp_ready     (m0_resp_ready),
-    .m0_bypass_addr    (m0_bypass_addr),
-    .m0_bypass_data    (m0_bypass_data),
+        // M0: I-side (inst_memory refill)
+        .m0_req_valid      (m0_req_valid),
+        .m0_req_ready      (m0_req_ready),
+        .m0_req_addr       (m0_req_addr),
+        .m0_resp_valid     (m0_resp_valid),
+        .m0_resp_data      (m0_resp_data),
+        .m0_resp_last      (m0_resp_last),
+        .m0_resp_ready     (m0_resp_ready),
+        .m0_bypass_addr    (m0_bypass_addr),
+        .m0_bypass_data    (m0_bypass_data),
 
-    // M1: D-side (LSU/store buffer)
-    .m1_req_valid      (m1_req_valid),
-    .m1_req_ready      (m1_req_ready),
-    .m1_req_addr       (m1_req_addr),
-    .m1_req_write      (m1_req_write),
-    .m1_req_wdata      (m1_req_wdata),
-    .m1_req_wen        (m1_req_wen),
-    .m1_resp_valid     (m1_resp_valid),
-    .m1_resp_data      (m1_resp_data),
+        // M1: D-side (LSU/store buffer)
+        .m1_req_valid      (m1_req_valid),
+        .m1_req_ready      (m1_req_ready),
+        .m1_req_addr       (m1_req_addr),
+        .m1_req_write      (m1_req_write),
+        .m1_req_wdata      (m1_req_wdata),
+        .m1_req_wen        (m1_req_wen),
+        .m1_resp_valid     (m1_resp_valid),
+        .m1_resp_data      (m1_resp_data),
 
-    // M2: RoCC DMA interface
-    .m2_req_valid      (m2_req_valid),
-    .m2_req_ready      (m2_req_ready),
-    .m2_req_addr       (m2_req_addr),
-    .m2_req_write      (m2_req_write),
-    .m2_req_wdata      (m2_req_wdata),
-    .m2_req_wen        (m2_req_wen),
-    .m2_resp_valid     (m2_resp_valid),
-    .m2_resp_data      (m2_resp_data),
+        // M2: RoCC DMA interface
+        .m2_req_valid      (m2_req_valid),
+        .m2_req_ready      (m2_req_ready),
+        .m2_req_addr       (m2_req_addr),
+        .m2_req_write      (m2_req_write),
+        .m2_req_wdata      (m2_req_wdata),
+        .m2_req_wen        (m2_req_wen),
+        .m2_resp_valid     (m2_resp_valid),
+        .m2_resp_data      (m2_resp_data),
 
-    // Testbench observation
-    .tube_status       (mem_subsys_tube_status),
+        // Testbench observation
+        .tube_status       (mem_subsys_tube_status),
 
-    // External interrupt wiring
-    .ext_irq_src       (ext_irq_src_clean),
-    .ext_timer_irq     (ext_timer_irq),
-    .ext_external_irq  (ext_external_irq)
-);
+        // External interrupt wiring
+        .ext_irq_src       (ext_irq_src_clean),
+        .ext_timer_irq     (mem_subsys_ext_timer_irq),
+        .ext_external_irq  (mem_subsys_ext_external_irq)
+    );
+end else begin : gen_mem_subsys_tieoff
+    assign m0_req_ready              = 1'b0;
+    assign m0_resp_valid             = 1'b0;
+    assign m0_resp_data              = 32'd0;
+    assign m0_resp_last              = 1'b0;
+    assign m1_req_ready              = 1'b0;
+    assign m1_resp_valid             = 1'b0;
+    assign m1_resp_data              = 32'd0;
+    assign m2_req_ready              = 1'b0;
+    assign m2_resp_valid             = 1'b0;
+    assign m2_resp_data              = 32'd0;
+    assign mem_subsys_tube_status    = 8'd0;
+    assign mem_subsys_ext_timer_irq  = 1'b0;
+    assign mem_subsys_ext_external_irq = 1'b0;
+end
+endgenerate
 
-// Export tube_status (from mem_subsys when enabled, otherwise 0)
-assign tube_status = use_mem_subsys ? mem_subsys_tube_status : 8'd0;
+assign ext_timer_irq    = use_mem_subsys ? mem_subsys_ext_timer_irq : 1'b0;
+assign ext_external_irq = use_mem_subsys ? mem_subsys_ext_external_irq : 1'b0;
+assign tube_status      = use_mem_subsys ? mem_subsys_tube_status : legacy_tube_status;
 
 endmodule

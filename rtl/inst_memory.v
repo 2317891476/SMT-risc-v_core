@@ -47,6 +47,9 @@ wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
 wire [31:0] backing_store_data_raw;
 wire [31:0] backing_store_data;
+reg  [0:0]  legacy_resp_tid_r;
+reg  [3:0]  legacy_resp_epoch_r;
+reg         legacy_resp_valid_r;
 
 // Backing store has 1-cycle read latency (synchronous RAM).
 // When icache detects a miss on cycle N+1 for address presented on cycle N,
@@ -76,6 +79,20 @@ wire        mem_req_ready_mux  = use_external_refill ? ext_mem_req_ready  : int_
 wire        mem_resp_valid_mux = use_external_refill ? ext_mem_resp_valid : int_mem_resp_valid;
 wire [31:0] mem_resp_data_mux  = use_external_refill ? ext_mem_resp_data  : int_mem_resp_data;
 wire        mem_resp_last_mux  = use_external_refill ? ext_mem_resp_last  : int_mem_resp_last;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        legacy_resp_tid_r   <= 1'b0;
+        legacy_resp_epoch_r <= 4'd0;
+        legacy_resp_valid_r <= 1'b0;
+    end else begin
+        legacy_resp_valid_r <= req_valid;
+        if (req_valid) begin
+            legacy_resp_tid_r   <= req_tid;
+            legacy_resp_epoch_r <= current_epoch;
+        end
+    end
+end
 
 // ICache instance - synchronous interface
 icache #(
@@ -159,9 +176,9 @@ inst_backing_store #(
 );
 
 // Output assignment
-assign inst_o      = icache_resp_data;
-assign resp_tid    = icache_resp_tid;
-assign resp_epoch  = icache_resp_epoch;
-assign resp_valid  = icache_resp_valid;
+assign inst_o      = use_external_refill ? icache_resp_data  : backing_store_data;
+assign resp_tid    = use_external_refill ? icache_resp_tid   : legacy_resp_tid_r;
+assign resp_epoch  = use_external_refill ? icache_resp_epoch : legacy_resp_epoch_r;
+assign resp_valid  = use_external_refill ? icache_resp_valid : legacy_resp_valid_r;
 
 endmodule
