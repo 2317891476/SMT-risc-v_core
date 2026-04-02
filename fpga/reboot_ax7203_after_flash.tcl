@@ -9,9 +9,12 @@ puts "Rebooting AX7203 to boot from Flash..."
 # Open hardware manager
 open_hw_manager
 
+# Flash boot/reboot does not use ChipScope debug services.
+set_param labtools.enable_cs_server false
+
 # Connect to hw_server
 puts "Connecting to hardware server..."
-if {[catch {connect_hw_server} err]} {
+if {[catch {connect_hw_server -url TCP:localhost:3121} err]} {
     puts "ERROR: Failed to connect to hardware server"
     puts $err
     exit 1

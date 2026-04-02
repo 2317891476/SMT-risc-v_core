@@ -1,0 +1,19 @@
++====================+====================+============================================================+
+| Launch Setup Clock | Launch Hold Clock  | Pin                                                        |
++====================+====================+============================================================+
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/slot1_issue_flags_snapshot_reg[0]/D   |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/sel0_idx_snapshot_reg[0]/D            |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/sel0_idx_snapshot_reg[1]/D            |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/slot1_issue_flags_snapshot_reg[2]/D   |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qk_t0_snapshot_reg[0]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qk_t0_snapshot_reg[2]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qj_t0_snapshot_reg[0]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qk_t0_snapshot_reg[3]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qj_t0_snapshot_reg[3]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qk_t0_snapshot_reg[1]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qj_t0_snapshot_reg[1]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_qj_t0_snapshot_reg[2]/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_ready_t0_snapshot_reg/D     |
+| clk_out1_clk_wiz_0 | clk_out1_clk_wiz_0 | u_uart_status_beacon/oldest_br_just_woke_t0_snapshot_reg/D |
+| sys_clk            | sys_clk            | u_uart_status_beacon/tx_data_reg[0]/D                      |
++--------------------+--------------------+------------------------------------------------------------+

@@ -27,9 +27,12 @@ puts "Configuration file: $cfgmem_file"
 # Open hardware manager
 open_hw_manager
 
+# Flash programming only needs plain JTAG access to the FPGA/config flash path.
+set_param labtools.enable_cs_server false
+
 # Connect to hw_server
 puts "Connecting to hardware server..."
-if {[catch {connect_hw_server} err]} {
+if {[catch {connect_hw_server -url TCP:localhost:3121} err]} {
     puts "ERROR: Failed to connect to hardware server"
     puts $err
     exit 1

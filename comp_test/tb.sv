@@ -38,6 +38,7 @@ module tb;
 
 reg clk;
 reg rst;
+wire core_uart_tx;
 localparam integer DATA_BASE_WORD = 32'h0000_1000 >> 2;
 localparam integer TB_SELECTED_TEST_ID = `TEST_ID;
 always begin
@@ -50,7 +51,8 @@ integer j;
 
 adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
-    .sys_rstn (rst )
+    .sys_rstn (rst ),
+    .uart_tx  (core_uart_tx)
 );
 
 //------------------------------------------------------------------------------------------------
@@ -123,6 +125,14 @@ initial begin
     rst = 1'b0;
     #100 rst = 1'b1;
 end
+
+`ifdef TB_LEGACY_MEM
+always @(posedge clk) begin
+    if (rst && u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.uart_write_fire) begin
+        $write("%c", u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.uart_write_byte);
+    end
+end
+`endif
 
 //------------------------------------------------------------------------------------------------
 // PLIC External Interrupt Stimulus

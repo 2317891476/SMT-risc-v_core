@@ -9,7 +9,7 @@
 # Generates:
 #   - clk_wiz_0 (MMCM based)
 #   - Input clock: 200.000 MHz
-#   - Output clock: 50.000 MHz (single output for initial bring-up)
+#   - Output clock: 20.000 MHz (single output for initial bring-up)
 
 # Sanity check: this script must run inside Vivado Tcl.
 if {[llength [info commands create_ip]] == 0} {
@@ -70,7 +70,7 @@ create_ip -name clk_wiz -vendor xilinx.com -library ip -module_name $clk_ip_name
 # MMCM configuration for AX7203 bring-up clocking:
 #   Fin  = 200.000 MHz (single-ended clock after top-level IBUFGDS)
 #   Fvco = Fin / DIVCLK * CLKFBOUT_MULT = 200 / 1 * 5 = 1000 MHz
-#   Fout = Fvco / CLKOUT0_DIVIDE = 1000 / 20 = 50 MHz
+#   Fout = Fvco / CLKOUT0_DIVIDE = 1000 / 50 = 20 MHz
 #
 # Keep only one output clock for initial integration simplicity.
 set_property -dict [list \
@@ -79,7 +79,7 @@ set_property -dict [list \
   CONFIG.PRIM_IN_FREQ {200.000} \
   CONFIG.CLKIN1_JITTER_PS {50.0} \
   CONFIG.NUM_OUT_CLKS {1} \
-  CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {50.000} \
+  CONFIG.CLKOUT1_REQUESTED_OUT_FREQ {20.000} \
   CONFIG.CLKOUT1_REQUESTED_PHASE {0.000} \
   CONFIG.CLKOUT1_REQUESTED_DUTY_CYCLE {50.000} \
   CONFIG.USE_RESET {true} \
@@ -87,7 +87,7 @@ set_property -dict [list \
   CONFIG.USE_LOCKED {true} \
   CONFIG.MMCM_DIVCLK_DIVIDE {1} \
   CONFIG.MMCM_CLKFBOUT_MULT_F {5.000} \
-  CONFIG.MMCM_CLKOUT0_DIVIDE_F {20.000} \
+  CONFIG.MMCM_CLKOUT0_DIVIDE_F {50.000} \
 ] [get_ips $clk_ip_name]
 
 # Get the XCI path

@@ -141,7 +141,6 @@ assign icache_mem_req_ready  = mem_req_ready_mux;
 assign icache_mem_resp_valid = mem_resp_valid_mux;
 assign icache_mem_resp_data  = mem_resp_data_mux;
 assign icache_mem_resp_last  = mem_resp_last_mux;
-assign icache_mem_resp_ready = use_external_refill ? ext_mem_resp_ready : 1'b1;
 
 // ICache Memory Adapter (used when use_external_refill=0)
 icache_mem_adapter #(

@@ -357,6 +357,9 @@ python verification/run_riscv_tests.py --suite riscv-tests
 - 通过率阈值设置为 90%，允许需要可选扩展的测试失败
 - 非对齐访问是处理器设计选择，不影响标准 RV32I/M 兼容性
 - 实际部署时若需要支持非对齐访问，可启用 DCache 的硬件处理
+- `verification/run_riscv_tests.py` 现在会在每个测试前清理 `rom/inst.hex` / `rom/data.hex`，并为当前测试重新生成镜像
+- 当测试 ELF 不包含 `.data` 段时，脚本会自动写入一个空 `data.hex`，避免沿用上一轮的陈旧数据镜像
+- Icarus 仿真超时门限已提高到 `120s`，减少大测试在 Windows 下的误报 timeout
 
 ### 运行统一测试脚本 
 
@@ -675,8 +678,17 @@ fpga/
 ├─ observability_contract_ax7203.md # UART/LED 输出规范
 ├─ resource.md                      # ★ 官方硬件资源文档 (完整引脚表)
 ├─ rtl/
-│  ├─ adam_riscv_ax7203_top.v    # FPGA 顶层封装
-│  └─ uart_tx_simple.v              # ★ 简化 UART (启动消息发送)
+│  ├─ adam_riscv_ax7203_top.v                 # 默认板级 top（CPU UART 板测入口）
+│  ├─ adam_riscv_ax7203_status_top.v          # 板级状态诊断 top
+│  ├─ adam_riscv_ax7203_issue_probe_top.v     # issue 路径诊断 top
+│  ├─ adam_riscv_ax7203_branch_probe_top.v    # branch 路径诊断 top
+│  ├─ adam_riscv_ax7203_main_bridge_probe_top.v # 主桥接 UART 诊断 top
+│  ├─ adam_riscv_ax7203_io_smoke_top.v        # 纯板级 IO smoke top
+│  ├─ uart_rx_monitor.v                       # 板侧 UART 帧监测器
+│  ├─ uart_status_beacon.v                    # 状态信标
+│  ├─ uart_issue_probe_beacon.v               # issue probe 信标
+│  ├─ uart_branch_probe_beacon.v              # branch probe 信标
+│  └─ uart_main_bridge_beacon.v               # 主桥接 probe 信标
 ├─ constraints/
 │  ├─ ax7203_base.xdc               # 时钟/复位约束 (T6复位, R4/T4时钟)
 │  └─ ax7203_uart_led.xdc           # UART/LED 约束 (N15/P20, W5/B13等)
@@ -687,13 +699,18 @@ fpga/
 │  ├─ inst_mem.coe                  # 指令存储器初始化
 │  └─ data_mem.coe                  # 数据存储器初始化
 ├─ scripts/
-│  └─ generate_coe.py               # COE 文件生成脚本
+│  ├─ generate_coe.py               # COE 文件生成脚本
+│  ├─ build_rom_image.py            # 板级 profile ROM 镜像构建
+│  └─ run_board_feedback.py         # 默认端到端板测入口
 ├─ flow_common.tcl                  # ★ Vivado 批处理公共辅助
+├─ prepare_ax7203_synth.tcl         # ★ 综合前准备脚本
 ├─ run_ax7203_synth.tcl             # ★ 仅综合脚本 (默认 15 分钟超时)
 ├─ build_ax7203_bitstream.tcl       # ★ 综合实现脚本
 ├─ create_project_ax7203.tcl        # ★ 创建工程脚本
+├─ check_jtag.tcl                   # ★ JTAG 链探测脚本
 ├─ program_ax7203_jtag.tcl          # ★ JTAG 下载脚本
-└─ program_ax7203_flash.tcl         # QSPI Flash 烧录脚本
+├─ program_ax7203_flash.tcl         # QSPI Flash 烧录脚本
+└─ reboot_ax7203_after_flash.tcl    # Flash 烧录后重启脚本
 ```
 
 ### 13.3 快速开始 (FPGA)
@@ -702,20 +719,8 @@ fpga/
 # 1. 先跑仿真 gate
 python verification/run_all_tests.py --basic
 
-# 2. 创建 Vivado 项目
-vivado -mode batch -source fpga/create_project_ax7203.tcl
-
-# 3. 仅综合 (默认 15 分钟超时)
-vivado -mode batch -source fpga/run_ax7203_synth.tcl
-
-# 4. 综合通过后再生成 bitstream
-vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
-
-# 5. JTAG 下载
-vivado -mode batch -source fpga/program_ax7203_jtag.tcl
-
-# 6. 查看串口输出 (Windows)
-python -c "import serial; ser=serial.Serial('COM5',115200,timeout=2); print(ser.read(256).decode('ascii','replace'))"
+# 2. 默认端到端板测流程（仿真 -> 建工程 -> <=15 分钟综合 -> bitstream -> JTAG -> 串口抓取）
+python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4
 ```
 
 **当前状态**: 这条流程已经在 AX7203 上闭环验证
@@ -723,12 +728,27 @@ python -c "import serial; ser=serial.Serial('COM5',115200,timeout=2); print(ser.
 - 数据位: 8, 停止位: 1, 无校验
 - 流控: 无
 - `python verification/run_all_tests.py --basic`：`26/26 PASS`
-- `vivado -mode batch -source fpga/run_ax7203_synth.tcl`：综合通过，`synth_design` 实测约 `1分15秒`
-- `vivado -mode batch -source fpga/build_ax7203_bitstream.tcl`：bitstream 生成通过，时序满足
-- `vivado -mode batch -source fpga/program_ax7203_jtag.tcl`：JTAG 下载通过，`DONE=1 / EOS=1`
-- `COM5` 串口已收到 `AdamRiscv AX7203 Boot`
+- `python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4`：闭环通过
+- 最近一次默认板测 `BuildID=0x69CE6358`
+- `synth_design` 实测约 `2.85` 分钟，满足 15 分钟门限
+- bitstream 生成通过，时序满足，`WNS=0.606ns` / `WHS=0.050ns`
+- `program_ax7203_jtag.tcl` 已完成 `BuildID` 回读校验，`DONE=1 / EOS=1`
+- `COM5` 串口已稳定收到重复的 `UART DIAG PASS`
 
-### 13.4 当前固定综合配置（2026-03-31）
+**常用底层脚本**
+
+```powershell
+# 仅重建当前 profile 的 ROM 镜像
+python fpga/scripts/build_rom_image.py --asm rom/test_fpga_uart_board_diag_gap.s
+
+# 手动分步执行 Vivado 流程
+vivado -mode batch -source fpga/create_project_ax7203.tcl
+vivado -mode batch -source fpga/run_ax7203_synth.tcl
+vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
+vivado -mode batch -source fpga/program_ax7203_jtag.tcl
+```
+
+### 13.4 当前固定综合配置（2026-04-03）
 
 当前默认的 FPGA 配置是面向 AX7203 bring-up 的 `BRAM-first` 版本，目标是先固定一条稳定、可复现、可烧录的上板路径，而不是直接上完整的 `mem_subsys/L2/RoCC` 竞赛配置。
 
@@ -744,8 +764,10 @@ python -c "import serial; ser=serial.Serial('COM5',115200,timeout=2); print(ser.
 - `adam_riscv` 主核：双发射前后端、`scoreboard`、`rob_lite`、两套寄存器堆、`decoder_dual`、`fetch_buffer`、`exec_pipe0/1`、`mul_unit`、`csr_unit`
 - 访存路径：`lsu_shell + store_buffer`
 - 取指路径：`stage_if + bimodal BPU + inst_memory + inst_backing_store`
-- 轻量数据后端：`legacy_mem_subsys`，用于板级 BRAM-first bring-up
-- 板级逻辑：`clk_wiz_0`、`syn_rst`、`uart_tx_simple`、LED heartbeat
+- 轻量数据后端：`legacy_mem_subsys`，包含 BRAM-first 数据路径和 MMIO UART
+- 板级逻辑：`clk_wiz_0`、`syn_rst`、`u_board_uart_tx`、`uart_rx_monitor`、LED/诊断 glue
+- 默认板测 top：`adam_riscv_ax7203_top`
+- 板级诊断 top：`adam_riscv_ax7203_status_top`、`adam_riscv_ax7203_issue_probe_top`、`adam_riscv_ax7203_branch_probe_top`、`adam_riscv_ax7203_main_bridge_probe_top`
 
 **当前没有综合进去的部件**
 
@@ -755,32 +777,62 @@ python -c "import serial; ser=serial.Serial('COM5',115200,timeout=2); print(ser.
 - `RoCC accelerator`
 - `SMT` 多线程模式
 
-### 13.5 当前综合资源（AX7203, 2026-03-31）
+### 13.5 当前综合资源（AX7203, 2026-04-03）
 
-综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；本次实际 `synth_design` 用时约 `1分15秒`。实现后 `WNS=1.296ns`、`WHS=0.228ns`，Vivado 报告 `All user specified timing constraints are met.`。
+综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；最近一次默认 `core_diag` profile 实际 `synth_design` 用时约 `2.85` 分钟。实现后 `WNS=0.606ns`、`WHS=0.050ns`，未约束路径数为 `0`。
 
 | 资源 | 使用量 | 可用量 | 利用率 |
 |------|------|------|------|
-| Slice LUTs | 47,558 | 134,600 | 35.33% |
-| Slice Registers | 16,805 | 269,200 | 6.24% |
+| Slice LUTs | 38,500 | 133,800 | 28.77% |
+| Slice Registers | 30,894 | 269,200 | 11.48% |
 | LUT as Memory | 4,096 | 46,200 | 8.87% |
-| RAMB18 | 1 | 730 | 0.14% |
+| RAMB18 | 0 | 730 | 0.00% |
 | DSP48E1 | 4 | 740 | 0.54% |
 
 **主要层级资源分布（综合层级报告）**
 
 | 模块/层级 | Total LUTs | FFs | 备注 |
 |------|------|------|------|
-| `u_scoreboard` | 25,793 | 4,727 | 当前最大 LUT 消耗点 |
-| `gen_legacy_mem.u_legacy_mem_subsys` | 4,563 | 40 | 其中 4,096 LUTRAM |
-| `u_regs_mt` | 3,313 | 1,984 | Pipe0/线程寄存器堆 |
-| `u_regs_mt_p1` | 3,313 | 1,984 | Pipe1/线程寄存器堆 |
-| `u_rob_lite` | 1,800 | 1,278 | 提交/回滚路径 |
-| `u_stage_if` | 1,496 | 2,202 | 含 `bpu_bimodal + inst_memory` |
-| `u_lsu_shell` | 1,195 | 880 | 含 `store_buffer` |
-| `u_uart_tx_simple` | 48 | 38 | 板级启动串口发送器 |
+| `u_scoreboard` | 11,951 | 2,651 | 当前最大 LUT 消耗点 |
+| `u_stage_if` | 6,539 | 18,934 | 含 `bpu_bimodal + inst_memory` |
+| `gen_legacy_mem.u_legacy_mem_subsys` | 4,617 | 97 | 其中 4,096 LUTRAM |
+| `u_regs_mt` | 3,292 | 1,984 | Pipe0/线程寄存器堆 |
+| `u_regs_mt_p1` | 3,292 | 1,984 | Pipe1/线程寄存器堆 |
+| `u_rob_lite` | 1,869 | 1,278 | 提交/回滚路径 |
+| `u_lsu_shell` | 1,206 | 942 | 含 `store_buffer` |
+| `u_board_uart_tx` | 29 | 25 | 板侧重新定时 UART 发送器 |
+| `u_core_uart_monitor` | 35 | 35 | 板侧 UART 帧监测器 |
 
-### 13.6 CoreMark 性能测试
+### 13.6 当前板测 Profile
+
+默认板测入口由 `fpga/scripts/run_board_feedback.py` 统一管理。它会按固定顺序执行：
+
+1. 顶层仿真
+2. 创建 Vivado 工程
+3. 15 分钟内综合
+4. skip-opt bitstream 生成
+5. JTAG 下载并回读 `BuildID`
+6. COM 串口抓取
+
+**当前默认 profile**
+
+| Profile | Top | 默认 ROM | 用途 |
+|------|------|------|------|
+| `core_diag` | `adam_riscv_ax7203_top` | `rom/test_fpga_uart_board_diag_gap.s` | 默认 CPU 板级 smoke，串口回传 `UART DIAG PASS` |
+| `main_bridge_probe` | `adam_riscv_ax7203_main_bridge_probe_top` | `rom/test_fpga_uart_board_diag.s` | 证明主顶层内部 UART bridge 在真板上可观测 |
+| `core_status` | `adam_riscv_ax7203_status_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 导出 core ready / retire / tube / UART 等状态 |
+| `issue_probe` | `adam_riscv_ax7203_issue_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 排查 issue / wakeup 相关卡死 |
+| `branch_probe` | `adam_riscv_ax7203_branch_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 排查 branch pending / complete 链路 |
+| `io_smoke` | `adam_riscv_ax7203_io_smoke_top` | 无 | 纯板级 IO / 串口通路 smoke |
+
+**最近一次板测结果**
+
+- `core_diag`：`BuildID=0x69CE6358`，`UartBytes=150`，抓包内容为重复的 `UART DIAG PASS`
+- `main_bridge_probe`：`BuildID=0x69CE5B50`，`UartBytes=1296`，抓包内容为重复的 `M111:A2:A2:A2:3`
+- `main_bridge_probe` 用来证明“CPU -> core_uart -> 板侧 bridge -> PC 串口”这条链在真板上确实打通
+- 默认 `core_diag` 之所以使用 `test_fpga_uart_board_diag_gap.s`，是为了在板级串口抓取上保留明显行间空闲，避免过于紧凑的连续流影响可观测性
+
+### 13.7 CoreMark 性能测试
 
 ```powershell
 cd benchmarks/coremark

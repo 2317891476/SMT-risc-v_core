@@ -23,6 +23,7 @@ set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set build_threads [ax7203_env_or_default AX7203_MAX_THREADS 4]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 
 puts "Creating project: $project_name"
 puts "Target part: $target_part"
@@ -31,6 +32,10 @@ puts "AX7203_ENABLE_ROCC: $enable_rocc"
 puts "AX7203_ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "AX7203_SMT_MODE: $smt_mode"
 puts "AX7203_MAX_THREADS: $build_threads"
+puts "AX7203_TOP_MODULE: $top_module"
+
+puts "Preparing board ROM image..."
+ax7203_build_board_rom $script_dir
 
 # Create project
 create_project -force $project_name $project_dir -part $target_part
@@ -177,6 +182,22 @@ if {[file exists $clk_wiz_tcl]} {
     # Source in a way that doesn't conflict with our variables
     set ::env(TARGET_PART) $target_part
     source $clk_wiz_tcl
+    set clk_xci_files [get_files -quiet */clk_wiz_0.xci]
+    set clk_generated_files [list \
+        "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0.v" \
+        "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_clk_wiz.v" \
+    ]
+    foreach clk_generated_file $clk_generated_files {
+        if {![file exists $clk_generated_file]} {
+            puts "ERROR: Missing generated Clock Wizard HDL: $clk_generated_file"
+            exit 1
+        }
+        add_files -norecurse $clk_generated_file
+    }
+    if {[llength $clk_xci_files] > 0} {
+        puts "INFO: Removing clk_wiz_0.xci after HDL generation to avoid fragile in-run IP regeneration."
+        remove_files $clk_xci_files
+    }
 } else {
     puts "WARNING: Missing Clock Wizard IP script: $clk_wiz_tcl"
     puts "WARNING: The core requires clk_wiz_0 when FPGA_MODE is defined."
@@ -187,13 +208,17 @@ set bram_ip_tcl "$bram_init_dir/create_bram_ip.tcl"
 if {[file exists $bram_ip_tcl]} {
     puts "Generating BRAM IP from: $bram_ip_tcl"
     source $bram_ip_tcl
+    set bram_xci_files [get_files -quiet */bram_mem_0.xci]
+    if {[llength $bram_xci_files] > 0} {
+        set_property GENERATE_SYNTH_CHECKPOINT 0 $bram_xci_files
+    }
 } else {
     puts "ERROR: Missing BRAM IP script: $bram_ip_tcl"
     exit 1
 }
 
 # Set top module
-set_property top adam_riscv_ax7203_top [get_filesets sources_1]
+set_property top $top_module [get_filesets sources_1]
 
 # Define FPGA build knobs explicitly so board synthesis is reproducible.
 set_property verilog_define [list \
@@ -224,6 +249,7 @@ file mkdir $project_dir/checkpoints
 
 puts "Project created successfully!"
 puts "Part: $target_part"
+puts "Top: $top_module"
 puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys SMT_MODE=$smt_mode"
 puts "To build: vivado -mode batch -source fpga/build_ax7203_bitstream.tcl"
 
@@ -236,6 +262,7 @@ ax7203_write_evidence $evidence_file [list \
     "ENABLE_ROCC_ACCEL: $enable_rocc" \
     "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
     "SMT_MODE: $smt_mode" \
+    "TopModule: $top_module" \
     "MaxThreads: $build_threads" \
     "Timestamp: [clock format [clock seconds]]" \
 ]

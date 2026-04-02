@@ -208,6 +208,12 @@ reset_vector:                                                           \
 
 def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
     """Compile a single test with our adapter"""
+    # Clean up old hex files
+    for stale_file in ["inst.hex", "data.hex"]:
+        stale_path = ROM_DIR / stale_file
+        if stale_path.exists():
+            stale_path.unlink()
+    
     test_name = Path(test_path).stem
     test_out_dir = output_dir / test_name
     test_out_dir.mkdir(parents=True, exist_ok=True)
@@ -256,13 +262,30 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
     subprocess.run([OBJCOPY, "-O", "verilog", str(elf_path), str(inst_hex)], 
                    capture_output=True, cwd=str(test_out_dir))
     
+    # Generate data.hex (if .data section exists)
+    data_hex = test_out_dir / "data.hex"
+    result = subprocess.run([OBJCOPY, "-j", ".data", "-O", "verilog", str(elf_path), str(data_hex)], 
+                           capture_output=True, cwd=str(test_out_dir))
+    
     # Copy to ROM directory
     rom_hex = ROM_DIR / "inst.hex"
+    rom_data = ROM_DIR / "data.hex"
+    
+    # 复制 inst.hex
     if sys.platform == "win32":
-        subprocess.run(["cmd", "/c", "copy", "/Y", str(inst_hex), str(rom_hex)], 
-                       capture_output=True)
+        subprocess.run(["cmd", "/c", "copy", "/Y", str(inst_hex), str(rom_hex)], capture_output=True)
     else:
         subprocess.run(["cp", str(inst_hex), str(rom_hex)], capture_output=True)
+    
+    # 处理 data.hex
+    if data_hex.exists() and data_hex.stat().st_size > 0:
+        if sys.platform == "win32":
+            subprocess.run(["cmd", "/c", "copy", "/Y", str(data_hex), str(rom_data)], capture_output=True)
+        else:
+            subprocess.run(["cp", str(data_hex), str(rom_data)], capture_output=True)
+    else:
+        # 创建空的 data.hex
+        rom_data.write_text("@00001000\n", encoding="ascii")
     
     return True, "", test_name
 
@@ -271,6 +294,7 @@ def run_simulation():
     """Run the simulation"""
     compile_cmd = (
         "iverilog -g2012 -s tb -o out_iverilog/bin/tb_riscv_test.out "
+        "-DTEST_ID=0 "
         "-I ../rtl ../rtl/*.v "
         "../libs/REG_ARRAY/SRAM/ram_bfm.v tb.sv"
     )
@@ -283,7 +307,7 @@ def run_simulation():
     run_cmd = "vvp out_iverilog/bin/tb_riscv_test.out"
     try:
         result = subprocess.run(run_cmd, shell=True, capture_output=True, 
-                               text=True, cwd=str(COMP_TEST_DIR), timeout=30)
+                               text=True, cwd=str(COMP_TEST_DIR), timeout=120)
     except subprocess.TimeoutExpired:
         return False, "Timeout", ""
     

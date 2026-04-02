@@ -29,10 +29,18 @@ wire [ADDR_WIDTH -1 : 0] inst_addr_2;
 assign inst_addr_2 = inst_addr[ADDR_WIDTH +2-1 : 2];
 
 `ifdef FPGA_MODE
-(* ram_style = "block" *) reg [31:0] mem [0:IROM_SPACE-1];
+// Keep the FPGA instruction image in synchronous block RAM so implementation
+// cannot aggressively constant-fold the whole CPU against a fixed ROM image.
+// The board build cares more about preserving real hardware behavior than
+// shaving a few LUTs from bring-up.
+(* rom_style = "block" *) reg [7:0] mem [0:(IROM_SPACE*4)-1];
 reg [31:0] inst_o_r;
+integer i;
 
 initial begin
+    for (i = 0; i < (IROM_SPACE*4); i = i + 1) begin
+        mem[i] = 8'd0;
+    end
     $readmemh("inst.hex", mem);
 end
 
@@ -40,7 +48,12 @@ always @(posedge clk or negedge rstn) begin
     if (!rstn)
         inst_o_r <= 32'd0;
     else
-        inst_o_r <= mem[inst_addr_2];
+        inst_o_r <= {
+            mem[{inst_addr_2, 2'b00} + 2'd3],
+            mem[{inst_addr_2, 2'b00} + 2'd2],
+            mem[{inst_addr_2, 2'b00} + 2'd1],
+            mem[{inst_addr_2, 2'b00} + 2'd0]
+        };
 end
 
 assign inst_o = inst_o_r;

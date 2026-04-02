@@ -7,6 +7,8 @@
 
 # TUBE MMIO (test completion marker)
 .equ TUBE_ADDR,           0x13000000
+.equ UART_TXDATA_ADDR,    0x13000010
+.equ UART_STATUS_ADDR,    0x13000014
 
 # CLINT (Core Local Interruptor) - Machine Timer
 .equ CLINT_BASE,          0x02000000

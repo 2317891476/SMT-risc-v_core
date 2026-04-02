@@ -1,5 +1,5 @@
 # run_ax7203_synth.tcl
-# Run AX7203 synthesis only with an explicit timeout gate.
+# Run AX7203 synthesis inside a single Vivado batch session.
 # Usage: vivado -mode batch -source fpga/run_ax7203_synth.tcl
 
 set script_dir [file dirname [info script]]
@@ -13,6 +13,7 @@ set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
 set synth_timeout_min [ax7203_env_or_default AX7203_SYNTH_TIMEOUT_MIN 15]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set project_file "$project_dir/$project_name.xpr"
 
 if {![file exists $project_file]} {
@@ -26,8 +27,12 @@ puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "SMT_MODE: $smt_mode"
+puts "Top module: $top_module"
 puts "Synthesis jobs: $synth_jobs"
-puts "Synthesis timeout: ${synth_timeout_min} minute(s)"
+puts "Synthesis timeout budget: ${synth_timeout_min} minute(s)"
+
+puts "Refreshing board ROM image before synthesis..."
+ax7203_build_board_rom $script_dir
 
 open_project $project_file
 
@@ -37,64 +42,94 @@ if {$current_part != $target_part} {
     set_property part $target_part [current_project]
 }
 
+set_property top $top_module [get_filesets sources_1]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
     ENABLE_MEM_SUBSYS=$enable_mem_subsys \
     SMT_MODE=$smt_mode \
 ] [get_filesets sources_1]
+update_compile_order -fileset sources_1
 
-reset_run synth_1
-reset_run impl_1
-
-puts "Starting synthesis..."
-launch_runs synth_1 -jobs $synth_jobs
-
-if {[catch {
-    ax7203_wait_run_with_timeout synth_1 [expr {$synth_timeout_min * 60}]
-} synth_err]} {
-    puts "ERROR: $synth_err"
-    exit 1
+foreach ip_file [get_files -quiet *.xci] {
+    catch {set_property GENERATE_SYNTH_CHECKPOINT 0 $ip_file}
 }
-
-set synth_status [get_property STATUS [get_runs synth_1]]
-if {$synth_status != "synth_design Complete!"} {
-    puts "ERROR: Unexpected synthesis status: $synth_status"
-    exit 1
-}
-
-puts "Synthesis completed successfully."
 
 set report_dir "$project_dir/reports"
 set checkpoint_dir "$project_dir/checkpoints"
+set runs_dir "$project_dir/${project_name}.runs"
+set synth_checkpoint "$checkpoint_dir/${project_name}_post_synth.dcp"
+set synth_util_rpt "$report_dir/synth_utilization.rpt"
+set synth_util_hier_rpt "$report_dir/synth_utilization_hier.rpt"
+set synth_timing_rpt "$report_dir/synth_timing_summary.rpt"
 file mkdir $report_dir
 file mkdir $checkpoint_dir
 
-open_run synth_1
-report_utilization -file $report_dir/synth_utilization.rpt
-report_utilization -hierarchical -hierarchical_depth 3 -file $report_dir/synth_utilization_hier.rpt
-report_timing_summary -file $report_dir/synth_timing_summary.rpt -max_paths 20
-ax7203_copy_first_match "$project_dir/$project_name.runs/synth_1/*.dcp" "$checkpoint_dir/${project_name}_post_synth.dcp"
+catch {set_param general.maxThreads $synth_jobs}
+catch {close_design}
+
+ax7203_clear_run_markers $runs_dir
+ax7203_reset_runs_matching synth_1
+ax7203_reset_runs_matching impl_1
+
+set synth_start [clock seconds]
+puts "Running manual synth_design in the current Vivado session..."
+catch {reset_run synth_1}
+catch {close_design}
+synth_design \
+    -top $top_module \
+    -part $target_part \
+    -flatten_hierarchy none \
+    -directive RuntimeOptimized \
+    -fsm_extraction off
+write_checkpoint -force $synth_checkpoint
+report_utilization -file $synth_util_rpt
+report_utilization -hierarchical -hierarchical_depth 3 -file $synth_util_hier_rpt
+report_timing_summary -file $synth_timing_rpt -max_paths 10
+set synth_elapsed [expr {[clock seconds] - $synth_start}]
+set synth_elapsed_min [expr {$synth_elapsed / 60.0}]
+
+puts "Synthesis completed in [format %.2f $synth_elapsed_min] minute(s)."
+if {$synth_elapsed > ($synth_timeout_min * 60)} {
+    puts "ERROR: Synthesis exceeded timeout budget of ${synth_timeout_min} minute(s)."
+    exit 1
+}
+
+set synth_run_dcp "$runs_dir/synth_1/${top_module}.dcp"
+if {![file exists $synth_run_dcp]} {
+    set synth_run_dcp "$runs_dir/synth_1/${project_name}_top.dcp"
+}
+if {![file exists $synth_run_dcp]} {
+    set synth_run_dcp "$runs_dir/synth_1/adam_riscv_ax7203_top.dcp"
+}
+if {![file exists $synth_run_dcp]} {
+    puts "WARNING: synth_1 run checkpoint not found under $runs_dir; using manual checkpoint $synth_checkpoint"
+    set synth_run_dcp $synth_checkpoint
+}
 
 set evidence_file "$script_dir/../.sisyphus/evidence/task-2a-synth.log"
 ax7203_write_evidence $evidence_file [list \
     "Synthesis: SUCCESS" \
+    "Mode: manual_synth_design" \
     "Part: $target_part" \
     "ENABLE_ROCC_ACCEL: $enable_rocc" \
     "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
     "SMT_MODE: $smt_mode" \
+    "TopModule: $top_module" \
     "Jobs: $synth_jobs" \
     "TimeoutMinutes: $synth_timeout_min" \
-    "Status: $synth_status" \
+    "ElapsedSeconds: $synth_elapsed" \
+    "SynthRunDcp: $synth_run_dcp" \
     "Timestamp: [clock format [clock seconds]]" \
 ]
 
 puts "Reports:"
-puts "  $report_dir/synth_utilization.rpt"
-puts "  $report_dir/synth_utilization_hier.rpt"
-puts "  $report_dir/synth_timing_summary.rpt"
+puts "  $synth_util_rpt"
+puts "  $synth_util_hier_rpt"
+puts "  $synth_timing_rpt"
 puts "Checkpoint:"
-puts "  $checkpoint_dir/${project_name}_post_synth.dcp"
+puts "  $synth_checkpoint"
 
+catch {close_design}
 close_project
 exit 0

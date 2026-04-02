@@ -38,6 +38,7 @@ create_clock -name sys_clk -period 5.000 [get_ports sys_clk_p]
 # RESET_N = T6 (active-low push button on core board)
 set_property PACKAGE_PIN T6 [get_ports sys_rst_n]
 set_property IOSTANDARD LVCMOS33 [get_ports sys_rst_n]
+set_property PULLUP true [get_ports sys_rst_n]
 
 ################################################################################
 # 3) Baseline timing exceptions (justified)

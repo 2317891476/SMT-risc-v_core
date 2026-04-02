@@ -157,6 +157,7 @@ wire                     sb_load_hazard;
 wire is_load  = req_valid && !req_wen;
 wire is_store = req_valid && req_wen;
 wire store_enqueue_fire;
+wire legacy_load_issue_fire;
 
 
 
@@ -182,6 +183,7 @@ wire load_accept = !sb_load_hazard && state_machine_idle;
 
 assign req_accept = is_store ? store_accept : load_accept;
 assign store_enqueue_fire = is_store && req_accept;
+assign legacy_load_issue_fire = !use_mem_subsys && is_load && req_accept && !sb_forward_valid;
 
 // Export load hazard signal for scoreboard stalling
 assign load_hazard = is_load && sb_load_hazard;
@@ -355,6 +357,10 @@ always @(posedge clk or negedge rstn) begin
                         m1_req_write  <= 1'b0;  // Read
                         m1_req_wdata  <= 32'd0;
                         m1_req_wen    <= 4'b0000;
+                    end else if (!use_mem_subsys && is_load && !sb_forward_valid) begin
+                        // Legacy load: issue the read only for the accepted request,
+                        // then wait one cycle to sample the returned data.
+                        lsu_state     <= LSU_REQ;
                     end else if (is_store) begin
                         // Store: complete immediately (speculative)
                         lsu_state     <= LSU_RESP;
@@ -376,10 +382,18 @@ always @(posedge clk or negedge rstn) begin
             end
 
             LSU_REQ: begin
-                // Waiting for mem_subsys to accept request
-                if (m1_req_ready) begin
-                    m1_req_valid <= 1'b0;
-                    lsu_state    <= LSU_WAIT_RESP;
+                if (use_mem_subsys) begin
+                    // Waiting for mem_subsys to accept request
+                    if (m1_req_ready) begin
+                        m1_req_valid <= 1'b0;
+                        lsu_state    <= LSU_WAIT_RESP;
+                    end
+                end else begin
+                    // Legacy load returns through mem_rdata one cycle after the
+                    // accepted request pulse. Sample it here to decouple the
+                    // response path from any younger speculative requests.
+                    raw_mem_rdata <= mem_rdata;
+                    lsu_state     <= LSU_RESP;
                 end
             end
 
@@ -416,8 +430,8 @@ always @(posedge clk or negedge rstn) begin
 end
 
 // Legacy memory interface (for use_mem_subsys=0)
-assign mem_addr = req_addr;
-assign mem_read = (!use_mem_subsys && is_load && !sb_load_hazard) ? 4'b1111 : 4'b0000;
+assign mem_addr = legacy_load_issue_fire ? req_addr : pending_addr;
+assign mem_read = legacy_load_issue_fire ? 4'b1111 : 4'b0000;
 
 // =============================================================================
 // Load Data Shaping (replicated from stage_wb for single-cycle response)
@@ -425,8 +439,8 @@ assign mem_read = (!use_mem_subsys && is_load && !sb_load_hazard) ? 4'b1111 : 4'
 
 wire [1:0]  addr_in_word = pending_addr[1:0];
 
-// Select raw memory data source: legacy (1-cycle) or mem_subsys (variable)
-wire [31:0] raw_mem_data = use_mem_subsys ? raw_mem_rdata : mem_rdata;
+// Both legacy and mem_subsys paths capture data into raw_mem_rdata before LSU_RESP.
+wire [31:0] raw_mem_data = raw_mem_rdata;
 
 // Combinational load data shaping for memory data (same logic as stage_wb)
 reg [31:0] mem_data_shaped;

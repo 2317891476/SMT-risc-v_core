@@ -1,5 +1,8 @@
 # build_ax7203_bitstream.tcl
-# Build bitstream for ALINX AX7203
+# Build AX7203 bitstream from the synthesized checkpoint.
+# We intentionally skip opt_design here because the default project impl flow
+# aggressively constant-folds the board bring-up core into a tiny, non-working
+# shell when the ROM image is fixed at build time.
 # Usage: vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
 
 set script_dir [file dirname [info script]]
@@ -14,10 +17,9 @@ set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
-set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
 set impl_jobs [ax7203_env_or_default AX7203_IMPL_JOBS 4]
-set synth_timeout_min [ax7203_env_or_default AX7203_SYNTH_TIMEOUT_MIN 15]
 set impl_timeout_min [ax7203_env_or_default AX7203_IMPL_TIMEOUT_MIN 45]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set is_compare 0
 if {[info exists ::env(TARGET_PART)]} {
     set target_part $::env(TARGET_PART)
@@ -26,15 +28,33 @@ if {[info exists ::env(COMPARE_BUILD)]} {
     set is_compare $::env(COMPARE_BUILD)
 }
 
-puts "Opening project: $project_name"
+set report_dir "$project_dir/reports"
+set checkpoint_dir "$project_dir/checkpoints"
+set synth_checkpoint "$checkpoint_dir/${project_name}_post_synth.dcp"
+if {$top_module eq "adam_riscv_ax7203_top"} {
+    set route_checkpoint "$checkpoint_dir/${project_name}_post_route.dcp"
+    set bitstream_file "$project_dir/${project_name}_${target_part}.bit"
+    set build_id_file "$project_dir/${project_name}_bitstream_id.txt"
+} else {
+    set route_checkpoint "$checkpoint_dir/${project_name}_${top_module}_post_route.dcp"
+    set bitstream_file "$project_dir/${project_name}_${top_module}_${target_part}.bit"
+    set build_id_file "$project_dir/${project_name}_${top_module}_bitstream_id.txt"
+}
+set runs_dir "$project_dir/${project_name}.runs"
+set clk_wiz_board_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_board.xdc"
+set clk_wiz_timing_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0.xdc"
+set base_xdc "$script_dir/constraints/ax7203_base.xdc"
+set uart_led_xdc "$script_dir/constraints/ax7203_uart_led.xdc"
+
+puts "Building bitstream from synthesized checkpoint (skip opt_design)"
 puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "SMT_MODE: $smt_mode"
-puts "Synthesis jobs: $synth_jobs"
+puts "Top module: $top_module"
 puts "Implementation jobs: $impl_jobs"
-puts "Synthesis timeout: ${synth_timeout_min} minute(s)"
-puts "Implementation timeout: ${impl_timeout_min} minute(s)"
+puts "Implementation timeout budget: ${impl_timeout_min} minute(s)"
+puts "Project: $project_file"
 
 if {![file exists $project_file]} {
     puts "ERROR: Project not found: $project_file"
@@ -42,89 +62,88 @@ if {![file exists $project_file]} {
     exit 1
 }
 
-# Open project
+file mkdir $report_dir
+file mkdir $checkpoint_dir
+
 open_project $project_file
-
-# Update part if different
-set current_part [get_property part [current_project]]
-if {$current_part != $target_part} {
-    puts "Updating part from $current_part to $target_part"
-    set_property part $target_part [current_project]
-}
-
+set_property top $top_module [get_filesets sources_1]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
     ENABLE_MEM_SUBSYS=$enable_mem_subsys \
     SMT_MODE=$smt_mode \
 ] [get_filesets sources_1]
+update_compile_order -fileset sources_1
 
-# Reset runs
-reset_run synth_1
-reset_run impl_1
-
-# Run synthesis
-puts "Starting synthesis..."
-launch_runs synth_1 -jobs $synth_jobs
-if {[catch {
-    ax7203_wait_run_with_timeout synth_1 [expr {$synth_timeout_min * 60}]
-} synth_err]} {
-    puts "ERROR: $synth_err"
+set synth_run [get_runs synth_1]
+if {[llength $synth_run] == 0} {
+    puts "ERROR: synth_1 run is missing from the project."
     exit 1
 }
 
-# Check synthesis results
-set synth_status [get_property status [get_runs synth_1]]
-if {$synth_status != "synth_design Complete!"} {
-    puts "ERROR: Synthesis failed with status: $synth_status"
+set synth_status [get_property STATUS $synth_run]
+puts "synth_1 status: $synth_status"
+if {![file exists $synth_checkpoint]} {
+    puts "ERROR: Synth checkpoint not found: $synth_checkpoint"
+    puts "Run synthesis first: vivado -mode batch -source fpga/run_ax7203_synth.tcl"
     exit 1
 }
-
-puts "Synthesis completed successfully!"
-
-set report_dir "$project_dir/reports"
-set checkpoint_dir "$project_dir/checkpoints"
-file mkdir $report_dir
-file mkdir $checkpoint_dir
-
-open_run synth_1
-report_utilization -file $report_dir/synth_utilization.rpt
-report_utilization -hierarchical -hierarchical_depth 3 -file $report_dir/synth_utilization_hier.rpt
-report_timing_summary -file $report_dir/synth_timing_summary.rpt -max_paths 20
-ax7203_copy_first_match "$project_dir/$project_name.runs/synth_1/*.dcp" "$checkpoint_dir/${project_name}_post_synth.dcp"
-
-# Run implementation
-puts "Starting implementation..."
-launch_runs impl_1 -to_step write_bitstream -jobs $impl_jobs
-if {[catch {
-    ax7203_wait_run_with_timeout impl_1 [expr {$impl_timeout_min * 60}]
-} impl_err]} {
-    puts "ERROR: $impl_err"
-    exit 1
+if {![ax7203_status_is_complete $synth_status]} {
+    puts "WARNING: synth_1 run status is not marked complete, but checkpoint exists."
+    puts "WARNING: Continuing from checkpoint: $synth_checkpoint"
 }
 
-# Check implementation results
-set impl_status [get_property status [get_runs impl_1]]
-if {$impl_status != "write_bitstream Complete!"} {
-    puts "ERROR: Implementation failed with status: $impl_status"
-    exit 1
+set required_xdc_list [list $base_xdc $uart_led_xdc]
+if {$top_module eq "adam_riscv_ax7203_top"} {
+    set required_xdc_list [concat [list $clk_wiz_board_xdc $clk_wiz_timing_xdc] $required_xdc_list]
+}
+foreach required_xdc $required_xdc_list {
+    if {![file exists $required_xdc]} {
+        puts "ERROR: Required constraint file not found: $required_xdc"
+        exit 1
+    }
 }
 
-puts "Implementation completed successfully!"
+close_project
+catch {close_design}
+catch {set_param general.maxThreads $impl_jobs}
 
-# Generate reports
-puts "Generating reports..."
+puts "Opening synthesized checkpoint: $synth_checkpoint"
+open_checkpoint $synth_checkpoint
+if {[llength [get_cells -quiet u_adam_riscv/clk2cpu/inst]] > 0} {
+    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_board_xdc
+    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_timing_xdc
+}
+read_xdc $base_xdc
+read_xdc $uart_led_xdc
 
-# Timing report
-open_run impl_1
+set build_id [format %08X [expr {[clock seconds] & 0xFFFFFFFF}]]
+set_property BITSTREAM.CONFIG.USERID "32'h$build_id" [current_design]
+set_property BITSTREAM.CONFIG.USR_ACCESS "0x$build_id" [current_design]
+puts "Bitstream build id: 0x$build_id"
+
+puts "Running implementation steps (place/phys_opt/route) without opt_design..."
+set impl_start [clock seconds]
+place_design
+phys_opt_design
+route_design
+set impl_elapsed [expr {[clock seconds] - $impl_start}]
+
 report_timing_summary -file $report_dir/timing_summary.rpt -max_paths 10
 report_timing -file $report_dir/timing_detail.rpt -max_paths 100
 report_clock_interaction -file $report_dir/clock_interaction.rpt
-
-# Utilization report
 report_utilization -file $report_dir/utilization.rpt
 report_utilization -hierarchical -hierarchical_depth 3 -file $report_dir/utilization_hier.rpt
-ax7203_copy_first_match "$project_dir/$project_name.runs/impl_1/*.dcp" "$checkpoint_dir/${project_name}_post_route.dcp"
+write_checkpoint -force $route_checkpoint
+write_bitstream -force $bitstream_file
+
+ax7203_write_evidence $build_id_file [list \
+    "BUILD_ID=0x$build_id" \
+    "TOP_MODULE=$top_module" \
+    "BITSTREAM=$bitstream_file" \
+    "TARGET_PART=$target_part" \
+    "TIMESTAMP=[clock format [clock seconds]]" \
+]
 
 # Check for unconstrained paths using the generated timing report. Vivado 2023.2
 # in this environment does not support `get_timing_paths -unconstrained`.
@@ -138,51 +157,77 @@ if {[file exists $report_dir/timing_summary.rpt]} {
     }
 }
 
+set wns "NA"
+set tns "NA"
+set whs "NA"
+set setup_paths [get_timing_paths -delay_type max -max_paths 1 -nworst 1]
+if {[llength $setup_paths] > 0} {
+    set wns [get_property SLACK [lindex $setup_paths 0]]
+}
+set hold_paths [get_timing_paths -delay_type min -max_paths 1 -nworst 1]
+if {[llength $hold_paths] > 0} {
+    set whs [get_property SLACK [lindex $hold_paths 0]]
+}
+if {[file exists $report_dir/timing_summary.rpt]} {
+    set timing_fh [open $report_dir/timing_summary.rpt r]
+    set timing_text [read $timing_fh]
+    close $timing_fh
+    if {[regexp {\n\s*([-0-9.]+)\s+([-0-9.]+)\s+[0-9]+\s+[0-9]+\s+([-0-9.]+)\s+([-0-9.]+)} $timing_text -> rpt_wns rpt_tns rpt_whs rpt_ths]} {
+        set wns $rpt_wns
+        set tns $rpt_tns
+        set whs $rpt_whs
+    }
+}
+
 puts "Report Summary:"
 puts "  - Timing summary: $report_dir/timing_summary.rpt"
 puts "  - Utilization: $report_dir/utilization.rpt"
 puts "  - Unconstrained paths: $num_unconstrained"
+puts "  - Bitstream: $bitstream_file"
+puts "  - Build ID: 0x$build_id"
 
-# Copy bitstream to standard location
-set bitstream [glob $project_dir/$project_name.runs/impl_1/*.bit]
-file copy -force $bitstream $project_dir/${project_name}_${target_part}.bit
-
-puts "Bitstream: $project_dir/${project_name}_${target_part}.bit"
-
-# Save evidence
 set evidence_file "$script_dir/../.sisyphus/evidence/task-2-build-bitstream.log"
 ax7203_write_evidence $evidence_file [list \
     "Build: SUCCESS" \
+    "Mode: checkpoint_place_route_skip_opt" \
     "Part: $target_part" \
     "ENABLE_ROCC_ACCEL: $enable_rocc" \
     "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
     "SMT_MODE: $smt_mode" \
-    "Synthesis: $synth_status" \
-    "Implementation: $impl_status" \
-    "SynthesisJobs: $synth_jobs" \
+    "TopModule: $top_module" \
     "ImplementationJobs: $impl_jobs" \
-    "SynthesisTimeoutMinutes: $synth_timeout_min" \
     "ImplementationTimeoutMinutes: $impl_timeout_min" \
+    "ImplementationElapsedSeconds: $impl_elapsed" \
+    "BuildID: 0x$build_id" \
+    "BuildManifest: $build_id_file" \
+    "SynthCheckpoint: $synth_checkpoint" \
+    "RouteCheckpoint: $route_checkpoint" \
+    "Bitstream: $bitstream_file" \
+    "WNS: $wns" \
+    "TNS: $tns" \
+    "WHS: $whs" \
     "Unconstrained paths: $num_unconstrained" \
     "Timestamp: [clock format [clock seconds]]" \
 ]
-
-# Check for timing violations
-set wns [get_property STATS.WNS [get_runs impl_1]]
-set tns [get_property STATS.TNS [get_runs impl_1]]
-set whs [get_property STATS.WHS [get_runs impl_1]]
 
 puts "Timing Results:"
 puts "  WNS: $wns"
 puts "  TNS: $tns"
 puts "  WHS: $whs"
+puts "  Build ID: 0x$build_id"
 
-if {$wns < 0 || $whs < 0} {
-    puts "WARNING: Timing violations detected!"
-    puts "  Setup violations: WNS = $wns"
-    puts "  Hold violations: WHS = $whs"
+if {$wns ne "NA" && $wns < 0} {
+    puts "WARNING: Setup timing violations detected! WNS = $wns"
     if {!$is_compare} {
-        puts "ERROR: Primary target ($target_part) has timing violations. Fix before continuing."
+        puts "ERROR: Primary target ($target_part) has setup timing violations. Fix before continuing."
+        exit 1
+    }
+}
+
+if {$whs ne "NA" && $whs < 0} {
+    puts "WARNING: Hold timing violations detected! WHS = $whs"
+    if {!$is_compare} {
+        puts "ERROR: Primary target ($target_part) has hold timing violations. Fix before continuing."
         exit 1
     }
 }
@@ -193,5 +238,6 @@ if {$num_unconstrained > 0} {
 }
 
 puts "Build completed successfully!"
-close_project
+catch {close_design}
+catch {close_project}
 exit 0

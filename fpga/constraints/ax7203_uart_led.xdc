@@ -23,24 +23,14 @@ set_property IOSTANDARD LVCMOS33 [get_ports uart_rx]
 set_property PULLUP true [get_ports uart_rx]
 
 ################################################################################
-# 2) UART timing constraints (initial placeholder for bring-up)
+# 2) UART timing constraints
 ################################################################################
 
-# UART is asynchronous to sys_clk; define a virtual reference clock for I/O delay
-# bookkeeping (115200 baud => bit period 8.680556 us = 8680.556 ns).
-create_clock -name uart_line_clk -period 8680.556
-
-# Conservative board-level placeholders; refine after schematic + SI review.
-set_output_delay -clock [get_clocks uart_line_clk] -max 5.000 [get_ports uart_tx]
-set_output_delay -clock [get_clocks uart_line_clk] -min -5.000 [get_ports uart_tx]
-
-set_input_delay -clock [get_clocks uart_line_clk] -max 5.000 [get_ports uart_rx]
-set_input_delay -clock [get_clocks uart_line_clk] -min 0.000 [get_ports uart_rx]
-
-# UART virtual timing domain is asynchronous to FPGA system clock domain.
-set_clock_groups -asynchronous \
-  -group [get_clocks sys_clk] \
-  -group [get_clocks uart_line_clk]
+# The CP2102 UART link is asynchronous to the FPGA system clock. For this
+# bring-up design we intentionally exclude direct UART pad timing from closure
+# so the core timing report focuses on synchronous on-chip paths.
+set_false_path -to [get_ports uart_tx]
+set_false_path -from [get_ports uart_rx]
 
 ################################################################################
 # 3) Debug visibility recommendations (optional, commented)

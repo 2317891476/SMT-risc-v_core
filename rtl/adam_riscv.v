@@ -26,7 +26,45 @@ module adam_riscv(
 `endif
     input wire sys_rstn,
     input wire ext_irq_src,
-    output wire [7:0] tube_status  // Task 4: Export for testbench observation
+    output wire [7:0] tube_status, // Task 4: Export for testbench observation
+    output wire       uart_tx,
+    output wire       debug_core_ready,
+    output wire       debug_core_clk,
+    output wire       debug_retire_seen,
+    output wire       debug_uart_status_busy,
+    output wire       debug_uart_busy,
+    output wire       debug_uart_pending_valid,
+    output wire [7:0] debug_uart_status_load_count,
+    output wire [7:0] debug_uart_tx_store_count,
+    output wire       debug_uart_tx_byte_valid,
+    output wire [7:0] debug_uart_tx_byte,
+    output wire [7:0] debug_last_iss0_pc_lo,
+    output wire [7:0] debug_last_iss1_pc_lo,
+    output wire       debug_branch_pending_any,
+    output wire       debug_br_found_t0,
+    output wire       debug_branch_in_flight_t0,
+    output wire       debug_oldest_br_ready_t0,
+    output wire       debug_oldest_br_just_woke_t0,
+    output wire [3:0] debug_oldest_br_qj_t0,
+    output wire [3:0] debug_oldest_br_qk_t0,
+    output wire [3:0] debug_slot1_flags,
+    output wire [7:0] debug_slot1_pc_lo,
+    output wire [3:0] debug_slot1_qj,
+    output wire [3:0] debug_slot1_qk,
+    output wire [3:0] debug_tag2_flags,
+    output wire [3:0] debug_reg_x12_tag_t0,
+    output wire [3:0] debug_slot1_issue_flags,
+    output wire [3:0] debug_sel0_idx,
+    output wire [3:0] debug_slot1_fu,
+    output wire [7:0] debug_oldest_br_seq_lo_t0,
+    output wire [15:0] debug_rs_flags_flat,
+    output wire [31:0] debug_rs_pc_lo_flat,
+    output wire [15:0] debug_rs_fu_flat,
+    output wire [15:0] debug_rs_qj_flat,
+    output wire [15:0] debug_rs_qk_flat,
+    output wire [31:0] debug_rs_seq_lo_flat,
+    output wire [7:0] debug_branch_issue_count,
+    output wire [7:0] debug_branch_complete_count
 );
 
 // SMT mode parameter (0=single-thread, 1=SMT)
@@ -53,18 +91,47 @@ localparam ROCC_ACCEL_ENABLE = `ENABLE_ROCC_ACCEL;
 // ─── Clock / Reset ───────────────────────────────────────────────────────────
 wire rstn;
 wire clk;
+wire clk_locked;
+wire rstn_in;
 
 `ifdef FPGA_MODE
-    clk_wiz_0 clk2cpu(.clk_out1(clk), .clk_in1(sys_clk));
+    clk_wiz_0 clk2cpu(
+        .clk_out1(clk),
+        .reset   (~sys_rstn),
+        .locked  (clk_locked),
+        .clk_in1 (sys_clk)
+    );
 `else
     assign clk = sys_clk;
+    assign clk_locked = 1'b1;
 `endif
+
+// The AX7203 top-level already applies a long power-on-reset window before the
+// core is released. Keeping an additional `clk_locked` gate here has proven
+// brittle in hardware builds because stale/mis-modeled clock-wizard lock
+// behavior can collapse the whole core into permanent reset during synthesis.
+// For FPGA_MODE bring-up we therefore rely on the board wrapper POR and only
+// use the local synchronizer below to release reset cleanly into `clk`.
+assign rstn_in = sys_rstn;
 
 syn_rst u_syn_rst(
     .clock    (clk     ),
-    .rstn     (sys_rstn),
+    .rstn     (rstn_in ),
     .syn_rstn (rstn    )
 );
+
+// Board bring-up does not need the full simulator-oriented OoO window sizes.
+// Shrinking the FPGA profile keeps the smoke-test core behavior intact while
+// materially reducing timing pressure on the AX7203 build.
+`ifdef FPGA_MODE
+localparam FETCH_BUFFER_DEPTH_CFG = 4;
+localparam SCOREBOARD_RS_DEPTH_CFG = 4;
+localparam SCOREBOARD_RS_IDX_W_CFG = 2;
+`else
+localparam FETCH_BUFFER_DEPTH_CFG = 16;
+localparam SCOREBOARD_RS_DEPTH_CFG = 16;
+localparam SCOREBOARD_RS_IDX_W_CFG = 4;
+`endif
 
 // ─── Thread Scheduler ──────────────────────────────────────────────────────
 wire [0:0] fetch_tid;
@@ -82,6 +149,8 @@ wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
 wire [15:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
+reg        pipe0_br_complete_hold_r;
+wire       scoreboard_br_complete;
 
 // CSR from Pipe0
 wire       pipe0_csr_valid;
@@ -141,6 +210,19 @@ wire sb_disp_stall;
 wire rob_disp_stall;
 wire stall;
 assign stall       = sb_disp_stall || rob_disp_stall;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        pipe0_br_complete_hold_r <= 1'b0;
+    else
+        pipe0_br_complete_hold_r <= pipe0_br_complete;
+end
+
+`ifdef FPGA_MODE
+assign scoreboard_br_complete = pipe0_br_complete || pipe0_br_complete_hold_r;
+`else
+assign scoreboard_br_complete = pipe0_br_complete;
+`endif
 assign smt_stall   = {stall, stall};
 
 // ─── Thread Scheduler ──────────────────────────────────────────────────────
@@ -187,6 +269,29 @@ end
 // legacy path for FPGA bring-up builds.
 localparam USE_MEM_SUBSYS = `ENABLE_MEM_SUBSYS;
 wire use_mem_subsys = USE_MEM_SUBSYS;
+
+// Forward-declared interconnects that are consumed before their producer
+// instances appear later in the file.
+wire        m0_req_valid;
+wire        m0_req_ready;
+wire [31:0] m0_req_addr;
+wire        m0_resp_valid;
+wire [31:0] m0_resp_data;
+wire        m0_resp_last;
+wire        m0_resp_ready;
+wire [31:0] m0_bypass_addr;
+wire [31:0] m0_bypass_data;
+wire        rob_commit0_valid, rob_commit1_valid;
+wire [4:0]  rob_commit0_rd, rob_commit1_rd;
+wire [4:0]  rob_commit0_tag, rob_commit1_tag;
+wire        rob_commit0_has_result, rob_commit1_has_result;
+wire [31:0] rob_commit0_data, rob_commit1_data;
+wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
+wire        rob_commit0_is_store, rob_commit1_is_store;
+wire [1:0]  rob_instr_retired;
+wire [4:0]  sb_disp0_tag, sb_disp1_tag;
+wire        iss0_is_rocc;
+reg         retire_seen_r;
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 1: Instruction Fetch (stage_if with BPU)
@@ -261,7 +366,7 @@ wire [31:0] fb_pop0_pc,    fb_pop1_pc;
 wire [0:0]  fb_pop0_tid,   fb_pop1_tid;
 wire        fb_consume_0,  fb_consume_1;
 
-fetch_buffer #(.DEPTH(16)) u_fetch_buffer(
+fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
     .clk        (clk            ),
     .rstn       (rstn           ),
     .flush      (combined_flush ),
@@ -433,6 +538,28 @@ wire        iss1_br_addr_mode, iss1_regs_write;
 wire [2:0]  iss1_fu;
 wire [0:0]  iss1_tid;
 wire        sb_branch_pending_any;
+wire        sb_debug_br_found_t0;
+wire        sb_debug_branch_in_flight_t0;
+wire        sb_debug_oldest_br_ready_t0;
+wire        sb_debug_oldest_br_just_woke_t0;
+wire [3:0]  sb_debug_oldest_br_qj_t0;
+wire [3:0]  sb_debug_oldest_br_qk_t0;
+wire [3:0]  sb_debug_slot1_flags;
+wire [7:0]  sb_debug_slot1_pc_lo;
+wire [3:0]  sb_debug_slot1_qj;
+wire [3:0]  sb_debug_slot1_qk;
+wire [3:0]  sb_debug_tag2_flags;
+wire [3:0]  sb_debug_reg_x12_tag_t0;
+wire [3:0]  sb_debug_slot1_issue_flags;
+wire [3:0]  sb_debug_sel0_idx;
+wire [3:0]  sb_debug_slot1_fu;
+wire [7:0]  sb_debug_oldest_br_seq_lo_t0;
+wire [15:0] sb_debug_rs_flags_flat;
+wire [31:0] sb_debug_rs_pc_lo_flat;
+wire [15:0] sb_debug_rs_fu_flat;
+wire [15:0] sb_debug_rs_qj_flat;
+wire [15:0] sb_debug_rs_qk_flat;
+wire [31:0] sb_debug_rs_seq_lo_flat;
 
 // Issue metadata wires
 wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id;
@@ -449,7 +576,9 @@ wire [2:0]  wb0_fu,    wb1_fu;
 wire [0:0]  wb0_tid,   wb1_tid;
 
 scoreboard #(
-    .RS_DEPTH(16), .RS_IDX_W(4), .RS_TAG_W(5)
+    .RS_DEPTH(SCOREBOARD_RS_DEPTH_CFG),
+    .RS_IDX_W(SCOREBOARD_RS_IDX_W_CFG),
+    .RS_TAG_W(5)
 ) u_scoreboard (
     .clk         (clk              ),
     .rstn        (rstn             ),
@@ -572,6 +701,28 @@ scoreboard #(
     .iss1_fu           (iss1_fu           ),
     .iss1_tid          (iss1_tid          ),
     .branch_pending_any(sb_branch_pending_any),
+    .debug_br_found_t0 (sb_debug_br_found_t0),
+    .debug_branch_in_flight_t0(sb_debug_branch_in_flight_t0),
+    .debug_oldest_br_ready_t0(sb_debug_oldest_br_ready_t0),
+    .debug_oldest_br_just_woke_t0(sb_debug_oldest_br_just_woke_t0),
+    .debug_oldest_br_qj_t0(sb_debug_oldest_br_qj_t0),
+    .debug_oldest_br_qk_t0(sb_debug_oldest_br_qk_t0),
+    .debug_slot1_flags(sb_debug_slot1_flags),
+    .debug_slot1_pc_lo(sb_debug_slot1_pc_lo),
+    .debug_slot1_qj(sb_debug_slot1_qj),
+    .debug_slot1_qk(sb_debug_slot1_qk),
+    .debug_tag2_flags(sb_debug_tag2_flags),
+    .debug_reg_x12_tag_t0(sb_debug_reg_x12_tag_t0),
+    .debug_slot1_issue_flags(sb_debug_slot1_issue_flags),
+    .debug_sel0_idx(sb_debug_sel0_idx),
+    .debug_slot1_fu(sb_debug_slot1_fu),
+    .debug_oldest_br_seq_lo_t0(sb_debug_oldest_br_seq_lo_t0),
+    .debug_rs_flags_flat(sb_debug_rs_flags_flat),
+    .debug_rs_pc_lo_flat(sb_debug_rs_pc_lo_flat),
+    .debug_rs_fu_flat(sb_debug_rs_fu_flat),
+    .debug_rs_qj_flat(sb_debug_rs_qj_flat),
+    .debug_rs_qk_flat(sb_debug_rs_qk_flat),
+    .debug_rs_seq_lo_flat(sb_debug_rs_seq_lo_flat),
     .iss1_order_id     (iss1_order_id     ),
     .iss1_epoch        (iss1_epoch        ),
 
@@ -598,7 +749,7 @@ scoreboard #(
     .commit1_order_id(rob_commit1_order_id),
 
     // Branch completion
-    .br_complete     (pipe0_br_complete),
+    .br_complete     (scoreboard_br_complete),
 
     // RoCC backpressure
     .rocc_ready      (rocc_cmd_ready),
@@ -609,22 +760,11 @@ scoreboard #(
 // ROB Lite (Reorder Buffer for in-order commit)
 // ════════════════════════════════════════════════════════════════════════════
 
-// ROB wires
-wire        rob_commit0_valid, rob_commit1_valid;
-wire [4:0]  rob_commit0_rd, rob_commit1_rd;
-wire [4:0]  rob_commit0_tag, rob_commit1_tag;
-wire        rob_commit0_has_result, rob_commit1_has_result;
-wire [31:0] rob_commit0_data, rob_commit1_data;
-wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
-wire        rob_commit0_is_store, rob_commit1_is_store;
-wire [1:0]  rob_instr_retired;
-
 // Calculate is_store for dispatch
 wire disp0_is_store = (dec0_fu == `FU_STORE);
 wire disp1_is_store = (dec1_fu == `FU_STORE);
 
 // Dispatch tag wires from scoreboard
-wire [4:0] sb_disp0_tag, sb_disp1_tag;
 
 // Per-tag SYSTEM metadata (decoder → scoreboard issue sideband)
 reg        rs_is_csr  [0:31];
@@ -842,7 +982,7 @@ wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                             iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
 
 // Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
-wire        iss0_is_rocc     = iss0_tag_hits_disp0 ? dec0_is_rocc :
+assign iss0_is_rocc          = iss0_tag_hits_disp0 ? dec0_is_rocc :
                                iss0_tag_hits_disp1 ? dec1_is_rocc : rs_is_rocc[iss0_tag];
 wire [6:0]  iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
                                iss0_tag_hits_disp1 ? dec1_rocc_funct7 : rs_rocc_funct7[iss0_tag];
@@ -1189,6 +1329,14 @@ wire [31:0] sb_mem_write_data;
 wire [3:0]  sb_mem_write_wen;
 wire        sb_mem_write_ready;
 wire [7:0]  legacy_tube_status;
+wire        legacy_uart_tx;
+wire        legacy_debug_uart_status_busy;
+wire        legacy_debug_uart_busy;
+wire        legacy_debug_uart_pending_valid;
+wire [7:0]  legacy_debug_uart_status_load_count;
+wire [7:0]  legacy_debug_uart_tx_store_count;
+wire        legacy_debug_uart_tx_byte_valid;
+wire [7:0]  legacy_debug_uart_tx_byte;
 
 // ROB-driven commit signals for store buffer
 // Stores are committed in-order when they reach ROB head and complete
@@ -1283,6 +1431,14 @@ if (USE_MEM_SUBSYS) begin : gen_disable_legacy_mem
     assign lsu_mem_rdata      = 32'd0;
     assign sb_mem_write_ready = 1'b0;
     assign legacy_tube_status = 8'd0;
+    assign legacy_uart_tx     = 1'b1;
+    assign legacy_debug_uart_status_busy = 1'b0;
+    assign legacy_debug_uart_busy = 1'b0;
+    assign legacy_debug_uart_pending_valid = 1'b0;
+    assign legacy_debug_uart_status_load_count = 8'd0;
+    assign legacy_debug_uart_tx_store_count = 8'd0;
+    assign legacy_debug_uart_tx_byte_valid = 1'b0;
+    assign legacy_debug_uart_tx_byte = 8'd0;
 end else begin : gen_legacy_mem
     legacy_mem_subsys #(
         .RAM_WORDS(4096)
@@ -1297,7 +1453,15 @@ end else begin : gen_legacy_mem
         .sb_write_data  (sb_mem_write_data ),
         .sb_write_wen   (sb_mem_write_wen  ),
         .sb_write_ready (sb_mem_write_ready),
-        .tube_status    (legacy_tube_status)
+        .tube_status    (legacy_tube_status),
+        .uart_tx        (legacy_uart_tx    ),
+        .debug_uart_status_busy(legacy_debug_uart_status_busy),
+        .debug_uart_busy(legacy_debug_uart_busy),
+        .debug_uart_pending_valid(legacy_debug_uart_pending_valid),
+        .debug_uart_status_load_count(legacy_debug_uart_status_load_count),
+        .debug_uart_tx_store_count(legacy_debug_uart_tx_store_count),
+        .debug_uart_tx_byte_valid(legacy_debug_uart_tx_byte_valid),
+        .debug_uart_tx_byte(legacy_debug_uart_tx_byte)
     );
 end
 endgenerate
@@ -1363,6 +1527,10 @@ assign wb1_tid        = wb1_from_mul ? p1_mul_tid  :
 // 32-entry buffer (one per tag), stores result data for instructions in flight
 reg [31:0] result_buffer [0:31];
 reg        result_valid  [0:31];
+reg [7:0]  debug_last_iss0_pc_lo_r;
+reg [7:0]  debug_last_iss1_pc_lo_r;
+reg [7:0]  debug_branch_issue_count_r;
+reg [7:0]  debug_branch_complete_count_r;
 
 // WB data sources for result buffer
 wire [31:0] wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
@@ -1378,7 +1546,27 @@ always @(posedge clk or negedge rstn) begin
             result_buffer[i] <= 32'd0;
             result_valid[i]  <= 1'b0;
         end
+        debug_last_iss0_pc_lo_r <= 8'd0;
+        debug_last_iss1_pc_lo_r <= 8'd0;
+        debug_branch_issue_count_r <= 8'd0;
+        debug_branch_complete_count_r <= 8'd0;
     end else begin
+        if (iss0_valid)
+            debug_last_iss0_pc_lo_r <= iss0_pc[7:0];
+        if (iss1_valid)
+            debug_last_iss1_pc_lo_r <= iss1_pc[7:0];
+        if (iss0_valid && iss0_br)
+            debug_branch_issue_count_r <= debug_branch_issue_count_r + 8'd1;
+        if (pipe0_br_complete)
+            debug_branch_complete_count_r <= debug_branch_complete_count_r + 8'd1;
+
+        // Tags are recycled with RS entry reuse, so clear any stale buffered
+        // result as soon as a fresh instruction claims the tag.
+        if (disp0_accepted && (sb_disp0_tag != 5'd0))
+            result_valid[sb_disp0_tag] <= 1'b0;
+        if (disp1_accepted && (sb_disp1_tag != 5'd0))
+            result_valid[sb_disp1_tag] <= 1'b0;
+
         // Write WB0 result (highest priority if same tag)
         if (wb0_valid && wb0_regs_write) begin
             result_buffer[wb0_tag] <= wb0_result_data;
@@ -1390,6 +1578,11 @@ always @(posedge clk or negedge rstn) begin
             result_buffer[wb1_tag] <= wb1_result_data;
             result_valid[wb1_tag]  <= 1'b1;
         end
+
+        if (rob_commit0_valid && rob_commit0_has_result && (rob_commit0_tag != 5'd0))
+            result_valid[rob_commit0_tag] <= 1'b0;
+        if (rob_commit1_valid && rob_commit1_has_result && (rob_commit1_tag != 5'd0))
+            result_valid[rob_commit1_tag] <= 1'b0;
     end
 end
 
@@ -1518,17 +1711,6 @@ endgenerate
 // Task 4: Memory Subsystem Integration
 // ════════════════════════════════════════════════════════════════════════════
 
-// M0 (I-side) interface signals
-wire        m0_req_valid;
-wire        m0_req_ready;
-wire [31:0] m0_req_addr;
-wire        m0_resp_valid;
-wire [31:0] m0_resp_data;
-wire        m0_resp_last;
-wire        m0_resp_ready;
-wire [31:0] m0_bypass_addr;
-wire [31:0] m0_bypass_data;
-
 // M1 (D-side) interface signals
 wire        m1_req_valid;
 wire        m1_req_ready;
@@ -1632,5 +1814,50 @@ endgenerate
 assign ext_timer_irq    = use_mem_subsys ? mem_subsys_ext_timer_irq : 1'b0;
 assign ext_external_irq = use_mem_subsys ? mem_subsys_ext_external_irq : 1'b0;
 assign tube_status      = use_mem_subsys ? mem_subsys_tube_status : legacy_tube_status;
+assign uart_tx          = use_mem_subsys ? 1'b1 : legacy_uart_tx;
+assign debug_core_ready = rstn;
+assign debug_core_clk = clk;
+assign debug_retire_seen = retire_seen_r;
+assign debug_uart_status_busy = use_mem_subsys ? 1'b0 : legacy_debug_uart_status_busy;
+assign debug_uart_busy = use_mem_subsys ? 1'b0 : legacy_debug_uart_busy;
+assign debug_uart_pending_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_pending_valid;
+assign debug_uart_status_load_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_status_load_count;
+assign debug_uart_tx_store_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_store_count;
+assign debug_uart_tx_byte_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_tx_byte_valid;
+assign debug_uart_tx_byte = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_byte;
+assign debug_last_iss0_pc_lo = debug_last_iss0_pc_lo_r;
+assign debug_last_iss1_pc_lo = debug_last_iss1_pc_lo_r;
+assign debug_branch_pending_any = sb_branch_pending_any;
+assign debug_br_found_t0 = sb_debug_br_found_t0;
+assign debug_branch_in_flight_t0 = sb_debug_branch_in_flight_t0;
+assign debug_oldest_br_ready_t0 = sb_debug_oldest_br_ready_t0;
+assign debug_oldest_br_just_woke_t0 = sb_debug_oldest_br_just_woke_t0;
+assign debug_oldest_br_qj_t0 = sb_debug_oldest_br_qj_t0;
+assign debug_oldest_br_qk_t0 = sb_debug_oldest_br_qk_t0;
+assign debug_slot1_flags = sb_debug_slot1_flags;
+assign debug_slot1_pc_lo = sb_debug_slot1_pc_lo;
+assign debug_slot1_qj = sb_debug_slot1_qj;
+assign debug_slot1_qk = sb_debug_slot1_qk;
+assign debug_tag2_flags = sb_debug_tag2_flags;
+assign debug_reg_x12_tag_t0 = sb_debug_reg_x12_tag_t0;
+assign debug_slot1_issue_flags = sb_debug_slot1_issue_flags;
+assign debug_sel0_idx = sb_debug_sel0_idx;
+assign debug_slot1_fu = sb_debug_slot1_fu;
+assign debug_oldest_br_seq_lo_t0 = sb_debug_oldest_br_seq_lo_t0;
+assign debug_rs_flags_flat = sb_debug_rs_flags_flat;
+assign debug_rs_pc_lo_flat = sb_debug_rs_pc_lo_flat;
+assign debug_rs_fu_flat = sb_debug_rs_fu_flat;
+assign debug_rs_qj_flat = sb_debug_rs_qj_flat;
+assign debug_rs_qk_flat = sb_debug_rs_qk_flat;
+assign debug_rs_seq_lo_flat = sb_debug_rs_seq_lo_flat;
+assign debug_branch_issue_count = debug_branch_issue_count_r;
+assign debug_branch_complete_count = debug_branch_complete_count_r;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        retire_seen_r <= 1'b0;
+    else if (|rob_instr_retired)
+        retire_seen_r <= 1'b1;
+end
 
 endmodule

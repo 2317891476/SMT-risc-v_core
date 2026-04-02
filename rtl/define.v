@@ -168,6 +168,8 @@
 
 // TUBE MMIO (test completion marker)
 `define TUBE_ADDR           32'h1300_0000
+`define UART_TXDATA_ADDR    32'h1300_0010
+`define UART_STATUS_ADDR    32'h1300_0014
 
 // CLINT (Core Local Interruptor) - Machine Timer
 `define CLINT_BASE          32'h0200_0000

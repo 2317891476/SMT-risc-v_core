@@ -1,5 +1,6 @@
 open_hw_manager
-connect_hw_server
+set_param labtools.enable_cs_server false
+connect_hw_server -url TCP:localhost:3121
 
 set targets [get_hw_targets *]
 puts "HW targets: $targets"

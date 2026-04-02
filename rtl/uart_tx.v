@@ -18,91 +18,49 @@ module uart_tx #(
     output reg         busy         // High when transmitting
 );
 
-    // Baud rate calculation: clk_freq / baud_rate
-    // For 50MHz / 115200 = 434
-    // For 200MHz / 115200 = 1736
-    localparam CLK_DIV_BITS = $clog2(CLK_DIV + 1);  // Auto-calculate bits needed
+    // Keep the transmitter as a simple 10-bit shifter:
+    // {stop_bit, data[7:0], start_bit}. A one-cycle tx_start pulse
+    // while idle launches exactly one byte.
+    localparam integer FRAME_BITS   = 10;
+    localparam integer CLK_DIV_BITS = (CLK_DIV <= 1) ? 1 : $clog2(CLK_DIV);
 
-    // State machine states
-    localparam [2:0] STATE_IDLE  = 3'b000;
-    localparam [2:0] STATE_START = 3'b001;
-    localparam [2:0] STATE_DATA  = 3'b010;
-    localparam [2:0] STATE_STOP  = 3'b011;
-    localparam [2:0] STATE_DONE  = 3'b100;
+    reg [CLK_DIV_BITS-1:0] baud_cnt;
+    reg [3:0]              bits_left;
+    reg [FRAME_BITS-1:0]   shifter;
 
-    // State registers
-    reg [2:0] state;
-    reg [CLK_DIV_BITS-1:0] bit_cnt;    // Clock divider counter
-    reg [3:0] bit_idx;                  // Current bit index (0-7)
-    reg [7:0] tx_shift;                 // Shift register for data
-
-    // Sequential logic
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
-            state    <= STATE_IDLE;
-            tx       <= 1'b1;  // Idle state is high
-            busy     <= 1'b0;
-            bit_cnt  <= 0;
-            bit_idx  <= 0;
-            tx_shift <= 8'h00;
+            tx        <= 1'b1;
+            busy      <= 1'b0;
+            baud_cnt  <= {CLK_DIV_BITS{1'b0}};
+            bits_left <= 4'd0;
+            shifter   <= {FRAME_BITS{1'b1}};
         end else begin
-            case (state)
-                STATE_IDLE: begin
-                    tx <= 1'b1;  // Keep line idle
-                    if (tx_start && !busy) begin
-                        tx_shift <= tx_data;
-                        state    <= STATE_START;
-                        busy     <= 1'b1;
-                        bit_cnt  <= 0;
-                    end
+            if (!busy) begin
+                tx <= 1'b1;
+                if (tx_start) begin
+                    // Frame is sent LSB-first on shifter[0].
+                    shifter   <= {1'b1, tx_data, 1'b0};
+                    bits_left <= FRAME_BITS[3:0];
+                    baud_cnt  <= {CLK_DIV_BITS{1'b0}};
+                    busy      <= 1'b1;
+                    tx        <= 1'b0;
                 end
-
-                STATE_START: begin
-                    tx <= 1'b0;  // Start bit (low)
-                    if (bit_cnt == CLK_DIV - 1) begin
-                        bit_cnt <= 0;
-                        bit_idx <= 0;
-                        state   <= STATE_DATA;
-                    end else begin
-                        bit_cnt <= bit_cnt + 1;
-                    end
+            end else if (baud_cnt == CLK_DIV - 1) begin
+                baud_cnt <= {CLK_DIV_BITS{1'b0}};
+                if (bits_left == 4'd1) begin
+                    bits_left <= 4'd0;
+                    busy      <= 1'b0;
+                    shifter   <= {FRAME_BITS{1'b1}};
+                    tx        <= 1'b1;
+                end else begin
+                    shifter   <= {1'b1, shifter[FRAME_BITS-1:1]};
+                    bits_left <= bits_left - 4'd1;
+                    tx        <= shifter[1];
                 end
-
-                STATE_DATA: begin
-                    tx <= tx_shift[bit_idx];  // LSB first
-                    if (bit_cnt == CLK_DIV - 1) begin
-                        bit_cnt <= 0;
-                        if (bit_idx == 7) begin
-                            state <= STATE_STOP;
-                        end else begin
-                            bit_idx <= bit_idx + 1;
-                        end
-                    end else begin
-                        bit_cnt <= bit_cnt + 1;
-                    end
-                end
-
-                STATE_STOP: begin
-                    tx <= 1'b1;  // Stop bit (high)
-                    if (bit_cnt == CLK_DIV - 1) begin
-                        bit_cnt <= 0;
-                        state   <= STATE_DONE;
-                    end else begin
-                        bit_cnt <= bit_cnt + 1;
-                    end
-                end
-
-                STATE_DONE: begin
-                    busy <= 1'b0;
-                    if (!tx_start) begin
-                        state <= STATE_IDLE;
-                    end
-                end
-
-                default: begin
-                    state <= STATE_IDLE;
-                end
-            endcase
+            end else begin
+                baud_cnt <= baud_cnt + {{(CLK_DIV_BITS-1){1'b0}}, 1'b1};
+            end
         end
     end
 
