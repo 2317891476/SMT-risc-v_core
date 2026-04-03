@@ -69,6 +69,16 @@ PROFILES = {
         "rom": None,
         "expect_token": "[AX7203_IO_SMOKE] PASS",
     },
+    "uart_echo": {
+        "top": "adam_riscv_ax7203_top",
+        "tb": "tb_ax7203_uart_echo_smoke",
+        "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_smoke.sv",
+        "rom": REPO_ROOT / "rom" / "test_fpga_uart_echo.s",
+        "expect_token": "[AX7203_UART_ECHO] PASS",
+        "uart_send_text": "Z",
+        "uart_expect_text": "Z",
+        "uart_send_delay_ms": 800,
+    },
 }
 
 
@@ -239,23 +249,39 @@ def parse_build_id(path: Path) -> str:
     raise SystemExit(f"Failed to parse BUILD_ID from {path}")
 
 
-def capture_uart(port: str, out_file: Path, seconds: int, logs_dir: Path) -> Path:
+def capture_uart(
+    port: str,
+    out_file: Path,
+    seconds: int,
+    logs_dir: Path,
+    *,
+    send_text: str = "",
+    send_hex: str = "",
+    send_delay_ms: int = 0,
+) -> Path:
     powershell = which_required("powershell")
     log_path = logs_dir / "07_capture_uart.log"
+    cmd = [
+        powershell,
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(REPO_ROOT / "fpga" / "scripts" / "capture_uart_once.ps1"),
+        "-Port",
+        port,
+        "-OutFile",
+        str(out_file),
+        "-Seconds",
+        str(seconds),
+    ]
+    if send_text:
+        cmd.extend(["-SendText", send_text])
+    if send_hex:
+        cmd.extend(["-SendHex", send_hex])
+    if send_delay_ms:
+        cmd.extend(["-SendDelayMs", str(send_delay_ms)])
     run_logged(
-        [
-            powershell,
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(BUILD_DIR / "capture_uart_once.ps1"),
-            "-Port",
-            port,
-            "-OutFile",
-            str(out_file),
-            "-Seconds",
-            str(seconds),
-        ],
+        cmd,
         cwd=REPO_ROOT,
         log_path=log_path,
         timeout=max(60, seconds + 30),
@@ -270,6 +296,9 @@ def main() -> int:
     parser.add_argument("--capture-seconds", type=int, default=8)
     parser.add_argument("--rom", type=Path, default=None)
     parser.add_argument("--allow-empty-serial", action="store_true")
+    parser.add_argument("--send-text", default="")
+    parser.add_argument("--send-hex", default="")
+    parser.add_argument("--expect-text", default="")
     args = parser.parse_args()
 
     profile = dict(PROFILES[args.profile])
@@ -303,9 +332,18 @@ def main() -> int:
 
     build_id = parse_build_id(build_id_file)
     program_log = run_vivado("program_ax7203_jtag.tcl", env=env, logs_dir=logs_dir, step_name="07_program_jtag", timeout=600)
-    capture_log = capture_uart(args.port, uart_capture, args.capture_seconds, logs_dir)
+    capture_log = capture_uart(
+        args.port,
+        uart_capture,
+        args.capture_seconds,
+        logs_dir,
+        send_text=args.send_text or str(profile.get("uart_send_text", "")),
+        send_hex=args.send_hex,
+        send_delay_ms=int(profile.get("uart_send_delay_ms", 0)),
+    )
 
     uart_text = read_text(uart_capture) if uart_capture.exists() else ""
+    expect_text = args.expect_text or str(profile.get("uart_expect_text", ""))
     summary_path = logs_dir / "summary.txt"
     summary_path.write_text(
         "\n".join(
@@ -318,6 +356,7 @@ def main() -> int:
                 f"CaptureLog: {capture_log}",
                 f"UartCapture: {uart_capture}",
                 f"UartBytes: {len(uart_text.encode('utf-8'))}",
+                f"ExpectText: {expect_text}",
             ]
         )
         + "\n",
@@ -326,6 +365,8 @@ def main() -> int:
 
     if not uart_text and not args.allow_empty_serial:
         raise SystemExit(f"UART capture is empty. See summary: {summary_path}")
+    if expect_text and expect_text not in uart_text:
+        raise SystemExit(f"UART capture missing expected text {expect_text!r}. See summary: {summary_path}")
 
     print(summary_path)
     return 0

@@ -16,6 +16,7 @@ module tb_fpga_board_smoke;
     adam_riscv dut (
         .sys_clk          (sys_clk),
         .sys_rstn         (sys_rstn),
+        .uart_rx          (1'b1),
         .ext_irq_src      (ext_irq_src),
         .led              (led),
         .tube_status      (tube_status),

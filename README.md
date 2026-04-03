@@ -701,6 +701,7 @@ fpga/
 ├─ scripts/
 │  ├─ generate_coe.py               # COE 文件生成脚本
 │  ├─ build_rom_image.py            # 板级 profile ROM 镜像构建
+│  ├─ capture_uart_once.ps1         # 单次串口收发/抓取脚本
 │  └─ run_board_feedback.py         # 默认端到端板测入口
 ├─ flow_common.tcl                  # ★ Vivado 批处理公共辅助
 ├─ prepare_ax7203_synth.tcl         # ★ 综合前准备脚本
@@ -764,7 +765,7 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 - `adam_riscv` 主核：双发射前后端、`scoreboard`、`rob_lite`、两套寄存器堆、`decoder_dual`、`fetch_buffer`、`exec_pipe0/1`、`mul_unit`、`csr_unit`
 - 访存路径：`lsu_shell + store_buffer`
 - 取指路径：`stage_if + bimodal BPU + inst_memory + inst_backing_store`
-- 轻量数据后端：`legacy_mem_subsys`，包含 BRAM-first 数据路径和 MMIO UART
+- 轻量数据后端：`legacy_mem_subsys`，包含 BRAM-first 数据路径和完整 MMIO UART（TX/RX/STATUS/CTRL）
 - 板级逻辑：`clk_wiz_0`、`syn_rst`、`u_board_uart_tx`、`uart_rx_monitor`、LED/诊断 glue
 - 默认板测 top：`adam_riscv_ax7203_top`
 - 板级诊断 top：`adam_riscv_ax7203_status_top`、`adam_riscv_ax7203_issue_probe_top`、`adam_riscv_ax7203_branch_probe_top`、`adam_riscv_ax7203_main_bridge_probe_top`
@@ -824,12 +825,23 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 | `issue_probe` | `adam_riscv_ax7203_issue_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 排查 issue / wakeup 相关卡死 |
 | `branch_probe` | `adam_riscv_ax7203_branch_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 排查 branch pending / complete 链路 |
 | `io_smoke` | `adam_riscv_ax7203_io_smoke_top` | 无 | 纯板级 IO / 串口通路 smoke |
+| `uart_echo` | `adam_riscv_ax7203_top` | `rom/test_fpga_uart_echo.s` | MMIO UART 回环验证，PC 发 1 字节，CPU 读回后再回传 |
+
+**当前 FPGA profile 下的 MMIO UART 寄存器**
+
+| 地址 | 名称 | 访问 | 说明 |
+|------|------|------|------|
+| `0x1300_0010` | `UART_TXDATA_ADDR` | `W` | 发送 1 字节；当前轻量实现为“正在发送 + 1 字节 pending” |
+| `0x1300_0014` | `UART_STATUS_ADDR` | `R` | `bit0=TX busy`, `bit1=TX ready`, `bit2=RX valid`, `bit3=RX overrun`, `bit4=RX frame error`, `bit5=RX enable`, `bit6=TX enable` |
+| `0x1300_0018` | `UART_RXDATA_ADDR` | `R` | 读取最近收到的 1 字节，同时弹出 `RX valid` |
+| `0x1300_001C` | `UART_CTRL_ADDR` | `R/W` | `bit0=TX enable`, `bit1=RX enable`, `bit2=clear RX overrun`, `bit3=clear RX frame error`, `bit4=flush RX byte` |
 
 **最近一次板测结果**
 
 - `core_diag`：`BuildID=0x69CE6358`，`UartBytes=150`，抓包内容为重复的 `UART DIAG PASS`
 - `main_bridge_probe`：`BuildID=0x69CE5B50`，`UartBytes=1296`，抓包内容为重复的 `M111:A2:A2:A2:3`
 - `main_bridge_probe` 用来证明“CPU -> core_uart -> 板侧 bridge -> PC 串口”这条链在真板上确实打通
+- `uart_echo` profile 已接入 `run_board_feedback.py`，可配合 `--profile uart_echo --send-text Z --expect-text Z` 做 RX/TX 回环板测
 - 默认 `core_diag` 之所以使用 `test_fpga_uart_board_diag_gap.s`，是为了在板级串口抓取上保留明显行间空闲，避免过于紧凑的连续流影响可观测性
 
 ### 13.7 CoreMark 性能测试

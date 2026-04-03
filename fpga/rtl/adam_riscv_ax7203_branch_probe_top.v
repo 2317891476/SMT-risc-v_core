@@ -73,6 +73,7 @@ reg [7:0]  bridge_pending_byte;
 adam_riscv u_adam_riscv (
     .sys_clk(sys_clk_200m),
     .sys_rstn(core_rst_n),
+    .uart_rx(uart_rx),
     .ext_irq_src(1'b0),
     .led(core_led),
     .tube_status(tube_status),

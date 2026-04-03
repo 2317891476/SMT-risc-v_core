@@ -52,6 +52,7 @@ integer j;
 adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
     .sys_rstn (rst ),
+    .uart_rx  (1'b1),
     .uart_tx  (core_uart_tx)
 );
 

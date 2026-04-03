@@ -25,6 +25,7 @@ module adam_riscv(
     output wire[2:0] led,
 `endif
     input wire sys_rstn,
+    input wire uart_rx,
     input wire ext_irq_src,
     output wire [7:0] tube_status, // Task 4: Export for testbench observation
     output wire       uart_tx,
@@ -1445,6 +1446,7 @@ end else begin : gen_legacy_mem
     ) u_legacy_mem_subsys (
         .clk            (clk               ),
         .rstn           (rstn              ),
+        .uart_rx        (uart_rx           ),
         .load_addr      (lsu_mem_addr      ),
         .load_read      (lsu_mem_read      ),
         .load_rdata     (lsu_mem_rdata     ),
@@ -1825,6 +1827,8 @@ assign debug_uart_status_load_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_
 assign debug_uart_tx_store_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_store_count;
 assign debug_uart_tx_byte_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_tx_byte_valid;
 assign debug_uart_tx_byte = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_byte;
+
+wire _unused_uart_rx = use_mem_subsys ? uart_rx : 1'b0;
 assign debug_last_iss0_pc_lo = debug_last_iss0_pc_lo_r;
 assign debug_last_iss1_pc_lo = debug_last_iss1_pc_lo_r;
 assign debug_branch_pending_any = sb_branch_pending_any;

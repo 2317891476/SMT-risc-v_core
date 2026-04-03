@@ -109,6 +109,7 @@ reg [7:0]  board_pending_byte;
 adam_riscv u_adam_riscv (
     .sys_clk   (sys_clk_200m),  // 200MHz from IBUFGDS (core has clk_wiz_0 inside)
     .sys_rstn  (core_rst_n  ),  // POR-gated active-low reset into the core
+    .uart_rx   (uart_rx     ),
     .ext_irq_src (1'b0      ),  // External interrupt - tied low for now
     .led       (core_led    ),  // FPGA_MODE exposes this port
     .tube_status (tube_status),
@@ -152,7 +153,7 @@ uart_rx_monitor #(
 // a fragile serial-to-serial bridge on the physical board path.
 assign uart_tx = board_uart_tx;
 
-// UART RX is not consumed yet; keep the pin exposed for future RX/MMIO support.
+// UART RX now feeds the core MMIO UART receiver directly.
 
 // =============================================================================
 // Debug LED Output
