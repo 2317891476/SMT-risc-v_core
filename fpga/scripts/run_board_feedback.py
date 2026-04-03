@@ -124,7 +124,34 @@ def collect_verilog(root: Path) -> list[str]:
     return [str(path) for path in sorted(root.glob("*.v"))]
 
 
-def run_top_sim(profile: dict[str, object], logs_dir: Path) -> Path:
+def derive_idx_width(depth: int) -> int:
+    if depth <= 1:
+        return 1
+    return (depth - 1).bit_length()
+
+
+def derive_clk_wiz_half_div(core_clk_mhz: float) -> int:
+    if core_clk_mhz <= 0.0:
+        raise SystemExit(f"Core clock must be positive, got {core_clk_mhz}")
+    return max(1, round(100.0 / core_clk_mhz))
+
+
+def derive_uart_clk_div(core_clk_mhz: float, baud: int = 115200) -> int:
+    if core_clk_mhz <= 0.0:
+        raise SystemExit(f"Core clock must be positive, got {core_clk_mhz}")
+    if baud <= 0:
+        raise SystemExit(f"UART baud must be positive, got {baud}")
+    return max(1, round((core_clk_mhz * 1_000_000.0) / float(baud)))
+
+
+def run_top_sim(
+    profile: dict[str, object],
+    logs_dir: Path,
+    *,
+    rs_depth: int,
+    fetch_buffer_depth: int,
+    core_clk_mhz: float,
+) -> Path:
     python_bin = sys.executable
     sim_cwd = REPO_ROOT
     if profile["rom"] is not None:
@@ -153,6 +180,11 @@ def run_top_sim(profile: dict[str, object], logs_dir: Path) -> Path:
         "-DENABLE_MEM_SUBSYS=0",
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=0",
+        f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
+        f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
+        f"-DFPGA_FETCH_BUFFER_DEPTH={fetch_buffer_depth}",
+        f"-DFPGA_CLK_WIZ_HALF_DIV={derive_clk_wiz_half_div(core_clk_mhz)}",
+        f"-DFPGA_UART_CLK_DIV={derive_uart_clk_div(core_clk_mhz)}",
         "-s",
         str(profile["tb"]),
         "-o",
@@ -299,27 +331,47 @@ def main() -> int:
     parser.add_argument("--send-text", default="")
     parser.add_argument("--send-hex", default="")
     parser.add_argument("--expect-text", default="")
+    parser.add_argument("--rs-depth", type=int, default=16)
+    parser.add_argument("--fetch-buffer-depth", type=int, default=16)
+    parser.add_argument("--core-clk-mhz", type=float, default=10.0)
     args = parser.parse_args()
+    rs_idx_w = derive_idx_width(args.rs_depth)
 
     profile = dict(PROFILES[args.profile])
     if args.rom is not None:
         profile["rom"] = args.rom.resolve()
     logs_dir = BUILD_DIR / f"board_feedback_{args.profile}"
     logs_dir.mkdir(parents=True, exist_ok=True)
+    summary_path = logs_dir / "summary.txt"
+    if summary_path.exists():
+        summary_path.unlink()
 
-    sim_log = run_top_sim(profile, logs_dir)
+    sim_log = run_top_sim(
+        profile,
+        logs_dir,
+        rs_depth=args.rs_depth,
+        fetch_buffer_depth=args.fetch_buffer_depth,
+        core_clk_mhz=args.core_clk_mhz,
+    )
 
     env = os.environ.copy()
     env["AX7203_ENABLE_MEM_SUBSYS"] = "0"
     env["AX7203_ENABLE_ROCC"] = "0"
     env["AX7203_SMT_MODE"] = "0"
+    env["AX7203_RS_DEPTH"] = str(args.rs_depth)
+    env["AX7203_RS_IDX_W"] = str(rs_idx_w)
+    env["AX7203_FETCH_BUFFER_DEPTH"] = str(args.fetch_buffer_depth)
+    env["AX7203_CORE_CLK_MHZ"] = f"{args.core_clk_mhz:.3f}"
+    env["AX7203_UART_CLK_DIV"] = str(derive_uart_clk_div(args.core_clk_mhz))
+    env.setdefault("AX7203_MAX_THREADS", "1")
+    env.setdefault("AX7203_SYNTH_JOBS", "1")
     env["AX7203_TOP_MODULE"] = str(profile["top"])
     if profile["rom"] is not None:
         env["AX7203_ROM_ASM"] = str(profile["rom"])
 
     run_vivado("create_project_ax7203.tcl", env=env, logs_dir=logs_dir, step_name="04_create_project", timeout=600)
     run_direct_synth(env=env, logs_dir=logs_dir, top_module=str(profile["top"]), timeout=1200)
-    run_vivado("build_ax7203_bitstream.tcl", env=env, logs_dir=logs_dir, step_name="06_build_bitstream", timeout=3600)
+    run_vivado("build_ax7203_bitstream.tcl", env=env, logs_dir=logs_dir, step_name="06_build_bitstream", timeout=7200)
 
     project_dir = REPO_ROOT / "build" / "ax7203"
     top_module = str(profile["top"])
@@ -329,6 +381,8 @@ def main() -> int:
     else:
         build_id_file = project_dir / f"adam_riscv_ax7203_{top_module}_bitstream_id.txt"
         uart_capture = BUILD_DIR / f"ax7203_{args.profile}_uart_capture.txt"
+    if uart_capture.exists():
+        uart_capture.unlink()
 
     build_id = parse_build_id(build_id_file)
     program_log = run_vivado("program_ax7203_jtag.tcl", env=env, logs_dir=logs_dir, step_name="07_program_jtag", timeout=600)
@@ -344,12 +398,18 @@ def main() -> int:
 
     uart_text = read_text(uart_capture) if uart_capture.exists() else ""
     expect_text = args.expect_text or str(profile.get("uart_expect_text", ""))
-    summary_path = logs_dir / "summary.txt"
     summary_path.write_text(
         "\n".join(
             [
                 f"Profile: {args.profile}",
                 f"TopModule: {top_module}",
+                f"RSDepth: {args.rs_depth}",
+                f"RSIdxW: {rs_idx_w}",
+                f"FetchBufferDepth: {args.fetch_buffer_depth}",
+                f"CoreClkMHz: {args.core_clk_mhz:.3f}",
+                f"UartClkDiv: {derive_uart_clk_div(args.core_clk_mhz)}",
+                f"MaxThreads: {env['AX7203_MAX_THREADS']}",
+                f"SynthJobs: {env['AX7203_SYNTH_JOBS']}",
                 f"BuildID: {build_id}",
                 f"SimulationLog: {sim_log}",
                 f"ProgramLog: {program_log}",

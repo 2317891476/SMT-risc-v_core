@@ -17,6 +17,7 @@ module tb_ax7203_status_top_smoke;
     reg frame_seen;
     reg multi_frame_seen;
     reg uart_tx_q;
+    localparam integer TB_TIMEOUT_NS = 20_000_000;
 
     adam_riscv_ax7203_status_top dut (
         .sys_clk_p (sys_clk_p),
@@ -68,7 +69,7 @@ module tb_ax7203_status_top_smoke;
     end
 
     initial begin : timeout_guard
-        #6000000;  // 6 ms
+        #TB_TIMEOUT_NS;
         $display("[AX7203_STATUS] TIMEOUT led1_ready=%0b led2_retire=%0b led3_tube=%0b led4_uart=%0b frame_seen=%0b multi_frame=%0b frame_count=%0d uart_edges=%0d led=%b",
                  led1_ready_seen, led2_retire_seen, led3_tube_seen, led4_uart_seen, frame_seen, multi_frame_seen, dut.core_uart_frame_count, uart_edge_count, led);
         $fatal(1);

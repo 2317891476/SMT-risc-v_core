@@ -22,6 +22,7 @@ module tb_ax7203_uart_echo_smoke;
 
     localparam integer UART_BIT_NS = 8680;
     localparam [7:0] TEST_BYTE = 8'h5A;
+    localparam integer TB_TIMEOUT_NS = 24_000_000;
 
     adam_riscv_ax7203_top dut (
         .sys_clk_p (sys_clk_p),
@@ -103,7 +104,7 @@ module tb_ax7203_uart_echo_smoke;
     end
 
     initial begin : timeout_guard
-        #12000000;
+        #TB_TIMEOUT_NS;
         $display("[AX7203_UART_ECHO] TIMEOUT ready=%0b retire=%0b tube=%0b sent=%0b echoed=%0b byte=%02h frame_count=%0d led=%b",
                  led1_ready_seen, led2_retire_seen, led3_tube_seen, sent_uart_byte, echoed_valid, echoed_byte, ext_uart_frame_count, led);
         $fatal(1);

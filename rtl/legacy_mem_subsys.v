@@ -30,7 +30,10 @@ module legacy_mem_subsys #(
 
 localparam RAM_ADDR_W = $clog2(RAM_WORDS);
 `ifdef FPGA_MODE
-localparam integer UART_CLK_DIV = 174;
+    `ifndef FPGA_UART_CLK_DIV
+        `define FPGA_UART_CLK_DIV 174
+    `endif
+localparam integer UART_CLK_DIV = `FPGA_UART_CLK_DIV;
 `else
 // Keep simulation fast while preserving board behavior in FPGA builds.
 localparam integer UART_CLK_DIV = 4;

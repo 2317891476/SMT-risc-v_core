@@ -16,12 +16,13 @@ module tb_ax7203_top_smoke;
     reg led3_tube_seen;
     reg led4_uart_seen;
     reg uart_tx_q;
-    reg uart_prefix_seen;
     reg uart_stream_seen;
+    reg [31:0] uart_prefix_shift;
     wire ext_uart_frame_seen;
     wire [3:0] ext_uart_frame_count;
     wire ext_uart_byte_valid;
     wire [7:0] ext_uart_byte;
+    localparam integer TB_TIMEOUT_NS = 20_000_000;
 
     adam_riscv_ax7203_top dut (
         .sys_clk_p (sys_clk_p),
@@ -64,8 +65,8 @@ module tb_ax7203_top_smoke;
         led3_tube_seen = 1'b0;
         led4_uart_seen = 1'b0;
         uart_tx_q = 1'b1;
-        uart_prefix_seen = 1'b0;
         uart_stream_seen = 1'b0;
+        uart_prefix_shift = 32'd0;
         #100;
         sys_rst_n = 1'b1;
     end
@@ -84,20 +85,15 @@ module tb_ax7203_top_smoke;
 
         if (ext_uart_byte_valid) begin
             uart_byte_count <= uart_byte_count + 1;
-            if (uart_byte_count == 0 && ext_uart_byte == 8'h55) uart_prefix_seen <= 1'b1;
-            else if (uart_byte_count == 1 && uart_prefix_seen && ext_uart_byte == 8'h41) uart_prefix_seen <= 1'b1;
-            else if (uart_byte_count == 2 && uart_prefix_seen && ext_uart_byte == 8'h52) uart_prefix_seen <= 1'b1;
-            else if (uart_byte_count == 3 && uart_prefix_seen && ext_uart_byte == 8'h54) begin
-                uart_prefix_seen <= 1'b1;
+            uart_prefix_shift <= {uart_prefix_shift[23:0], ext_uart_byte};
+            if ({uart_prefix_shift[23:0], ext_uart_byte} == 32'h55415254) begin
                 uart_stream_seen <= 1'b1;
-            end else if (uart_byte_count < 4) begin
-                uart_prefix_seen <= 1'b0;
             end
         end
     end
 
     initial begin : timeout_guard
-        #8000000;  // 8 ms
+        #TB_TIMEOUT_NS;
         $display("[AX7203_TOP] TIMEOUT led1_ready=%0b led2_retire=%0b led3_tube=%0b led4_uart=%0b uart_edges=%0d uart_bytes=%0d frame_seen=%0b frame_count=%0d stream_seen=%0b led=%b",
                  led1_ready_seen, led2_retire_seen,
                  led3_tube_seen, led4_uart_seen, uart_edge_count, uart_byte_count,

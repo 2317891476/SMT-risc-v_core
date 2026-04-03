@@ -17,6 +17,11 @@ set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
+set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
+set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
+set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
+set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 20.0])}]
+set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
 set impl_jobs [ax7203_env_or_default AX7203_IMPL_JOBS 4]
 set impl_timeout_min [ax7203_env_or_default AX7203_IMPL_TIMEOUT_MIN 45]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
@@ -51,6 +56,11 @@ puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "SMT_MODE: $smt_mode"
+puts "RS depth: $rs_depth"
+puts "RS idx width: $rs_idx_w"
+puts "Fetch buffer depth: $fetch_buffer_depth"
+puts "Core clock: ${core_clk_mhz} MHz"
+puts "UART clock divider: $uart_clk_div"
 puts "Top module: $top_module"
 puts "Implementation jobs: $impl_jobs"
 puts "Implementation timeout budget: ${impl_timeout_min} minute(s)"
@@ -72,6 +82,10 @@ set_property verilog_define [list \
     ENABLE_ROCC_ACCEL=$enable_rocc \
     ENABLE_MEM_SUBSYS=$enable_mem_subsys \
     SMT_MODE=$smt_mode \
+    FPGA_SCOREBOARD_RS_DEPTH=$rs_depth \
+    FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w \
+    FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth \
+    FPGA_UART_CLK_DIV=$uart_clk_div \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
@@ -194,6 +208,11 @@ ax7203_write_evidence $evidence_file [list \
     "ENABLE_ROCC_ACCEL: $enable_rocc" \
     "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
     "SMT_MODE: $smt_mode" \
+    "RSDepth: $rs_depth" \
+    "RSIdxW: $rs_idx_w" \
+    "FetchBufferDepth: $fetch_buffer_depth" \
+    "CoreClkMHz: $core_clk_mhz" \
+    "UartClkDiv: $uart_clk_div" \
     "TopModule: $top_module" \
     "ImplementationJobs: $impl_jobs" \
     "ImplementationTimeoutMinutes: $impl_timeout_min" \

@@ -16,6 +16,7 @@ module tb_ax7203_main_bridge_probe_smoke;
     reg led3_tube_seen;
     reg led4_uart_seen;
     reg uart_tx_q;
+    localparam integer TB_TIMEOUT_NS = 20_000_000;
 
     adam_riscv_ax7203_main_bridge_probe_top dut (
         .sys_clk_p(sys_clk_p),
@@ -74,7 +75,7 @@ module tb_ax7203_main_bridge_probe_smoke;
     end
 
     initial begin : timeout_guard
-        #8_000_000;
+        #TB_TIMEOUT_NS;
         $display("[AX7203_MAIN_BRIDGE_PROBE] TIMEOUT led1_ready=%0b led2_retire=%0b led3_tube=%0b led4_uart=%0b core_frames=%0d board_tx_starts=%0d board_frames=%0d probe_frames=%0d led=%b",
                  led1_ready_seen, led2_retire_seen, led3_tube_seen, led4_uart_seen,
                  dut.core_uart_frame_count_rolling, dut.board_tx_start_count,

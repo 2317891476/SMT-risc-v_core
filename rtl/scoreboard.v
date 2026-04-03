@@ -806,7 +806,9 @@ always @(*) begin
                 else if (simple_blocked_by_store) begin
                     // Keep loads and MRET behind older same-thread stores.
                 end
-                else if (!simple_found || (win_seq[i] < simple_seq)) begin
+                // Keep the FPGA issue path cheap: pick the first eligible slot
+                // instead of building a full oldest-sequence comparator tree.
+                else if (!simple_found) begin
                     simple_found   = 1'b1;
                     simple_idx     = i[RS_IDX_W-1:0];
                     simple_seq     = win_seq[i];

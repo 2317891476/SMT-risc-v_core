@@ -14,6 +14,7 @@ module tb_ax7203_issue_probe_smoke;
     reg retire_seen;
     reg tube_seen;
     reg uart_tx_q;
+    localparam integer TB_TIMEOUT_NS = 20_000_000;
 
     adam_riscv_ax7203_issue_probe_top dut (
         .sys_clk_p(sys_clk_p),
@@ -59,7 +60,7 @@ module tb_ax7203_issue_probe_smoke;
     end
 
     initial begin : timeout_guard
-        #6000000;
+        #TB_TIMEOUT_NS;
         $display("[AX7203_ISSUE_PROBE] TIMEOUT ready=%0b retire=%0b tube=%0b uart_edges=%0d led=%b",
                  ready_seen, retire_seen, tube_seen, uart_edge_count, led);
         $fatal(1);

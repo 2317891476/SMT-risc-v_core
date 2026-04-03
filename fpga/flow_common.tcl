@@ -8,6 +8,35 @@ proc ax7203_env_or_default {name default_value} {
     return $default_value
 }
 
+proc ax7203_clog2 {value} {
+    if {$value <= 1} {
+        return 1
+    }
+
+    set result 0
+    set remaining [expr {$value - 1}]
+    while {$remaining > 0} {
+        incr result
+        set remaining [expr {$remaining >> 1}]
+    }
+    return $result
+}
+
+proc ax7203_uart_clk_div {core_clk_mhz {baud 115200}} {
+    if {$core_clk_mhz <= 0.0} {
+        error "Core clock must be positive, got $core_clk_mhz"
+    }
+    if {$baud <= 0} {
+        error "UART baud must be positive, got $baud"
+    }
+
+    set div [expr {round(($core_clk_mhz * 1000000.0) / double($baud))}]
+    if {$div < 1} {
+        set div 1
+    }
+    return $div
+}
+
 proc ax7203_status_is_complete {status} {
     return [string match "*Complete!*" $status]
 }

@@ -89,6 +89,18 @@ localparam ROCC_ACCEL_ENABLE = `ENABLE_ROCC_ACCEL;
     `define ENABLE_MEM_SUBSYS 1
 `endif
 
+`ifdef FPGA_MODE
+`ifndef FPGA_FETCH_BUFFER_DEPTH
+    `define FPGA_FETCH_BUFFER_DEPTH 16
+`endif
+`ifndef FPGA_SCOREBOARD_RS_DEPTH
+    `define FPGA_SCOREBOARD_RS_DEPTH 16
+`endif
+`ifndef FPGA_SCOREBOARD_RS_IDX_W
+    `define FPGA_SCOREBOARD_RS_IDX_W 4
+`endif
+`endif
+
 // ─── Clock / Reset ───────────────────────────────────────────────────────────
 wire rstn;
 wire clk;
@@ -121,13 +133,13 @@ syn_rst u_syn_rst(
     .syn_rstn (rstn    )
 );
 
-// Board bring-up does not need the full simulator-oriented OoO window sizes.
-// Shrinking the FPGA profile keeps the smoke-test core behavior intact while
-// materially reducing timing pressure on the AX7203 build.
+// FPGA board runs use explicit macro-controlled window sizes so the Vivado
+// flow, board smoke tests, and diagnostic scripts can all target the same
+// RS/fetch profile without editing RTL constants by hand.
 `ifdef FPGA_MODE
-localparam FETCH_BUFFER_DEPTH_CFG = 4;
-localparam SCOREBOARD_RS_DEPTH_CFG = 4;
-localparam SCOREBOARD_RS_IDX_W_CFG = 2;
+localparam FETCH_BUFFER_DEPTH_CFG = `FPGA_FETCH_BUFFER_DEPTH;
+localparam SCOREBOARD_RS_DEPTH_CFG = `FPGA_SCOREBOARD_RS_DEPTH;
+localparam SCOREBOARD_RS_IDX_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
 `else
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
 localparam SCOREBOARD_RS_DEPTH_CFG = 16;

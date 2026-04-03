@@ -720,21 +720,27 @@ fpga/
 # 1. 先跑仿真 gate
 python verification/run_all_tests.py --basic
 
-# 2. 默认端到端板测流程（仿真 -> 建工程 -> <=15 分钟综合 -> bitstream -> JTAG -> 串口抓取）
-python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4
+# 2. 单 profile 端到端板测（仿真 -> 建工程 -> <=15 分钟综合 -> bitstream -> JTAG -> 串口抓取）
+python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0
+
+# 3. 完整自动调试闭环（basic -> core_diag -> uart_echo，失败时自动切诊断 profile）
+python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0
 ```
 
-**当前状态**: 这条流程已经在 AX7203 上闭环验证
+**当前状态**: `RS=16 / FetchBuffer=16 / core_clk=10MHz` 这条流程已经在 AX7203 上闭环验证
 - 波特率: 115200
 - 数据位: 8, 停止位: 1, 无校验
 - 流控: 无
 - `python verification/run_all_tests.py --basic`：`26/26 PASS`
-- `python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4`：闭环通过
-- 最近一次默认板测 `BuildID=0x69CE6358`
-- `synth_design` 实测约 `2.85` 分钟，满足 15 分钟门限
-- bitstream 生成通过，时序满足，`WNS=0.606ns` / `WHS=0.050ns`
+- `python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：闭环通过
+- `python fpga/scripts/run_board_feedback.py --profile uart_echo --port COM5 --capture-seconds 4 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：闭环通过
+- `python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：主验收双通过
+- 最近一次 `core_diag` 板测 `BuildID=0x69CFB1B5`
+- 最近一次 `uart_echo` 板测 `BuildID=0x69CFB4E6`
+- `synth_design` 实测约 `6.05` 分钟，满足 15 分钟门限
+- bitstream 生成通过，时序满足，`WNS=0.359ns` / `WHS=0.084ns`
 - `program_ax7203_jtag.tcl` 已完成 `BuildID` 回读校验，`DONE=1 / EOS=1`
-- `COM5` 串口已稳定收到重复的 `UART DIAG PASS`
+- `COM5` 串口已稳定收到重复的 `UART DIAG PASS`，并且 `uart_echo` 已实测回显 `Z`
 
 **常用底层脚本**
 
@@ -749,9 +755,45 @@ vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
 vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 ```
 
+**`FPGA_MODE` 仿真 gate 的实际入口**
+
+`run_board_feedback.py` 在进入 Vivado 之前，会先用一套固定的 `FPGA_MODE` 仿真 profile 做 gate，编译开关固定为：
+
+- `-DFPGA_MODE=1`
+- `-DENABLE_MEM_SUBSYS=0`
+- `-DENABLE_ROCC_ACCEL=0`
+- `-DSMT_MODE=0`
+- `-DFPGA_SCOREBOARD_RS_DEPTH=16`
+- `-DFPGA_SCOREBOARD_RS_IDX_W=4`
+- `-DFPGA_FETCH_BUFFER_DEPTH=16`
+- `-DFPGA_CLK_WIZ_HALF_DIV=10`
+- `-DFPGA_UART_CLK_DIV=87`
+
+当前常用 profile 如下：
+
+| Profile | 顶层 Top | Testbench | 默认 ROM | 用途 |
+|------|------|------|------|------|
+| `core_diag` | `adam_riscv_ax7203_top` | `tb_ax7203_top_smoke.sv` | `rom/test_fpga_uart_board_diag_gap.s` | 默认 CPU 板级 smoke |
+| `uart_echo` | `adam_riscv_ax7203_top` | `tb_ax7203_uart_echo_smoke.sv` | `rom/test_fpga_uart_echo.s` | MMIO UART 回环验证 |
+| `core_status` | `adam_riscv_ax7203_status_top` | `tb_ax7203_status_top_smoke.sv` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 状态导出诊断 |
+| `issue_probe` | `adam_riscv_ax7203_issue_probe_top` | `tb_ax7203_issue_probe_smoke.sv` | `rom/test_fpga_uart_board_diag_pollsafe.s` | issue/wakeup 诊断 |
+| `branch_probe` | `adam_riscv_ax7203_branch_probe_top` | `tb_ax7203_branch_probe_smoke.sv` | `rom/test_fpga_uart_board_diag_pollsafe.s` | branch 链路诊断 |
+| `main_bridge_probe` | `adam_riscv_ax7203_main_bridge_probe_top` | `tb_ax7203_main_bridge_probe_smoke.sv` | `rom/test_fpga_uart_board_diag.s` | 主 UART bridge 观测 |
+| `io_smoke` | `adam_riscv_ax7203_io_smoke_top` | `tb_ax7203_io_smoke.sv` | 无 | 纯板级 IO 通路 smoke |
+
+**`run_board_feedback.py` 的固定顺序**
+
+1. 根据 profile 重建板级 ROM 镜像
+2. 用对应的 `Top + Testbench` 做 `FPGA_MODE` 顶层仿真
+3. 创建 Vivado 工程
+4. 15 分钟内综合
+5. 生成 bitstream
+6. JTAG 下载并回读 `BuildID`
+7. 串口抓取或串口回环校验
+
 ### 13.4 当前固定综合配置（2026-04-03）
 
-当前默认的 FPGA 配置是面向 AX7203 bring-up 的 `BRAM-first` 版本，目标是先固定一条稳定、可复现、可烧录的上板路径，而不是直接上完整的 `mem_subsys/L2/RoCC` 竞赛配置。
+当前默认的 FPGA 配置是面向 AX7203 bring-up 的轻量 on-chip RAM 版本，目标是先固定一条稳定、可复现、可烧录的上板路径，而不是直接上完整的 `mem_subsys/L2/RoCC` 竞赛配置。
 
 > 这里特别说明：README 前文提到的“`RS=16、L2=8KB、RoCC Scratchpad=4KB`”是**目标竞赛配置**。  
 > 当前已经综合、生成 bitstream 并上板验证的配置不是那一版，而是下面这套轻量 bring-up 配置。
@@ -762,24 +804,38 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 | `ENABLE_MEM_SUBSYS` | `0` | 不综合 `mem_subsys/L2/CLINT/PLIC`，改走轻量 `legacy_mem_subsys` |
 | `ENABLE_ROCC_ACCEL` | `0` | 默认不综合 RoCC 加速器 |
 | `SMT_MODE` | `0` | 当前固定为单线程 bring-up 配置 |
+| `AX7203_CORE_CLK_MHZ` | `10.0` | 为 `RS=16 / FetchBuffer=16` 的稳定板测收敛到 10MHz core clock |
+| `AX7203_UART_CLK_DIV` | `87` | 保持 core 内 MMIO UART 为 `115200 8N1` |
+| `AX7203_MAX_THREADS` / `AX7203_SYNTH_JOBS` | `1 / 1` | 避免 Vivado 综合阶段偶发 `EXCEPTION_ACCESS_VIOLATION` |
 
 **当前实际上板的关键微架构参数**
 
 | 参数 | 当前上板值 | 目标竞赛值 | 说明 |
 |------|------|------|------|
 | 发射宽度 | 2 | 2 | 当前仍是双发射 core |
-| `scoreboard` RS 深度 | `4` | `16` | 当前 `FPGA_MODE` 下为了时序/稳定性收缩为 `RS=4` |
-| Fetch Buffer 深度 | `4` | `16` | 当前 `FPGA_MODE` 下同步收缩 |
+| `scoreboard` RS 深度 | `16` | `16` | 已在当前 `FPGA_MODE` 上恢复到目标深度，稳定板测依赖 `core_clk=10MHz` |
+| Fetch Buffer 深度 | `16` | `16` | 已在当前 `FPGA_MODE` 上恢复到目标深度 |
+| L1 ICache | `2KB, 1-way, 32B line` | 待后续冻结 | 当前 `inst_memory` 内部仍启用轻量指令缓存 |
+| L1 DCache | `关闭` | 待后续冻结 | 当前上板不走 `l1_dcache_nb`，数据侧直接走轻量后端 |
 | L2 Cache | `关闭` | `8KB` | 当前走 `legacy_mem_subsys`，不走完整 `mem_subsys/L2` |
+| `legacy_mem_subsys` 本地 RAM | `16KB, LUTRAM` | 待后续冻结 | 当前实现结果为 `4096` LUT as Memory，而不是 BRAM |
 | RoCC Scratchpad | `关闭` | `4KB` | 当前默认不综合 RoCC |
 | SMT | `关闭` | 可选 | 当前上板固定单线程 |
+
+**当前 `legacy_mem_subsys` 配置**
+
+- 数据 RAM：`RAM_WORDS=4096`，按 32-bit word 组织，总容量 `16KB`
+- 地址窗口：`0x0000_0000 - 0x0000_3FFF`
+- 实现形态：当前 Vivado 综合结果为 `4096` 个 LUT as Memory（`16KB LUTRAM`）的轻量数据后端
+- 数据侧行为：当前不带 L1 DCache / L2 / CLINT / PLIC，load/store 直接落到这块本地 RAM 或 MMIO
+- 当前 MMIO：`TUBE` + 完整 MMIO UART（`TXDATA/STATUS/RXDATA/CTRL`）
 
 **当前综合进去的主要部件**
 
 - `adam_riscv` 主核：双发射前后端、`scoreboard`、`rob_lite`、两套寄存器堆、`decoder_dual`、`fetch_buffer`、`exec_pipe0/1`、`mul_unit`、`csr_unit`
 - 访存路径：`lsu_shell + store_buffer`
 - 取指路径：`stage_if + bimodal BPU + inst_memory + inst_backing_store`
-- 轻量数据后端：`legacy_mem_subsys`，包含 BRAM-first 数据路径和完整 MMIO UART（TX/RX/STATUS/CTRL）
+- 轻量数据后端：`legacy_mem_subsys`，包含 `16KB LUTRAM` 数据路径和完整 MMIO UART（TX/RX/STATUS/CTRL）
 - 板级逻辑：`clk_wiz_0`、`syn_rst`、`u_board_uart_tx`、`uart_rx_monitor`、LED/诊断 glue
 - 默认板测 top：`adam_riscv_ax7203_top`
 - 板级诊断 top：`adam_riscv_ax7203_status_top`、`adam_riscv_ax7203_issue_probe_top`、`adam_riscv_ax7203_branch_probe_top`、`adam_riscv_ax7203_main_bridge_probe_top`
@@ -792,14 +848,18 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 - `RoCC accelerator`
 - `SMT` 多线程模式
 
-### 13.5 当前综合资源（AX7203, 2026-04-03）
+### 13.5 当前综合/实现资源（AX7203, 2026-04-03）
 
-综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；最近一次默认 `core_diag` profile 实际 `synth_design` 用时约 `2.85` 分钟。实现后 `WNS=0.606ns`、`WHS=0.050ns`，未约束路径数为 `0`。
+综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；当前稳定设置为 `AX7203_MAX_THREADS=1`、`AX7203_SYNTH_JOBS=1`。最近一次 `RS=16 / FetchBuffer=16 / core_clk=10MHz` 的 `core_diag` / `uart_echo` 板测流程中，`synth_design` 实际用时约 `6.05` 分钟。实现后 `WNS=0.359ns`、`WHS=0.084ns`，未约束路径数为 `0`。
+
+> 下面这些资源数字对应的是**当前实际上板的轻量 bring-up 配置**，也就是  
+> `RS=16 + FetchBuffer=16 + L1 ICache=2KB(1-way) + legacy_mem_subsys=16KB(LUTRAM) + core_clk=10MHz + UART_CLK_DIV=87 + ENABLE_MEM_SUBSYS=0 + ENABLE_ROCC_ACCEL=0 + SMT_MODE=0`，  
+> 并不是 README 前文提到的目标竞赛配置（`RS=16 + L2=8KB + RoCC Scratchpad=4KB`）。
 
 | 资源 | 使用量 | 可用量 | 利用率 |
 |------|------|------|------|
-| Slice LUTs | 38,500 | 133,800 | 28.77% |
-| Slice Registers | 30,894 | 269,200 | 11.48% |
+| Slice LUTs | 51,631 | 133,800 | 38.59% |
+| Slice Registers | 33,837 | 269,200 | 12.57% |
 | LUT as Memory | 4,096 | 46,200 | 8.87% |
 | RAMB18 | 0 | 730 | 0.00% |
 | DSP48E1 | 4 | 740 | 0.54% |
@@ -808,15 +868,15 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 | 模块/层级 | Total LUTs | FFs | 备注 |
 |------|------|------|------|
-| `u_scoreboard` | 11,951 | 2,651 | 当前最大 LUT 消耗点 |
-| `u_stage_if` | 6,539 | 18,934 | 含 `bpu_bimodal + inst_memory` |
-| `gen_legacy_mem.u_legacy_mem_subsys` | 4,617 | 97 | 其中 4,096 LUTRAM |
-| `u_regs_mt` | 3,292 | 1,984 | Pipe0/线程寄存器堆 |
-| `u_regs_mt_p1` | 3,292 | 1,984 | Pipe1/线程寄存器堆 |
-| `u_rob_lite` | 1,869 | 1,278 | 提交/回滚路径 |
-| `u_lsu_shell` | 1,206 | 942 | 含 `store_buffer` |
-| `u_board_uart_tx` | 29 | 25 | 板侧重新定时 UART 发送器 |
-| `u_core_uart_monitor` | 35 | 35 | 板侧 UART 帧监测器 |
+| `u_scoreboard` | 24,962 | 4,753 | 当前最大 LUT 消耗点 |
+| `u_stage_if` | 6,553 | 18,926 | 含 `bpu_bimodal + inst_memory` |
+| `gen_legacy_mem.u_legacy_mem_subsys` | 4,671 | 141 | 其中 4,096 LUTRAM |
+| `u_regs_mt` | 3,313 | 1,984 | Pipe0/线程寄存器堆 |
+| `u_regs_mt_p1` | 3,313 | 1,984 | Pipe1/线程寄存器堆 |
+| `u_rob_lite` | 1,888 | 1,278 | 提交/回滚路径 |
+| `u_lsu_shell` | 1,238 | 942 | 含 `store_buffer` |
+| `u_board_uart_tx` | 30 | 25 | 板侧重新定时 UART 发送器 |
+| `u_core_uart_monitor` | 36 | 35 | 板侧 UART 帧监测器 |
 
 ### 13.6 当前板测 Profile
 
@@ -828,6 +888,13 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 4. skip-opt bitstream 生成
 5. JTAG 下载并回读 `BuildID`
 6. COM 串口抓取
+
+完整自动调试入口为 `fpga/scripts/run_fpga_autodebug.py`。它会按固定顺序执行：
+
+1. `python verification/run_all_tests.py --basic`
+2. `core_diag` 的完整板测流程
+3. `uart_echo` 的完整板测流程
+4. 只有主验收失败时，才自动切到 `core_status / issue_probe / branch_probe / main_bridge_probe`
 
 **当前默认 profile**
 
@@ -852,10 +919,10 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **最近一次板测结果**
 
-- `core_diag`：`BuildID=0x69CE6358`，`UartBytes=150`，抓包内容为重复的 `UART DIAG PASS`
-- `main_bridge_probe`：`BuildID=0x69CE5B50`，`UartBytes=1296`，抓包内容为重复的 `M111:A2:A2:A2:3`
-- `main_bridge_probe` 用来证明“CPU -> core_uart -> 板侧 bridge -> PC 串口”这条链在真板上确实打通
-- `uart_echo` profile 已接入 `run_board_feedback.py`，可配合 `--profile uart_echo --send-text Z --expect-text Z` 做 RX/TX 回环板测
+- `run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：通过，`FailedStage: none`
+- `core_diag`：`BuildID=0x69CFB1B5`，`UartBytes=75`，抓包内容为重复的 `UART DIAG PASS`
+- `uart_echo`：`BuildID=0x69CFB4E6`，`UartBytes=1`，串口抓包内容为单字节回显 `Z`
+- `main_bridge_probe` 仍保留为失败时自动触发的诊断 profile，用来证明“CPU -> core_uart -> 板侧 bridge -> PC 串口”这条链在真板上确实打通
 - 默认 `core_diag` 之所以使用 `test_fpga_uart_board_diag_gap.s`，是为了在板级串口抓取上保留明显行间空闲，避免过于紧凑的连续流影响可观测性
 
 ### 13.7 CoreMark 性能测试
