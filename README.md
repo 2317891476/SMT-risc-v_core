@@ -620,7 +620,7 @@ w_regs_en, w_regs_addr, w_regs_data
 | **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 建立统一性能测试框架，形成 `仿真结果 + 上板结果 + 编译参数 + MHz 归一化成绩` 四联表。输出核心指标：CoreMark/MHz、DMIPS/MHz、Embench 几何平均分、平均 IPC。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
-| **P3**     | **资源封顶版竞赛 Bitstream**                             | 冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
+| **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
 | **P4**     | **轻量前端优化（只做资源友好升级）**                     | 在不明显增加 BRAM/LUT 的前提下，将现有 Bimodal 升级为轻量 Gshare / 小型 Tournament 版本；严禁引入 TAGE/Perceptron 这类高成本预测器。目标是用极小代价提升 CoreMark 与分支密集程序的实际 IPC。 |
 | **P4**     | **Load/Store 路径微优化**                                | 聚焦影响跑分最明显的路径：Store-Load 转发时序、Cache refill 停顿、提交边界气泡、MMIO 访问旁路。只做“小改动高收益”的微优化，不引入更大 ROB / 更深 LSQ。 |
 | **P4**     | **DDR3 支持（最小可用版本）**                            | 打通 AX7203 板载 DDR3 的最小稳定数据面：代码仍可驻留 BRAM，数据集/工作集放入 DDR3。优先服务 benchmark 扩展测试和 Demo 数据集加载，而不是一开始就追求完整外存操作系统。 |
@@ -753,12 +753,26 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 当前默认的 FPGA 配置是面向 AX7203 bring-up 的 `BRAM-first` 版本，目标是先固定一条稳定、可复现、可烧录的上板路径，而不是直接上完整的 `mem_subsys/L2/RoCC` 竞赛配置。
 
+> 这里特别说明：README 前文提到的“`RS=16、L2=8KB、RoCC Scratchpad=4KB`”是**目标竞赛配置**。  
+> 当前已经综合、生成 bitstream 并上板验证的配置不是那一版，而是下面这套轻量 bring-up 配置。
+
 | 开关 | 当前值 | 说明 |
 |------|------|------|
 | `FPGA_MODE` | `1` | 启用 AX7203 顶层时钟/复位/板级接口路径 |
 | `ENABLE_MEM_SUBSYS` | `0` | 不综合 `mem_subsys/L2/CLINT/PLIC`，改走轻量 `legacy_mem_subsys` |
 | `ENABLE_ROCC_ACCEL` | `0` | 默认不综合 RoCC 加速器 |
 | `SMT_MODE` | `0` | 当前固定为单线程 bring-up 配置 |
+
+**当前实际上板的关键微架构参数**
+
+| 参数 | 当前上板值 | 目标竞赛值 | 说明 |
+|------|------|------|------|
+| 发射宽度 | 2 | 2 | 当前仍是双发射 core |
+| `scoreboard` RS 深度 | `4` | `16` | 当前 `FPGA_MODE` 下为了时序/稳定性收缩为 `RS=4` |
+| Fetch Buffer 深度 | `4` | `16` | 当前 `FPGA_MODE` 下同步收缩 |
+| L2 Cache | `关闭` | `8KB` | 当前走 `legacy_mem_subsys`，不走完整 `mem_subsys/L2` |
+| RoCC Scratchpad | `关闭` | `4KB` | 当前默认不综合 RoCC |
+| SMT | `关闭` | 可选 | 当前上板固定单线程 |
 
 **当前综合进去的主要部件**
 
