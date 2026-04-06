@@ -184,6 +184,11 @@ if {[file exists $data_hex]} {
     add_files -norecurse $data_hex
     set_property file_type {Memory File} [get_files $data_hex]
 }
+set data_word_hex "$script_dir/../rom/data_word.hex"
+if {[file exists $data_word_hex]} {
+    add_files -norecurse $data_word_hex
+    set_property file_type {Memory File} [get_files $data_word_hex]
+}
 
 # Generate Clock Wizard IP (required by adam_riscv when FPGA_MODE is defined)
 set clk_wiz_tcl "$script_dir/ip/create_clk_wiz_ax7203.tcl"

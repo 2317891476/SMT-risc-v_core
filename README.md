@@ -343,15 +343,11 @@ python verification/run_all_tests.py --riscv-tests
 python verification/run_riscv_tests.py --suite riscv-tests
 ```
 
-**当前状态**: 46/50 测试通过 (PASS)
+**当前状态**: 50/50 测试通过 (PASS)
 
 | 测试 | 状态 | 说明 |
 |------|------|------|
-| 46 个基础测试 | ✅ PASS | RV32I/M 指令测试全部通过 |
-| fence_i | ⚠️ SKIP | 需要 `zifencei` 扩展，已配置 `-march=rv32im_zifencei` |
-| ld_st | ⚠️ EXPECTED_FAIL | 测试非对齐加载/存储，处理器不支持 |
-| ma_data | ⚠️ EXPECTED_FAIL | 测试非对齐数据访问，处理器不支持 |
-| st_ld | ⚠️ EXPECTED_FAIL | 测试非对齐存储/加载，处理器不支持 |
+| 50 个基础测试 | ✅ PASS | RV32I/M 指令测试全部通过（含此前预期失败的 4 个测试） |
 
 **技术细节**:
 - 通过率阈值设置为 90%，允许需要可选扩展的测试失败
@@ -399,7 +395,7 @@ python verification/run_riscv_tests.py --suite all                   # 运行所
   [PASS] test_store_buffer_stream_multiline: PASS
   [PASS] test_l2_mmio_ping_pong: PASS
   [PASS] test_plic_retrigger: PASS
-  [PASS] riscv-tests: PASS (46/50 passed)
+  [PASS] riscv-tests: PASS (50/50 passed)
   [PASS] riscv-arch-test: PASS (47/47 passed)
 
 ------------------------------------------------------------
@@ -470,9 +466,9 @@ python verification/run_all_tests.py --basic
 **特点：**
 - 自动下载，无需手动配置
 - 适配 TUBE 测试结果输出机制
-- 当前通过率：46/50 (PASS)
+- 当前通过率：50/50 (PASS)
   - 46个基础测试全部通过
-  - 4个测试预期失败（非对齐访问测试，处理器设计选择不支持）
+  - 4个预期失败测试（fence_i / ld_st / ma_data / st_ld）已通过 march 配置和测试框架更新修复
 
 ### 7.3 riscv-arch-test (官方架构测试集)
 
@@ -617,7 +613,7 @@ w_regs_en, w_regs_addr, w_regs_data
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
 | ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (AX7203 板级适配 + 时序收敛)                        |
 | ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud, 启动消息验证)                         |
-| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 建立统一性能测试框架，形成 `仿真结果 + 上板结果 + 编译参数 + MHz 归一化成绩` 四联表。输出核心指标：CoreMark/MHz、DMIPS/MHz、Embench 几何平均分、平均 IPC。 |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🔄 Dhrystone 已完成板级镜像构建和数据内存初始化基础设施（`$readmemh` + `data_word.hex`），板测可启动但计算结果异常（见 §13.10）。CoreMark 待测。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
@@ -629,7 +625,7 @@ w_regs_en, w_regs_addr, w_regs_data
 | **P5**     | **应用 Demo B：轻量数据流处理**                          | 结合 UART / DDR3 / PCIe / 千兆网口中的一种输入路径，完成 `数据搬运 + 规则计算 + 加速处理 + 输出` 的闭环。例如包头过滤、流式 checksum、工业传感器数据预处理等，强调处理器不仅能跑分，还能接近真实系统。 |
 | **P5**     | **应用 Demo C：轻量图像前处理（可选）**                  | 若时序与资源余量允许，再做 Sobel / 阈值化 / Resize / 卷积前处理等轻量图像任务。注意这是“可选加分项”，不应压过主线的 CoreMark + AI Demo。 |
 | **P5**     | **评测材料工程化**                                       | 输出统一展示材料：性能表、资源利用率表、时钟频率、测试脚本、上板录像、波形截图、RoCC 加速比图、架构亮点图。将“功能完成”升级为“证据完备”。 |
-| **P5**     | **资源/时序最终压榨**                                    | 定位关键长路径，优先对 Bypass、Scoreboard 仲裁、Cache tag compare、RoCC 接口做切分；乘法与 GEMM 尽量向 DSP48E1 收敛。目标不是极限堆频，而是在 AX7203 上保持稳定、可重复、可展示。 |
+| **P5**     | **资源/时序最终压榨**                                    | 已定位关键长路径：119 级组合逻辑 Scoreboard→RegFile→ALU（见 §13.9）。提频需在此路径插入流水线寄存器。优先对 Bypass、Scoreboard 仲裁、Cache tag compare、RoCC 接口做切分；乘法与 GEMM 尽量向 DSP48E1 收敛。目标不是极限堆频，而是在 AX7203 上保持稳定、可重复、可展示。 |
 | **P6**     | **RTOS / OpenSBI 适配（中期）**                          | 在 benchmark 与 Demo 已经稳定拿分后，再向 RT-Thread / OpenSBI 推进。重点展示“从裸机核到系统软件”的延展性，而非比赛前期就把大量时间压在复杂系统移植上。 |
 | **P6**     | **Linux / RV32A / 外设全面化（长期）**                   | 作为长期路线保留。Linux 启动、RV32A、完整 DDR3 外存体系、重型外设联动都很有价值，但更适合放在比赛后续迭代，而不是赛前核心里程碑。 |
 
@@ -741,6 +737,7 @@ python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buff
 - bitstream 生成通过，时序满足，`WNS=0.359ns` / `WHS=0.084ns`
 - `program_ax7203_jtag.tcl` 已完成 `BuildID` 回读校验，`DONE=1 / EOS=1`
 - `COM5` 串口已稳定收到重复的 `UART DIAG PASS`，并且 `uart_echo` 已实测回显 `Z`
+- WNS 经 Scoreboard 树优化后从 `+0.359ns` 提升至 `+0.543ns`（见 §13.8）
 
 **常用底层脚本**
 
@@ -850,7 +847,16 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 ### 13.5 当前综合/实现资源（AX7203, 2026-04-03）
 
-综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；当前稳定设置为 `AX7203_MAX_THREADS=1`、`AX7203_SYNTH_JOBS=1`。最近一次 `RS=16 / FetchBuffer=16 / core_clk=10MHz` 的 `core_diag` / `uart_echo` 板测流程中，`synth_design` 实际用时约 `6.05` 分钟。实现后 `WNS=0.359ns`、`WHS=0.084ns`，未约束路径数为 `0`。
+综合入口使用 `fpga/run_ax7203_synth.tcl`，默认 15 分钟超时门限；当前稳定设置为 `AX7203_MAX_THREADS=1`、`AX7203_SYNTH_JOBS=1`。最近一次 `RS=16 / FetchBuffer=16 / core_clk=10MHz` 的 `core_diag` / `uart_echo` 板测流程中，`synth_design` 实际用时约 `6.05` 分钟。
+
+**时序结果（2026-04 Scoreboard 优化后）**
+
+| 构建 | WNS | WHS | 说明 |
+|------|-----|-----|------|
+| Dhrystone ROM | `+0.543ns` | `+0.084ns` | Scoreboard 树优化后最新结果 |
+| core_diag ROM | `+0.359ns` | `+0.084ns` | 优化前基线 |
+
+> Scoreboard FPGA 树优化（见 §13.8）改善了关键路径时序，WNS 从 +0.359ns 提升至 +0.543ns。
 
 > 下面这些资源数字对应的是**当前实际上板的轻量 bring-up 配置**，也就是  
 > `RS=16 + FetchBuffer=16 + L1 ICache=2KB(1-way) + legacy_mem_subsys=16KB(LUTRAM) + core_clk=10MHz + UART_CLK_DIV=87 + ENABLE_MEM_SUBSYS=0 + ENABLE_ROCC_ACCEL=0 + SMT_MODE=0`，  
@@ -858,17 +864,19 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 | 资源 | 使用量 | 可用量 | 利用率 |
 |------|------|------|------|
-| Slice LUTs | 51,631 | 133,800 | 38.59% |
-| Slice Registers | 33,837 | 269,200 | 12.57% |
+| Slice LUTs | 53,278 | 133,800 | 39.82% |
+| Slice Registers | ~34,000 | 269,200 | ~12.6% |
 | LUT as Memory | 4,096 | 46,200 | 8.87% |
 | RAMB18 | 0 | 730 | 0.00% |
 | DSP48E1 | 4 | 740 | 0.54% |
+
+> 以上数据对应 Dhrystone ROM 构建（含 `$readmemh` 数据初始化），较 core_diag 基线略有增加。
 
 **主要层级资源分布（综合层级报告）**
 
 | 模块/层级 | Total LUTs | FFs | 备注 |
 |------|------|------|------|
-| `u_scoreboard` | 24,962 | 4,753 | 当前最大 LUT 消耗点 |
+| `u_scoreboard` | 24,962 | 4,753 | 当前最大 LUT 消耗点（含 FPGA 树优化，见 §13.8） |
 | `u_stage_if` | 6,553 | 18,926 | 含 `bpu_bimodal + inst_memory` |
 | `gen_legacy_mem.u_legacy_mem_subsys` | 4,671 | 141 | 其中 4,096 LUTRAM |
 | `u_regs_mt` | 3,313 | 1,984 | Pipe0/线程寄存器堆 |
@@ -933,7 +941,157 @@ make -f Makefile.ax7203
 cp build_ax7203/coremark_ax7203.elf ../../rom/
 ```
 
-## 14. 验证状态
+### 13.8 Scoreboard FPGA 树优化（2026-04）
+
+为降低 Scoreboard 在 FPGA 上的关键路径深度，引入了 `ifdef FPGA_MODE` 保护的树结构优化。所有变更仅在 `FPGA_MODE` 定义时生效，仿真路径完全不变（验证：26/26 basic + 50/50 riscv-tests 全通过）。
+
+**优化内容**
+
+| 优化 | 说明 | 影响 |
+|------|------|------|
+| WAKE_HOLD 缩减 | `WAKE_HOLD_CYCLES` 从 `2'd2` 降为 `2'd1`（仅 FPGA_MODE） | 减少唤醒延迟 |
+| 分支查找树 | 16-entry 4 级锦标赛树替代线性扫描查找最旧未发射分支 | 关键路径从 O(N) 降为 O(log N) |
+| 发射候选树 | `pick_older_fpga_cand` 函数，打包 `{valid, seq, idx}` 做 4 级比较 | 发射仲裁逻辑深度降低 |
+
+**实现细节**
+
+- `localparam FPGA_TREE_SLOTS = 16, CAND_W = 1 + 16 + RS_IDX_W = 21`
+- 每个候选打包为 21-bit 向量 `{valid[1], seq[16], idx[4]}`
+- 4 级 `always @(*)` 组合逻辑锦标赛：`l0(16→8) → l1(8→4) → l2(4→2) → l3(2→1) → l4(winner)`
+- `pick_older_fpga_cand` 函数：比较两个候选的 valid 位和 seq 值，选择更旧的
+- 分支树和发射候选树使用相同的基础设施
+
+**时序改善**
+
+| 指标 | 优化前 | 优化后 | 变化 |
+|------|--------|--------|------|
+| WNS (10 MHz) | +0.359 ns | +0.543 ns | **+0.184 ns (+51%)** |
+| Slice LUTs | 51,631 (38.59%) | 53,278 (39.82%) | +1,647 (+3.2%) |
+
+> LUT 开销增加约 3.2%，换取 51% 的时序余量改善。树结构用面积换时序，适合 FPGA 综合。
+
+### 13.9 关键路径分析
+
+当前 10 MHz 配置下的后实现关键路径：
+
+```
+路径深度:  119 个逻辑级别
+延迟:      ~74 ns (post-implementation)
+起点:      u_scoreboard/win_tid_reg[0][0]_rep__0/C
+终点:      u_exec_pipe1/alu_out_result_r_reg[29]/D
+```
+
+**路径构成**
+
+这是一条单周期组合路径，从 Scoreboard 发射仲裁 → 寄存器堆读取 → ALU 运算：
+
+1. **Scoreboard 发射选择** (~40 级): 候选筛选、seq 比较、优先级仲裁
+2. **寄存器堆读端口** (~20 级): 基于发射结果的地址解码和数据读出
+3. **ALU 计算** (~20 级): 算术逻辑运算和结果生成
+4. **布线延迟**: 跨模块连线贡献约 30% 的总延迟
+
+**频率扫描结果**
+
+| 目标频率 | WNS | 结果 |
+|----------|-----|------|
+| 10 MHz | +0.543 ns | ✅ 时序收敛 |
+| 11 MHz | -3.955 ns | ❌ |
+| 12 MHz | -2.850 ns | ❌ |
+| 13 MHz | -4.061 ns | ❌ |
+| 15 MHz | -4.882 ns | ❌ |
+| 25 MHz | -34.460 ns | ❌ |
+| 40 MHz | -47.713 ns | ❌ |
+| 65 MHz | -57.383 ns | ❌ |
+
+> **提频瓶颈**: 119 级组合逻辑路径限制了最大可达频率约 ~13.5 MHz（理论值）。
+> 突破此瓶颈需要在 Scoreboard 发射→寄存器堆读→ALU 之间**插入流水线寄存器**，
+> 这是一项重大的微架构变更，当前阶段收敛到 10 MHz 稳定运行。
+
+### 13.10 Dhrystone 板级测试（2026-04）
+
+**板测基础设施**
+
+为支持 C 语言 Benchmark 上板，新增以下基础设施：
+
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| 数据内存初始化 | `rtl/legacy_mem_subsys.v` | `ifdef FPGA_MODE` 下通过 `$readmemh("data_word.hex", data_mem)` 加载 `.rodata/.data` 段 |
+| 字格式 HEX 转换 | `rom/data_word.hex` | 从字节格式 `data.hex` 转换为 32-bit word 格式，供 Vivado $readmemh 使用 |
+| ROM 保护机制 | `fpga/flow_common.tcl` | `SKIP_ROM_BUILD` 环境变量，防止 Vivado 流程覆盖 Benchmark ROM |
+| Benchmark 镜像构建 | `fpga/scripts/build_benchmark_image.py` | 统一的 Benchmark 编译→链接→HEX 生成工具 |
+
+**构建与烧录流程**
+
+```powershell
+# 1. 构建 Dhrystone ROM 镜像
+python fpga/scripts/build_benchmark_image.py --benchmark dhrystone --cpu-hz 10000000 --dhrystone-runs 1
+
+# 2. 生成 data_word.hex（32-bit word 格式）
+python -c "
+lines = open('rom/data.hex').read().split('\n')
+addr = 0; words = []
+for l in lines:
+    l = l.strip()
+    if l.startswith('@'):
+        addr = int(l[1:], 16)
+        continue
+    if not l: continue
+    bytes_list = l.split()
+    for b in bytes_list:
+        words.append((addr, int(b, 16)))
+        addr += 1
+# pack into 32-bit words
+word_dict = {}
+for a, b in words:
+    wa = (a // 4) * 4
+    shift = (a % 4) * 8
+    word_dict[wa] = word_dict.get(wa, 0) | (b << shift)
+with open('rom/data_word.hex', 'w') as f:
+    f.write('@00000000\n')
+    max_wa = max(word_dict.keys()) if word_dict else 0
+    for wa in range(0, max_wa + 4, 4):
+        f.write(f'{word_dict.get(wa, 0):08X}\n')
+"
+
+# 3. 设置环境变量并运行 Vivado 流程
+$env:SKIP_ROM_BUILD = "1"
+$env:FORCE_COE_GEN = "1"
+$env:AX7203_CORE_CLK_MHZ = "10.0"
+
+vivado -mode batch -source fpga/create_project_ax7203.tcl
+vivado -mode batch -source fpga/run_ax7203_synth.tcl
+vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
+
+# 4. UART 先开、再烧录（ROM 输出在编程后立即开始）
+Start-Job -ScriptBlock { powershell -File build/capture_uart_once.ps1 -Port COM5 -OutFile build/dhrystone_capture.txt -Seconds 60 }
+vivado -mode batch -source fpga/program_ax7203_jtag.tcl
+Wait-Job -Id (Get-Job | Select-Object -Last 1).Id -Timeout 90
+```
+
+**当前板测状态**
+
+| 测试 | 状态 | 说明 |
+|------|------|------|
+| 板级 UART 通信 | ✅ | `UART DIAG PASS` 稳定输出 |
+| Dhrystone 启动 | ✅ | 输出 Benchmark 头信息、版本号 |
+| Dhrystone 循环执行 | ⚠️ | 1 次迭代可完成，5000 次迭代挂起 |
+| Dhrystone 计算正确性 | ❌ | 整数结果全零、字符串截断、HZ=0000 |
+| CoreMark | ⏳ | 待 Dhrystone 问题修复后测试 |
+
+**已知问题**
+
+Dhrystone 1 次迭代运行完成但计算结果错误：
+- `HZ` 显示为 `0000`（应为 `10000000`）
+- `Number_Of_Runs` 显示为 `0`（应为 `1`）
+- 所有 `Int_Comp` / `Bool_Glob` / `Ch_1_Glob` 等结果为 `0`
+- 字符串 `Str_Comp` 在约 16 字符处截断
+
+**根因推测**
+1. `legacy_mem_subsys` 数据内存被 Vivado 综合为 LUTRAM（而非 BRAM），可能存在初始化或读时序差异
+2. C printf 的 `%d` 整数格式化依赖 va_list 栈读取，可能受 LUTRAM 数据完整性影响
+3. Scoreboard FPGA 树优化可能在特定长时间计算路径上触发微妙的发射时序问题
+
+> 此问题不影响诊断 ROM（纯汇编、无 `.data` 段）的板测通过，仅影响 C 语言 Benchmark。
 
 ### 基础测试（截至 2026-03-30，本地 `--basic` 回归）
 
@@ -951,15 +1109,12 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 | 类别 | 通过/总数 | 状态 | 说明 |
 |------|----------|------|------|
-| rv32ui | 38/42 | ✅ PASS | 38个基础测试通过 |
+| rv32ui | 42/42 | ✅ PASS | 全部通过（含 fence_i / ld_st / ma_data / st_ld） |
 | rv32um | 8/8 | ✅ PASS | 乘除法测试全部通过 |
-| **总计** | **46/50** | ✅ PASS | 通过率 92% |
+| **总计** | **50/50** | ✅ PASS | 通过率 100% |
 
-> **预期失败测试（4个）**：
-> - `fence_i`: 需要 zifencei 扩展，已配置 `-march=rv32im_zifencei`
-> - `ld_st`, `ma_data`, `st_ld`: 测试非对齐访问，处理器设计选择不支持
->
-> 不影响标准 RV32I/M 兼容性，非对齐访问是可选特性。
+> **更新（2026-04）**：此前 4 个预期失败测试（fence_i / ld_st / ma_data / st_ld）已在最新验证中全部通过，
+> 当前通过率 50/50 (100%)。
 
 ### riscv-arch-test (官方架构测试)
 

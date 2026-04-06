@@ -1,0 +1,2232 @@
+VCD info: dumpfile tb.vcd opened for output.
+                   0<<Starting simulation>>
+          0: 0040006f
+          1: 00000193
+          2: 00200193
+          3: 00001117
+          4: ff410113
+          5: 0aa00093
+          6: 00000797
+          7: 01478793
+          8: 00111023
+          9: 00011703
+         10: 0080006f
+         11: 00008713
+         12: 0aa00393
+         13: 4c771663
+         14: 00300193
+         15: 00001117
+         16: fc410113
+         17: ffffb0b7
+         18: a0008093
+         19: 00000797
+         20: 01478793
+         21: 00111123
+         22: 00211703
+         23: 0080006f
+         24: 00008713
+         25: ffffb3b7
+         26: a0038393
+         27: 48771a63
+         28: 00400193
+         29: 00001117
+         30: f8c10113
+         31: beef10b7
+         32: aa008093
+         33: 00000797
+         34: 01478793
+         35: 00111223
+         36: 00412703
+         37: 0080006f
+         38: 00008713
+         39: beef13b7
+         40: aa038393
+         41: 44771e63
+         42: 00500193
+         43: 00001117
+         44: f5410113
+         45: ffffa0b7
+         46: 00a08093
+         47: 00000797
+         48: 01478793
+         49: 00111323
+[MEM_SUBSYS_INIT] ram[24]=00008713 ram[25]=ffffb3b7 ram[26]=a0038393 ram[27]=48771a63 ram[28]=00400193 ram[29]=00001117
+[DATA_OVERLAY] ram[1024]=beefbeef ram[1025]=beefbeef ram[1026]=beefbeef ram[1027]=beefbeef
+[HEARTBEAT] Cycle=0 PC=0x00000000 if_valid=0 if_inst=0x00000000 dec0_valid=0 fb_pop0_valid=0 rst=1 @100
+[L2 ARB] grant M0 addr=00000000
+[L2 CACHE] accept addr=00000000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000000 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000000 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000000 ram_rdata=0040006f victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000004 ram_rdata=00000193 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000008 ram_rdata=00200193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000000c ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000010 ram_rdata=ff410113 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000014 ram_rdata=0aa00093 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000018 ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000001c ram_rdata=01478793 victim=0
+[L2 CACHE] lookup addr=00000000 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0040006f
+[L2 ARB] grant M0 addr=00000000
+[L2 CACHE] accept addr=00000000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000000 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0040006f
+[L2 ARB] grant M0 addr=00000020
+[L2 CACHE] accept addr=00000020 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000020 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000020 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000020 ram_rdata=00111023 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000024 ram_rdata=00011703 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000028 ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000002c ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000030 ram_rdata=0aa00393 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000034 ram_rdata=4c771663 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000038 ram_rdata=00300193 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000003c ram_rdata=00001117 victim=0
+[L2 CACHE] lookup addr=00000020 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00111023
+[L2 ARB] grant M1 addr=00001000 write=1 wdata=000000aa
+[L2 CACHE] accept addr=00001000 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=0 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00001000 victim=1 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00001000 ram_rdata=beefbeef victim=1
+[L2 CACHE] refill cnt=1 ram_addr=00001004 ram_rdata=beefbeef victim=1
+[L2 CACHE] refill cnt=2 ram_addr=00001008 ram_rdata=beefbeef victim=1
+[L2 CACHE] refill cnt=3 ram_addr=0000100c ram_rdata=beefbeef victim=1
+[L2 CACHE] refill cnt=4 ram_addr=00001010 ram_rdata=beefbeef victim=1
+[L2 CACHE] refill cnt=5 ram_addr=00001014 ram_rdata=00000000 victim=1
+[L2 CACHE] refill cnt=6 ram_addr=00001018 ram_rdata=00000000 victim=1
+[L2 CACHE] refill cnt=7 ram_addr=0000101c ram_rdata=00000000 victim=1
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=000000aa
+[LSU RESP] drain=1 addr=00001000 raw=000000aa shaped=00000000
+[L2 ARB] grant M0 addr=00000020
+[L2 CACHE] accept addr=00000020 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000020 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00111023
+[L2 ARB] grant M1 addr=00001000 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=beef00aa
+[LSU RESP] drain=0 addr=00001000 raw=beef00aa shaped=00000000
+[L2 ARB] grant M0 addr=00000040
+[L2 CACHE] accept addr=00000040 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000040 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000040 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000040 ram_rdata=fc410113 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000044 ram_rdata=ffffb0b7 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000048 ram_rdata=a0008093 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000004c ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000050 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000054 ram_rdata=00111123 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000058 ram_rdata=00211703 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000005c ram_rdata=0080006f victim=0
+[L2 CACHE] lookup addr=00000040 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=fc410113
+[L2 ARB] grant M1 addr=00001002 write=1 wdata=aa000000
+[L2 CACHE] accept addr=00001002 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=aa000000
+[LSU RESP] drain=1 addr=00001002 raw=aa000000 shaped=ffffbeef
+[L2 ARB] grant M0 addr=00000060
+[L2 CACHE] accept addr=00000060 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000060 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000060 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000060 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000064 ram_rdata=ffffb3b7 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000068 ram_rdata=a0038393 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000006c ram_rdata=48771a63 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000070 ram_rdata=00400193 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000074 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000078 ram_rdata=f8c10113 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000007c ram_rdata=beef10b7 victim=0
+[L2 CACHE] lookup addr=00000060 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00008713
+[L2 ARB] grant M1 addr=00001002 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001002 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=aa0000aa
+[LSU RESP] drain=0 addr=00001002 raw=aa0000aa shaped=ffffbeef
+[L2 ARB] grant M0 addr=00000060
+[L2 CACHE] accept addr=00000060 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000060 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00008713
+[L2 ARB] grant M0 addr=00000080
+[L2 CACHE] accept addr=00000080 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000080 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000080 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000080 ram_rdata=aa008093 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000084 ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000088 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000008c ram_rdata=00111223 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000090 ram_rdata=00412703 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000094 ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000098 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000009c ram_rdata=beef13b7 victim=0
+[L2 CACHE] lookup addr=00000080 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=aa008093
+[L2 ARB] grant M1 addr=00001004 write=1 wdata=00000aa0
+[L2 CACHE] accept addr=00001004 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=00000aa0
+[LSU RESP] drain=1 addr=00001004 raw=00000aa0 shaped=000000aa
+[L2 ARB] grant M1 addr=00001004 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001004 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001004 raw=beef0aa0 shaped=aa0000aa
+[L2 ARB] resp master=1 data=beef0aa0
+[L2 ARB] grant M0 addr=000000a0
+[L2 CACHE] accept addr=000000a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000000a0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000000a0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000000a0 ram_rdata=aa038393 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000000a4 ram_rdata=44771e63 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000000a8 ram_rdata=00500193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000000ac ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000000b0 ram_rdata=f5410113 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000000b4 ram_rdata=ffffa0b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000000b8 ram_rdata=00a08093 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000000bc ram_rdata=00000797 victim=0
+[L2 CACHE] lookup addr=000000a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=aa038393
+[L2 ARB] grant M0 addr=000000c0
+[L2 CACHE] accept addr=000000c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000000c0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000000c0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000000c0 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000000c4 ram_rdata=00111323 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000000c8 ram_rdata=00611703 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000000cc ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000000d0 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000000d4 ram_rdata=ffffa3b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000000d8 ram_rdata=00a38393 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000000dc ram_rdata=42771263 victim=0
+[L2 CACHE] lookup addr=000000c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01478793
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=a00a0000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=a00a0000
+[LSU RESP] drain=1 addr=00001006 raw=a00a0000 shaped=ffffbeef
+[L2 ARB] grant M0 addr=000000c0
+[L2 CACHE] accept addr=000000c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000000c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01478793
+[L2 ARB] grant M1 addr=00001006 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001006 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=a00a0aa0
+[LSU RESP] drain=0 addr=00001006 raw=a00a0aa0 shaped=ffffbeef
+[L2 ARB] grant M0 addr=000000e0
+[L2 CACHE] accept addr=000000e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000000e0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000000e0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000000e0 ram_rdata=00600193 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000000e4 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000000e8 ram_rdata=f2a10113 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000000ec ram_rdata=0aa00093 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000000f0 ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000000f4 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000000f8 ram_rdata=fe111d23 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000000fc ram_rdata=ffa11703 victim=0
+[L2 CACHE] lookup addr=000000e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00600193
+[L2 ARB] grant M0 addr=00000100
+[L2 CACHE] accept addr=00000100 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000100 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000100 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000100 ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000104 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000108 ram_rdata=0aa00393 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000010c ram_rdata=3e771a63 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000110 ram_rdata=00700193 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000114 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000118 ram_rdata=efa10113 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000011c ram_rdata=ffffb0b7 victim=0
+[L2 CACHE] lookup addr=00000100 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0080006f
+[L2 ARB] grant M1 addr=00001008 write=1 wdata=000000aa
+[L2 CACHE] accept addr=00001008 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=000000aa
+[LSU RESP] drain=1 addr=00001008 raw=000000aa shaped=00000aa0
+[L2 ARB] grant M1 addr=00001008 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001008 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001008 raw=beef00aa shaped=00000aa0
+[L2 ARB] resp master=1 data=beef00aa
+[L2 ARB] grant M0 addr=00000100
+[L2 CACHE] accept addr=00000100 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000100 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0080006f
+[L2 ARB] grant M0 addr=00000120
+[L2 CACHE] accept addr=00000120 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000120 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000120 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000120 ram_rdata=a0008093 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000124 ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000128 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000012c ram_rdata=fe111e23 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000130 ram_rdata=ffc11703 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000134 ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000138 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000013c ram_rdata=ffffb3b7 victim=0
+[L2 CACHE] lookup addr=00000120 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=a0008093
+[L2 ARB] grant M1 addr=0000100a write=1 wdata=aa000000
+[L2 CACHE] accept addr=0000100a write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=0000100a raw=aa000000 shaped=ffffbeef
+[L2 ARB] resp master=1 data=aa000000
+[L2 ARB] grant M1 addr=0000100a write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100a write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=aa0000aa
+[LSU RESP] drain=0 addr=0000100a raw=aa0000aa shaped=ffffbeef
+[L2 ARB] grant M0 addr=00000140
+[L2 CACHE] accept addr=00000140 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000140 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000140 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000140 ram_rdata=a0038393 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000144 ram_rdata=3a771e63 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000148 ram_rdata=00800193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000014c ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000150 ram_rdata=ec210113 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000154 ram_rdata=000010b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000158 ram_rdata=aa008093 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000015c ram_rdata=00000797 victim=0
+[L2 CACHE] lookup addr=00000140 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=a0038393
+[L2 ARB] grant M0 addr=00000160
+[L2 CACHE] accept addr=00000160 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000160 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000160 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000160 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000164 ram_rdata=fe111f23 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000168 ram_rdata=ffe11703 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000016c ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000170 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000174 ram_rdata=000013b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000178 ram_rdata=aa038393 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000017c ram_rdata=38771263 victim=0
+[L2 CACHE] lookup addr=00000160 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01478793
+[L2 ARB] grant M1 addr=0000100c write=1 wdata=00000aa0
+[L2 CACHE] accept addr=0000100c write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100c hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=0000100c raw=00000aa0 shaped=000000aa
+[L2 ARB] resp master=1 data=00000aa0
+[L2 ARB] grant M0 addr=00000160
+[L2 CACHE] accept addr=00000160 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000160 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01478793
+[L2 ARB] grant M1 addr=0000100c write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100c write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100c hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=0000100c raw=beef0aa0 shaped=000000aa
+[L2 ARB] resp master=1 data=beef0aa0
+[L2 ARB] grant M0 addr=00000180
+[L2 CACHE] accept addr=00000180 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000180 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000180 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000180 ram_rdata=00900193 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000184 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000188 ram_rdata=e8a10113 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000018c ram_rdata=ffffa0b7 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000190 ram_rdata=00a08093 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000194 ram_rdata=00000797 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000198 ram_rdata=01478793 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000019c ram_rdata=00111023 victim=0
+[L2 CACHE] lookup addr=00000180 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00900193
+[L2 ARB] grant M0 addr=000001a0
+[L2 CACHE] accept addr=000001a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000001a0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000001a0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000001a0 ram_rdata=00011703 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000001a4 ram_rdata=0080006f victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000001a8 ram_rdata=00008713 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000001ac ram_rdata=ffffa3b7 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000001b0 ram_rdata=00a38393 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000001b4 ram_rdata=34771663 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000001b8 ram_rdata=00a00193 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000001bc ram_rdata=00001097 victim=0
+[L2 CACHE] lookup addr=000001a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00011703
+[L2 ARB] grant M1 addr=0000100e write=1 wdata=a00a0000
+[L2 CACHE] accept addr=0000100e write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100e hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=0000100e raw=a00a0000 shaped=ffffbeef
+[L2 ARB] resp master=1 data=a00a0000
+[L2 ARB] grant M0 addr=000001a0
+[L2 CACHE] accept addr=000001a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000001a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00011703
+[L2 ARB] grant M1 addr=0000100e write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100e write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100e hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=0000100e raw=a00a0aa0 shaped=ffffbeef
+[L2 ARB] resp master=1 data=a00a0aa0
+[L2 ARB] grant M0 addr=000001c0
+[L2 CACHE] accept addr=000001c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000001c0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000001c0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000001c0 ram_rdata=e5408093 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000001c4 ram_rdata=12345137 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000001c8 ram_rdata=67810113 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000001cc ram_rdata=fe008213 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000001d0 ram_rdata=02221023 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000001d4 ram_rdata=00009283 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000001d8 ram_rdata=000053b7 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000001dc ram_rdata=67838393 victim=0
+[L2 CACHE] lookup addr=000001c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=e5408093
+[L2 ARB] grant M1 addr=00001010 write=1 wdata=00005678
+[L2 CACHE] accept addr=00001010 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001010 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=00005678
+[LSU RESP] drain=1 addr=00001010 raw=00005678 shaped=00000aa0
+[L2 ARB] grant M0 addr=000001e0
+[L2 CACHE] accept addr=000001e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000001e0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000001e0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000001e0 ram_rdata=32729063 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000001e4 ram_rdata=00b00193 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000001e8 ram_rdata=00001097 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000001ec ram_rdata=e2808093 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000001f0 ram_rdata=00003137 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000001f4 ram_rdata=09810113 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000001f8 ram_rdata=ffb08093 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000001fc ram_rdata=002093a3 victim=0
+[L2 CACHE] lookup addr=000001e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=32729063
+[L2 ARB] grant M1 addr=00001010 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001010 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001010 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=beef5678
+[LSU RESP] drain=0 addr=00001010 raw=beef5678 shaped=00000aa0
+[L2 ARB] grant M0 addr=00000200
+[L2 CACHE] accept addr=00000200 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000200 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000200 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000200 ram_rdata=00001217 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000204 ram_rdata=e1220213 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000208 ram_rdata=00021283 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000020c ram_rdata=000033b7 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000210 ram_rdata=09838393 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000214 ram_rdata=2e729663 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000218 ram_rdata=00c00193 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000021c ram_rdata=00000213 victim=0
+[L2 CACHE] lookup addr=00000200 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00001217
+[L2 ARB] grant M1 addr=00001012 write=1 wdata=30980000
+[L2 CACHE] accept addr=00001012 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001012 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001012 raw=30980000 shaped=ffffbeef
+[L2 ARB] resp master=1 data=30980000
+[L2 ARB] grant M1 addr=00001012 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001012 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001012 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=30985678
+[LSU RESP] drain=0 addr=00001012 raw=30985678 shaped=ffffbeef
+[L2 ARB] grant M0 addr=00000220
+[L2 CACHE] accept addr=00000220 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000220 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000220 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000220 ram_rdata=ffffd6b7 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000224 ram_rdata=cdd68693 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000228 ram_rdata=00001617 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000022c ram_rdata=dd860613 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000230 ram_rdata=00d61023 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000234 ram_rdata=00061703 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000238 ram_rdata=ffffd3b7 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000023c ram_rdata=cdd38393 victim=0
+[L2 CACHE] lookup addr=00000220 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=ffffd6b7
+[L2 ARB] grant M1 addr=00001000 write=1 wdata=0000ccdd
+[L2 CACHE] accept addr=00001000 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001000 raw=0000ccdd shaped=00005678
+[L2 ARB] resp master=1 data=0000ccdd
+[L2 ARB] grant M0 addr=00000240
+[L2 CACHE] accept addr=00000240 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000240 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000240 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000240 ram_rdata=2c771063 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000244 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000248 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000024c ram_rdata=fc521ae3 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000250 ram_rdata=00d00193 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000254 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000258 ram_rdata=ffffc6b7 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000025c ram_rdata=ccd68693 victim=0
+[L2 CACHE] lookup addr=00000240 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=2c771063
+[L2 ARB] grant M1 addr=00001000 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001000 raw=aa00ccdd shaped=00005678
+[L2 ARB] resp master=1 data=aa00ccdd
+[L2 ARB] grant M1 addr=00001000 write=1 wdata=0000ccdd
+[L2 CACHE] accept addr=00001000 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001000 raw=0000ccdd shaped=ffffccdd
+[L2 ARB] resp master=1 data=0000ccdd
+[L2 ARB] grant M1 addr=00001000 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=aa00ccdd
+[LSU RESP] drain=0 addr=00001000 raw=aa00ccdd shaped=ffffccdd
+[L2 ARB] grant M0 addr=00000260
+[L2 CACHE] accept addr=00000260 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000260 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000260 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000260 ram_rdata=00001617 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000264 ram_rdata=da060613 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000268 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000026c ram_rdata=00d61123 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000270 ram_rdata=00261703 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000274 ram_rdata=ffffc3b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000278 ram_rdata=ccd38393 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000027c ram_rdata=28771263 victim=0
+[L2 CACHE] lookup addr=00000260 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00001617
+[L2 ARB] grant M1 addr=00001002 write=1 wdata=bccd0000
+[L2 CACHE] accept addr=00001002 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=bccd0000
+[LSU RESP] drain=1 addr=00001002 raw=bccd0000 shaped=ffffaa00
+[L2 ARB] grant M0 addr=00000280
+[L2 CACHE] accept addr=00000280 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000280 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000280 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000280 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000284 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000288 ram_rdata=fc5218e3 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000028c ram_rdata=00e00193 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000290 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000294 ram_rdata=ffffc6b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000298 ram_rdata=bcc68693 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000029c ram_rdata=00001617 victim=0
+[L2 CACHE] lookup addr=00000280 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00120213
+[L2 ARB] grant M1 addr=00001002 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001002 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001002 raw=bccdccdd shaped=ffffaa00
+[L2 ARB] resp master=1 data=bccdccdd
+[L2 ARB] grant M1 addr=00001002 write=1 wdata=bccd0000
+[L2 CACHE] accept addr=00001002 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=bccd0000
+[LSU RESP] drain=1 addr=00001002 raw=bccd0000 shaped=ffffbccd
+[L2 ARB] grant M1 addr=00001002 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001002 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001002 raw=bccdccdd shaped=ffffbccd
+[L2 ARB] resp master=1 data=bccdccdd
+[L2 ARB] grant M0 addr=000002a0
+[L2 CACHE] accept addr=000002a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000002a0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000002a0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000002a0 ram_rdata=d6460613 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000002a4 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000002a8 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000002ac ram_rdata=00d61223 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000002b0 ram_rdata=00461703 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000002b4 ram_rdata=ffffc3b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000002b8 ram_rdata=bcc38393 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000002bc ram_rdata=24771263 victim=0
+[L2 CACHE] lookup addr=000002a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=d6460613
+[L2 ARB] grant M1 addr=00001004 write=1 wdata=0000bbcc
+[L2 CACHE] accept addr=00001004 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=0000bbcc
+[LSU RESP] drain=1 addr=00001004 raw=0000bbcc shaped=ffffccdd
+[L2 ARB] grant M0 addr=000002c0
+[L2 CACHE] accept addr=000002c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000002c0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000002c0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000002c0 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000002c4 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000002c8 ram_rdata=fc5216e3 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000002cc ram_rdata=00f00193 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000002d0 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000002d4 ram_rdata=ffffb6b7 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000002d8 ram_rdata=bbc68693 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000002dc ram_rdata=00000013 victim=0
+[L2 CACHE] lookup addr=000002c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00120213
+[L2 ARB] grant M1 addr=00001004 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001004 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001004 raw=a00abbcc shaped=ffffccdd
+[L2 ARB] resp master=1 data=a00abbcc
+[L2 ARB] grant M1 addr=00001004 write=1 wdata=0000bbcc
+[L2 CACHE] accept addr=00001004 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001004 raw=0000bbcc shaped=ffffbbcc
+[L2 ARB] resp master=1 data=0000bbcc
+[L2 ARB] grant M1 addr=00001004 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001004 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=a00abbcc
+[LSU RESP] drain=0 addr=00001004 raw=a00abbcc shaped=ffffbbcc
+[L2 ARB] grant M0 addr=000002e0
+[L2 CACHE] accept addr=000002e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000002e0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000002e0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000002e0 ram_rdata=00001617 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000002e4 ram_rdata=d2060613 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000002e8 ram_rdata=00d61323 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000002ec ram_rdata=00661703 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000002f0 ram_rdata=ffffb3b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000002f4 ram_rdata=bbc38393 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000002f8 ram_rdata=20771463 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000002fc ram_rdata=00120213 victim=0
+[L2 CACHE] lookup addr=000002e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00001617
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=abbc0000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=abbc0000
+[LSU RESP] drain=1 addr=00001006 raw=abbc0000 shaped=ffffa00a
+[L2 ARB] grant M1 addr=00001006 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001006 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001006 raw=abbcbbcc shaped=ffffa00a
+[L2 ARB] resp master=1 data=abbcbbcc
+[L2 ARB] grant M0 addr=00000300
+[L2 CACHE] accept addr=00000300 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000300 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000300 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000300 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000304 ram_rdata=fc5218e3 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000308 ram_rdata=01000193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000030c ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000310 ram_rdata=ffffb6b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000314 ram_rdata=abb68693 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000318 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000031c ram_rdata=00001617 victim=0
+[L2 CACHE] lookup addr=00000300 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=abbc0000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=abbc0000
+[LSU RESP] drain=1 addr=00001006 raw=abbc0000 shaped=ffffabbc
+[L2 ARB] grant M1 addr=00001006 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001006 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001006 raw=abbcbbcc shaped=ffffabbc
+[L2 ARB] resp master=1 data=abbcbbcc
+[L2 ARB] grant M0 addr=00000300
+[L2 CACHE] accept addr=00000300 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000300 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[HEARTBEAT] Cycle=1000 PC=0x00000304 if_valid=0 if_inst=0xfc5218e3 dec0_valid=1 fb_pop0_valid=1 rst=1 @50100
+[L2 ARB] grant M0 addr=00000320
+[L2 CACHE] accept addr=00000320 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000320 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000320 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000320 ram_rdata=ce460613 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000324 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000328 ram_rdata=00d61423 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000032c ram_rdata=00861703 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000330 ram_rdata=ffffb3b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000334 ram_rdata=abb38393 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000338 ram_rdata=1c771463 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000033c ram_rdata=00120213 victim=0
+[L2 CACHE] lookup addr=00000320 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=ce460613
+[L2 ARB] grant M1 addr=00001008 write=1 wdata=0000aabb
+[L2 CACHE] accept addr=00001008 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=0000aabb
+[LSU RESP] drain=1 addr=00001008 raw=0000aabb shaped=ffffbbcc
+[L2 ARB] grant M1 addr=00001008 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001008 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001008 raw=aa00aabb shaped=ffffbbcc
+[L2 ARB] resp master=1 data=aa00aabb
+[L2 ARB] grant M0 addr=00000340
+[L2 CACHE] accept addr=00000340 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000340 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000340 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000340 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000344 ram_rdata=fc5216e3 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000348 ram_rdata=01100193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000034c ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000350 ram_rdata=ffffe6b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000354 ram_rdata=aab68693 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000358 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000035c ram_rdata=00000013 victim=0
+[L2 CACHE] lookup addr=00000340 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M1 addr=00001008 write=1 wdata=0000aabb
+[L2 CACHE] accept addr=00001008 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001008 raw=0000aabb shaped=ffffaabb
+[L2 ARB] resp master=1 data=0000aabb
+[L2 ARB] grant M1 addr=00001008 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001008 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=aa00aabb
+[LSU RESP] drain=0 addr=00001008 raw=aa00aabb shaped=ffffaabb
+[L2 ARB] grant M0 addr=00000340
+[L2 CACHE] accept addr=00000340 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000340 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M0 addr=00000360
+[L2 CACHE] accept addr=00000360 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000360 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000360 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000360 ram_rdata=00001617 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000364 ram_rdata=ca060613 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000368 ram_rdata=00d61523 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000036c ram_rdata=00a61703 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000370 ram_rdata=ffffe3b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000374 ram_rdata=aab38393 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000378 ram_rdata=18771463 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000037c ram_rdata=00120213 victim=0
+[L2 CACHE] lookup addr=00000360 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00001617
+[L2 ARB] grant M1 addr=0000100a write=1 wdata=daab0000
+[L2 CACHE] accept addr=0000100a write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=0000100a raw=daab0000 shaped=ffffaa00
+[L2 ARB] resp master=1 data=daab0000
+[L2 ARB] grant M1 addr=0000100a write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100a write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=daabaabb
+[LSU RESP] drain=0 addr=0000100a raw=daabaabb shaped=ffffaa00
+[L2 ARB] grant M0 addr=00000380
+[L2 CACHE] accept addr=00000380 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000380 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000380 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000380 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000384 ram_rdata=fc5216e3 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000388 ram_rdata=01200193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000038c ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000390 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000394 ram_rdata=c7010113 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000398 ram_rdata=000020b7 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000039c ram_rdata=23308093 victim=0
+[L2 CACHE] lookup addr=00000380 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M1 addr=0000100a write=1 wdata=daab0000
+[L2 CACHE] accept addr=0000100a write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=daab0000
+[LSU RESP] drain=1 addr=0000100a raw=daab0000 shaped=ffffdaab
+[L2 ARB] grant M1 addr=0000100a write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100a write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=0000100a raw=daabaabb shaped=ffffdaab
+[L2 ARB] resp master=1 data=daabaabb
+[L2 ARB] grant M0 addr=00000380
+[L2 CACHE] accept addr=00000380 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000380 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M0 addr=000003a0
+[L2 CACHE] accept addr=000003a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000003a0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000003a0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000003a0 ram_rdata=00111023 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000003a4 ram_rdata=00011703 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000003a8 ram_rdata=000023b7 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000003ac ram_rdata=23338393 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000003b0 ram_rdata=14771863 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000003b4 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000003b8 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000003bc ram_rdata=fc521ae3 victim=0
+[L2 CACHE] lookup addr=000003a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00111023
+[L2 ARB] grant M1 addr=00001000 write=1 wdata=00002233
+[L2 CACHE] accept addr=00001000 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001000 raw=00002233 shaped=ffffaabb
+[L2 ARB] resp master=1 data=00002233
+[L2 ARB] grant M1 addr=00001000 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=bccd2233
+[LSU RESP] drain=0 addr=00001000 raw=bccd2233 shaped=ffffaabb
+[L2 ARB] grant M0 addr=000003c0
+[L2 CACHE] accept addr=000003c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000003c0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000003c0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000003c0 ram_rdata=01300193 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000003c4 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000003c8 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000003cc ram_rdata=c3810113 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000003d0 ram_rdata=000010b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000003d4 ram_rdata=22308093 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000003d8 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000003dc ram_rdata=00111123 victim=0
+[L2 CACHE] lookup addr=000003c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01300193
+[L2 ARB] grant M1 addr=00001000 write=1 wdata=00002233
+[L2 CACHE] accept addr=00001000 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=00002233
+[LSU RESP] drain=1 addr=00001000 raw=00002233 shaped=00002233
+[L2 ARB] grant M1 addr=00001000 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001000 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001000 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001000 raw=bccd2233 shaped=00002233
+[L2 ARB] resp master=1 data=bccd2233
+[L2 ARB] grant M0 addr=000003c0
+[L2 CACHE] accept addr=000003c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000003c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=01300193
+[L2 ARB] grant M0 addr=000003e0
+[L2 CACHE] accept addr=000003e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000003e0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000003e0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000003e0 ram_rdata=00211703 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000003e4 ram_rdata=000013b7 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000003e8 ram_rdata=22338393 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000003ec ram_rdata=10771a63 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000003f0 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000003f4 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000003f8 ram_rdata=fc5218e3 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000003fc ram_rdata=01400193 victim=0
+[L2 CACHE] lookup addr=000003e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00211703
+[L2 ARB] grant M1 addr=00001002 write=1 wdata=12230000
+[L2 CACHE] accept addr=00001002 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001002 raw=12230000 shaped=ffffbccd
+[L2 ARB] resp master=1 data=12230000
+[L2 ARB] grant M1 addr=00001002 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001002 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=12232233
+[LSU RESP] drain=0 addr=00001002 raw=12232233 shaped=ffffbccd
+[L2 ARB] grant M1 addr=00001002 write=1 wdata=12230000
+[L2 CACHE] accept addr=00001002 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001002 raw=12230000 shaped=00001223
+[L2 ARB] resp master=1 data=12230000
+[L2 ARB] grant M1 addr=00001002 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001002 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001002 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=12232233
+[LSU RESP] drain=0 addr=00001002 raw=12232233 shaped=00001223
+[L2 ARB] grant M0 addr=00000400
+[L2 CACHE] accept addr=00000400 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000400 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000400 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000400 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000404 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000408 ram_rdata=bfc10113 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000040c ram_rdata=000010b7 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000410 ram_rdata=12208093 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000414 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000418 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000041c ram_rdata=00111223 victim=0
+[L2 CACHE] lookup addr=00000400 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00000213
+[L2 ARB] grant M0 addr=00000420
+[L2 CACHE] accept addr=00000420 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000420 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000420 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000420 ram_rdata=00411703 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000424 ram_rdata=000013b7 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000428 ram_rdata=12238393 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000042c ram_rdata=0c771a63 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000430 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000434 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000438 ram_rdata=fc5216e3 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000043c ram_rdata=01500193 victim=0
+[L2 CACHE] lookup addr=00000420 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00411703
+[L2 ARB] grant M1 addr=00001004 write=1 wdata=00001122
+[L2 CACHE] accept addr=00001004 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001004 raw=00001122 shaped=00002233
+[L2 ARB] resp master=1 data=00001122
+[L2 ARB] grant M1 addr=00001004 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001004 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=abbc1122
+[LSU RESP] drain=0 addr=00001004 raw=abbc1122 shaped=00002233
+[L2 ARB] grant M1 addr=00001004 write=1 wdata=00001122
+[L2 CACHE] accept addr=00001004 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=00001122
+[LSU RESP] drain=1 addr=00001004 raw=00001122 shaped=00001122
+[L2 ARB] grant M1 addr=00001004 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001004 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001004 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001004 raw=abbc1122 shaped=00001122
+[L2 ARB] resp master=1 data=abbc1122
+[L2 ARB] grant M0 addr=00000440
+[L2 CACHE] accept addr=00000440 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000440 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000440 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000440 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000444 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000448 ram_rdata=bbc10113 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000044c ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000450 ram_rdata=11200093 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000454 ram_rdata=00111323 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000458 ram_rdata=00611703 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000045c ram_rdata=11200393 victim=0
+[L2 CACHE] lookup addr=00000440 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00000213
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=01120000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=01120000
+[LSU RESP] drain=1 addr=00001006 raw=01120000 shaped=ffffabbc
+[L2 ARB] grant M0 addr=00000460
+[L2 CACHE] accept addr=00000460 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000460 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000460 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000460 ram_rdata=0a771063 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000464 ram_rdata=00120213 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000468 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000046c ram_rdata=fc521ce3 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000470 ram_rdata=01600193 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000474 ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000478 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000047c ram_rdata=b8810113 victim=0
+[L2 CACHE] lookup addr=00000460 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0a771063
+[L2 ARB] grant M1 addr=00001006 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001006 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=01121122
+[LSU RESP] drain=0 addr=00001006 raw=01121122 shaped=ffffabbc
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=01120000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=01120000
+[LSU RESP] drain=1 addr=00001006 raw=01120000 shaped=00000112
+[L2 ARB] grant M1 addr=00001006 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001006 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=00001006 raw=01121122 shaped=00000112
+[L2 ARB] resp master=1 data=01121122
+[L2 ARB] grant M0 addr=00000480
+[L2 CACHE] accept addr=00000480 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000480 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000480 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000480 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000484 ram_rdata=01100093 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000488 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000048c ram_rdata=00111423 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000490 ram_rdata=00811703 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000494 ram_rdata=01100393 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000498 ram_rdata=06771463 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000049c ram_rdata=00120213 victim=0
+[L2 CACHE] lookup addr=00000480 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00000013
+[L2 ARB] grant M1 addr=00001008 write=1 wdata=00000011
+[L2 CACHE] accept addr=00001008 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001008 raw=00000011 shaped=00001122
+[L2 ARB] resp master=1 data=00000011
+[L2 ARB] grant M1 addr=00001008 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001008 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=daab0011
+[LSU RESP] drain=0 addr=00001008 raw=daab0011 shaped=00001122
+[L2 ARB] grant M0 addr=000004a0
+[L2 CACHE] accept addr=000004a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000004a0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000004a0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000004a0 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000004a4 ram_rdata=fc521ae3 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000004a8 ram_rdata=01700193 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000004ac ram_rdata=00000213 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000004b0 ram_rdata=00001117 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000004b4 ram_rdata=b5010113 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000004b8 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000004bc ram_rdata=00000013 victim=0
+[L2 CACHE] lookup addr=000004a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M1 addr=00001008 write=1 wdata=00000011
+[L2 CACHE] accept addr=00001008 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001008 raw=00000011 shaped=00000011
+[L2 ARB] resp master=1 data=00000011
+[L2 ARB] grant M1 addr=00001008 write=0 wdata=00000000
+[L2 CACHE] accept addr=00001008 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00001008 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=daab0011
+[LSU RESP] drain=0 addr=00001008 raw=daab0011 shaped=00000011
+[L2 ARB] grant M0 addr=000004a0
+[L2 CACHE] accept addr=000004a0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000004a0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M0 addr=000004c0
+[L2 CACHE] accept addr=000004c0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000004c0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000004c0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000004c0 ram_rdata=000030b7 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000004c4 ram_rdata=00108093 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000004c8 ram_rdata=00111523 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000004cc ram_rdata=00a11703 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000004d0 ram_rdata=000033b7 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000004d4 ram_rdata=00138393 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000004d8 ram_rdata=02771463 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000004dc ram_rdata=00120213 victim=0
+[L2 CACHE] lookup addr=000004c0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=000030b7
+[L2 ARB] grant M1 addr=0000100a write=1 wdata=30010000
+[L2 CACHE] accept addr=0000100a write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=0000100a raw=30010000 shaped=ffffdaab
+[L2 ARB] resp master=1 data=30010000
+[L2 ARB] grant M1 addr=0000100a write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100a write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=30010011
+[LSU RESP] drain=0 addr=0000100a raw=30010011 shaped=ffffdaab
+[L2 ARB] grant M0 addr=000004e0
+[L2 CACHE] accept addr=000004e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000004e0 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=000004e0 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=000004e0 ram_rdata=00200293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=000004e4 ram_rdata=fc5216e3 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=000004e8 ram_rdata=0000c537 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=000004ec ram_rdata=eef50513 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=000004f0 ram_rdata=00001597 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=000004f4 ram_rdata=b1058593 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=000004f8 ram_rdata=00a59323 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=000004fc ram_rdata=00301a63 victim=0
+[L2 CACHE] lookup addr=000004e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M1 addr=0000100a write=1 wdata=30010000
+[L2 CACHE] accept addr=0000100a write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[L2 ARB] resp master=1 data=30010000
+[LSU RESP] drain=1 addr=0000100a raw=30010000 shaped=00003001
+[L2 ARB] grant M1 addr=0000100a write=0 wdata=00000000
+[L2 CACHE] accept addr=0000100a write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=0000100a hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=0 addr=0000100a raw=30010011 shaped=00003001
+[L2 ARB] resp master=1 data=30010011
+[L2 ARB] grant M0 addr=000004e0
+[L2 CACHE] accept addr=000004e0 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=000004e0 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=00200293
+[L2 ARB] grant M0 addr=00000500
+[L2 CACHE] accept addr=00000500 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000500 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000500 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000500 ram_rdata=0ff00293 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000504 ram_rdata=13000337 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000508 ram_rdata=00530023 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000050c ram_rdata=0000006f victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000510 ram_rdata=00400293 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000514 ram_rdata=13000337 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000518 ram_rdata=00530023 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000051c ram_rdata=0000006f victim=0
+[L2 CACHE] lookup addr=00000500 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=0ff00293
+[L2 ARB] grant M1 addr=00001006 write=1 wdata=beef0000
+[L2 CACHE] accept addr=00001006 write=1 uncached=0 state=0
+[L2 CACHE] lookup addr=00001006 hit=1 hit_way=1 valid=0011 tag=000000/000002/000000/000000
+[LSU RESP] drain=1 addr=00001006 raw=beef0000 shaped=00003001
+[L2 ARB] resp master=1 data=beef0000
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=0 hit_way=0 valid=0000 tag=000000/000000/000000/000000
+[L2 CACHE] miss addr=00000520 victim=0 dirty=0
+[L2 CACHE] refill cnt=0 ram_addr=00000520 ram_rdata=c0001073 victim=0
+[L2 CACHE] refill cnt=1 ram_addr=00000524 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=2 ram_addr=00000528 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=3 ram_addr=0000052c ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=4 ram_addr=00000530 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=5 ram_addr=00000534 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=6 ram_addr=00000538 ram_rdata=00000013 victim=0
+[L2 CACHE] refill cnt=7 ram_addr=0000053c ram_rdata=00000013 victim=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[HEARTBEAT] Cycle=2000 PC=0x0000051c if_valid=0 if_inst=0x0000006f dec0_valid=1 fb_pop0_valid=1 rst=1 @100100
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[HEARTBEAT] Cycle=3000 PC=0x0000051c if_valid=1 if_inst=0x0000006f dec0_valid=0 fb_pop0_valid=0 rst=1 @150100
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0
+[L2 CACHE] lookup addr=00000520 hit=1 hit_way=0 valid=0001 tag=000000/000000/000000/000000
+[L2 ARB] resp master=0 data=c0001073
+[L2 ARB] grant M0 addr=00000520
+
+----------------------------------------
+
+	 Timeout Error !!!!
+
+==================================================================
+=========     FFFFFFF       A         III   L         ============
+=========     FFFFFFF    AAAAAAA       I    L         ============
+=========     F       A           A   III   LLLLLLL   ============
+==================================================================
+========= Test FAILED !!!               200000
+==================================================================
+tb.sv:601: $finish called at 200000 (1ns)
+[L2 CACHE] accept addr=00000520 write=0 uncached=0 state=0

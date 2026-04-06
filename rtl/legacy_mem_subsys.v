@@ -130,6 +130,9 @@ initial begin
     for (idx = 0; idx < RAM_WORDS; idx = idx + 1) begin
         data_mem[idx] = 32'd0;
     end
+`ifdef FPGA_MODE
+    $readmemh("data_word.hex", data_mem);
+`endif
 end
 
 uart_tx #(

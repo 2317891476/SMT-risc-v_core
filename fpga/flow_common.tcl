@@ -104,6 +104,10 @@ proc ax7203_write_evidence {path lines} {
 }
 
 proc ax7203_build_board_rom {script_dir} {
+    if {[info exists ::env(SKIP_ROM_BUILD)] && $::env(SKIP_ROM_BUILD)} {
+        puts "INFO: SKIP_ROM_BUILD set; using existing rom/inst.hex and rom/data.hex"
+        return
+    }
     set rom_build_py "$script_dir/scripts/build_rom_image.py"
     if {![file exists $rom_build_py]} {
         error "Missing ROM builder script: $rom_build_py"
