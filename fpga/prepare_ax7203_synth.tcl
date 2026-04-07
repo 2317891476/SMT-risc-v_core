@@ -10,6 +10,7 @@ set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
@@ -46,6 +47,7 @@ set_property verilog_define [list \
     ENABLE_ROCC_ACCEL=$enable_rocc \
     ENABLE_MEM_SUBSYS=$enable_mem_subsys \
     SMT_MODE=$smt_mode \
+    {*}[expr {$enable_ddr3 ? "ENABLE_DDR3=1" : ""}] \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 

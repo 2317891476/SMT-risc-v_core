@@ -5,6 +5,7 @@
 //   - Write-back + write-allocate for RAM-window stores
 //   - PLRU replacement policy
 //   - Interfaces with backing RAM for refill and write-back
+//   - L2_PASSTHROUGH mode: zero-cache pass-through for FPGA on-chip SRAM
 // =============================================================================
 `include "define.v"
 
@@ -46,6 +47,98 @@ module l2_cache (
     output wire        cache_hit,
     output wire        cache_miss
 );
+
+`ifdef L2_PASSTHROUGH
+// ═════════════════════════════════════════════════════════════════════════════
+// PASSTHROUGH MODE — no cache arrays, direct RAM access.
+// Used for FPGA with on-chip SRAM where single-cycle RAM makes L2 redundant.
+// Read: 2 cycles (latch → respond).  Write: 3 cycles (latch → RMW read → write+respond).
+// ═════════════════════════════════════════════════════════════════════════════
+
+localparam PT_IDLE  = 3'd0;
+localparam PT_READ  = 3'd1;
+localparam PT_WRITE = 3'd2;
+
+reg [2:0]  pt_state;
+reg [31:0] pt_addr;
+reg        pt_write;
+reg [31:0] pt_wdata;
+reg [3:0]  pt_wen;
+reg [31:0] pt_resp_data;
+reg        pt_resp_valid;
+reg [31:0] pt_old_data;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        pt_state      <= PT_IDLE;
+        pt_resp_valid <= 1'b0;
+        pt_resp_data  <= 32'd0;
+        pt_addr       <= 32'd0;
+        pt_write      <= 1'b0;
+        pt_wdata      <= 32'd0;
+        pt_wen        <= 4'd0;
+        pt_old_data   <= 32'd0;
+    end else begin
+        pt_resp_valid <= 1'b0;
+
+        case (pt_state)
+            PT_IDLE: begin
+                if (req_valid) begin
+                    pt_addr  <= req_addr;
+                    pt_write <= req_write;
+                    pt_wdata <= req_wdata;
+                    pt_wen   <= req_wen;
+                    pt_state <= PT_READ;
+                end
+            end
+
+            PT_READ: begin
+                if (pt_write) begin
+                    pt_old_data <= ram_rdata;
+                    pt_state    <= PT_WRITE;
+                end else begin
+                    pt_resp_data  <= ram_rdata;
+                    pt_resp_valid <= 1'b1;
+                    pt_state      <= PT_IDLE;
+                end
+            end
+
+            PT_WRITE: begin
+                pt_resp_data  <= pt_merge_data;
+                pt_resp_valid <= 1'b1;
+                pt_state      <= PT_IDLE;
+            end
+
+            default: pt_state <= PT_IDLE;
+        endcase
+    end
+end
+
+wire [31:0] pt_merge_data = {
+    pt_wen[3] ? pt_wdata[31:24] : pt_old_data[31:24],
+    pt_wen[2] ? pt_wdata[23:16] : pt_old_data[23:16],
+    pt_wen[1] ? pt_wdata[15:8]  : pt_old_data[15:8],
+    pt_wen[0] ? pt_wdata[7:0]   : pt_old_data[7:0]
+};
+
+assign req_ready    = (pt_state == PT_IDLE);
+assign resp_valid   = pt_resp_valid;
+assign resp_data    = pt_resp_data;
+assign resp_last    = pt_resp_valid;
+
+assign ram_addr     = (pt_state == PT_IDLE) ? req_addr : pt_addr;
+assign ram_write    = (pt_state == PT_WRITE);
+assign ram_wdata    = pt_merge_data;
+assign ram_word_idx = pt_addr[4:2];
+
+assign cache_state  = pt_state;
+assign cache_hit    = 1'b0;
+assign cache_miss   = 1'b0;
+
+`else
+// ═════════════════════════════════════════════════════════════════════════════
+// FULL L2 CACHE — 4-way set-associative with PLRU
+// ═════════════════════════════════════════════════════════════════════════════
 
 // ═════════════════════════════════════════════════════════════════════════════
 // L2 Cache Parameters
@@ -357,5 +450,7 @@ assign ram_word_idx = refill_cnt[2:0];
 assign cache_state = state;
 assign cache_hit = (state == LOOKUP) && hit;
 assign cache_miss = (state == MISS) || ((state == LOOKUP) && !hit && active);
+
+`endif // L2_PASSTHROUGH
 
 endmodule

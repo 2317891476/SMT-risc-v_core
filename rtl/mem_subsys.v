@@ -58,13 +58,47 @@ module mem_subsys (
     // ═══════════════════════════════════════════════════════════════════════════
     input  wire        ext_irq_src,       // Raw PLIC source input (optional TB/device drive)
     output wire        ext_timer_irq,     // CLINT timer interrupt pending (MTIP)
-    output wire        ext_external_irq   // PLIC external interrupt pending (MEIP)
+    output wire        ext_external_irq,  // PLIC external interrupt pending (MEIP)
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    // UART physical interface
+    // ═══════════════════════════════════════════════════════════════════════════
+    input  wire        uart_rx,           // UART receive pin
+    output wire        uart_tx            // UART transmit pin
+
+`ifdef ENABLE_DDR3
+    ,
+    // ═══════════════════════════════════════════════════════════════════════════
+    // DDR3 external memory port (active when addr[31]=1, i.e. >=0x8000_0000)
+    // ═══════════════════════════════════════════════════════════════════════════
+    output wire        ddr3_req_valid,
+    input  wire        ddr3_req_ready,
+    output wire [31:0] ddr3_req_addr,
+    output wire        ddr3_req_write,
+    output wire [31:0] ddr3_req_wdata,
+    output wire [3:0]  ddr3_req_wen,
+    input  wire        ddr3_resp_valid,
+    input  wire [31:0] ddr3_resp_data,
+    input  wire        ddr3_init_calib_complete
+`endif
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Shared Backing RAM (4096 x 32-bit words = 16KB)
 // ═════════════════════════════════════════════════════════════════════════════
 reg [31:0] ram [0:4095];
+
+// RAM initialization: for FPGA builds, preload from combined hex file
+// containing both .text (instructions) and .data sections.
+// Testbench builds use hierarchical reference to fill ram[] instead.
+integer ram_init_idx;
+initial begin
+    for (ram_init_idx = 0; ram_init_idx < 4096; ram_init_idx = ram_init_idx + 1)
+        ram[ram_init_idx] = 32'd0;
+`ifdef FPGA_MODE
+    $readmemh("mem_subsys_ram.hex", ram);
+`endif
+end
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Internal Wires for Arbiter-Cache Interface
@@ -94,10 +128,30 @@ wire        cache_hit;
 wire        cache_miss;
 
 // Address decode for MMIO (used by arbiter and MMIO handling)
+// The 0x1300_xxxx region covers TUBE (test marker) and UART MMIO registers.
+wire addr_is_mmio_0x13_m1 = (m1_req_addr[31:16] == 16'h1300);
 wire addr_is_tube_m1    = (m1_req_addr == `TUBE_ADDR);
+wire addr_is_uart_tx_m1 = (m1_req_addr == `UART_TXDATA_ADDR);
+wire addr_is_uart_status_m1 = (m1_req_addr == `UART_STATUS_ADDR);
+wire addr_is_uart_rx_m1 = (m1_req_addr == `UART_RXDATA_ADDR);
+wire addr_is_uart_ctrl_m1 = (m1_req_addr == `UART_CTRL_ADDR);
+wire addr_is_ddr3_status_m1 = (m1_req_addr == `DDR3_STATUS_ADDR);
+wire addr_is_uart_m1    = addr_is_uart_tx_m1 || addr_is_uart_status_m1
+                        || addr_is_uart_rx_m1 || addr_is_uart_ctrl_m1;
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
-wire addr_is_uncached_m1 = addr_is_tube_m1 || addr_is_clint_m1 || addr_is_plic_m1;
+wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_plic_m1;
+
+// DDR3 region: address bit 31 set (0x8000_0000 - 0xFFFF_FFFF)
+`ifdef ENABLE_DDR3
+wire addr_is_ddr3_m1 = m1_req_addr[31];
+wire m1_ddr3_req     = m1_req_valid && addr_is_ddr3_m1;
+`else
+wire addr_is_ddr3_m1 = 1'b0;
+// synthesis translate_off
+wire m1_ddr3_req     = 1'b0;
+// synthesis translate_on
+`endif
 
 // M2 (RoCC DMA) address decode - RAM-only access (0x0000_0000 - 0x0000_3FFF)
 wire addr_is_ram_m2     = (m2_req_addr >= `RAM_CACHEABLE_BASE) && (m2_req_addr <= `RAM_CACHEABLE_TOP);
@@ -108,11 +162,21 @@ wire m2_cached_req      = m2_req_valid && addr_is_ram_m2;
 // ═════════════════════════════════════════════════════════════════════════════
 
 // M1 cached request - filter out MMIO
-wire        m1_cached_req   = m1_req_valid && !addr_is_uncached_m1;
+wire        m1_cached_req   = m1_req_valid && !addr_is_uncached_m1 && !addr_is_ddr3_m1;
 wire        m1_cached_ready;
 
-// M1 ready: MMIO is immediate, cached goes through arbiter
-assign m1_req_ready = addr_is_uncached_m1 ? m1_mmio_req : m1_cached_ready;
+// M1 ready: MMIO is immediate (except UART TX backpressure), cached goes through arbiter
+// UART TX write stalls when pending buffer is full.
+wire m1_mmio_ready = addr_is_uart_tx_m1 && m1_req_write
+                   ? (uart_tx_enable_r && !uart_pending_valid_r)
+                   : 1'b1;
+`ifdef ENABLE_DDR3
+assign m1_req_ready = addr_is_ddr3_m1    ? ddr3_req_ready
+                   : addr_is_uncached_m1 ? (m1_mmio_req && m1_mmio_ready)
+                   : m1_cached_ready;
+`else
+assign m1_req_ready = addr_is_uncached_m1 ? (m1_mmio_req && m1_mmio_ready) : m1_cached_ready;
+`endif
 
 l2_arbiter u_l2_arbiter (
     .clk            (clk),
@@ -273,6 +337,155 @@ assign ext_timer_irq    = clint_timer_irq;
 assign ext_external_irq = plic_ext_irq;
 
 // ═════════════════════════════════════════════════════════════════════════════
+// UART MMIO (TXDATA/STATUS/RXDATA/CTRL) – same register map as legacy_mem_subsys
+// ═════════════════════════════════════════════════════════════════════════════
+
+`ifdef FPGA_MODE
+    `ifndef FPGA_UART_CLK_DIV
+        `define FPGA_UART_CLK_DIV 174
+    `endif
+localparam integer UART_CLK_DIV = `FPGA_UART_CLK_DIV;
+`else
+localparam integer UART_CLK_DIV = 4;
+`endif
+
+reg        uart_tx_start_r;
+reg [7:0]  uart_tx_data_r;
+reg        uart_pending_valid_r;
+reg [7:0]  uart_pending_byte_r;
+reg        uart_tx_enable_r;
+reg        uart_rx_enable_r;
+reg        uart_rx_valid_r;
+reg        uart_rx_overrun_r;
+reg        uart_rx_frame_err_r;
+reg [7:0]  uart_rx_data_r;
+wire       uart_busy;
+wire       uart_status_busy;
+wire       uart_rx_byte_valid;
+wire [7:0] uart_rx_byte;
+wire       uart_rx_frame_error;
+
+assign uart_status_busy = uart_busy || uart_pending_valid_r || uart_tx_start_r;
+
+wire [31:0] uart_status_word = {
+    25'd0,
+    uart_tx_enable_r,
+    uart_rx_enable_r,
+    uart_rx_frame_err_r,
+    uart_rx_overrun_r,
+    uart_rx_valid_r,
+    (~uart_status_busy && uart_tx_enable_r),
+    uart_status_busy
+};
+wire [31:0] uart_ctrl_word = {29'd0, uart_rx_valid_r, uart_rx_enable_r, uart_tx_enable_r};
+
+// UART write byte extraction: pick the first non-zero byte lane
+function [7:0] select_mmio_byte;
+    input [7:0] current_value;
+    input [31:0] new_word;
+    input [3:0]  byte_en;
+    begin
+        select_mmio_byte = current_value;
+        if (byte_en[0]) select_mmio_byte = new_word[7:0];
+        else if (byte_en[1]) select_mmio_byte = new_word[15:8];
+        else if (byte_en[2]) select_mmio_byte = new_word[23:16];
+        else if (byte_en[3]) select_mmio_byte = new_word[31:24];
+    end
+endfunction
+
+// UART request decode from M1 MMIO path
+wire uart_tx_write  = m1_mmio_req && addr_is_uart_tx_m1 && m1_req_write;
+wire uart_ctrl_write = m1_mmio_req && addr_is_uart_ctrl_m1 && m1_req_write;
+wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
+wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
+wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
+wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
+
+uart_tx #(
+    .CLK_DIV(UART_CLK_DIV)
+) u_uart_tx (
+    .clk      (clk            ),
+    .rst_n    (rstn           ),
+    .tx_start (uart_tx_start_r),
+    .tx_data  (uart_tx_data_r ),
+    .tx       (uart_tx        ),
+    .busy     (uart_busy      )
+);
+
+uart_rx #(
+    .CLK_DIV(UART_CLK_DIV)
+) u_uart_rx (
+    .clk         (clk                ),
+    .rst_n       (rstn               ),
+    .enable      (uart_rx_enable_r   ),
+    .rx          (uart_rx            ),
+    .byte_valid  (uart_rx_byte_valid ),
+    .byte_data   (uart_rx_byte       ),
+    .frame_error (uart_rx_frame_error)
+);
+
+// UART TX pending + RX control FSM
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        uart_tx_start_r      <= 1'b0;
+        uart_tx_data_r       <= 8'd0;
+        uart_pending_valid_r <= 1'b0;
+        uart_pending_byte_r  <= 8'd0;
+        uart_tx_enable_r     <= 1'b1;
+        uart_rx_enable_r     <= 1'b1;
+        uart_rx_valid_r      <= 1'b0;
+        uart_rx_overrun_r    <= 1'b0;
+        uart_rx_frame_err_r  <= 1'b0;
+        uart_rx_data_r       <= 8'd0;
+    end else begin
+        uart_tx_start_r <= 1'b0;
+
+        // TX: accept store into pending register
+        if (uart_store_accept) begin
+            uart_pending_byte_r  <= uart_write_byte;
+            uart_pending_valid_r <= 1'b1;
+        end
+
+        // TX: drain pending when uart_tx is free
+        if (uart_pending_valid_r && !uart_busy) begin
+            uart_tx_data_r       <= uart_pending_byte_r;
+            uart_tx_start_r      <= 1'b1;
+            uart_pending_valid_r <= 1'b0;
+        end
+
+        // CTRL register write
+        if (uart_ctrl_write) begin
+            uart_tx_enable_r <= uart_ctrl_write_byte[0];
+            uart_rx_enable_r <= uart_ctrl_write_byte[1];
+            if (uart_ctrl_write_byte[2]) uart_rx_overrun_r   <= 1'b0;
+            if (uart_ctrl_write_byte[3]) uart_rx_frame_err_r <= 1'b0;
+            if (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4])
+                uart_rx_valid_r <= 1'b0;
+        end
+
+        // RX data pop on read
+        if (uart_rx_read) begin
+            uart_rx_valid_r <= 1'b0;
+        end
+
+        // RX frame error latch
+        if (uart_rx_frame_error) begin
+            uart_rx_frame_err_r <= 1'b1;
+        end
+
+        // RX byte arrival
+        if (uart_rx_byte_valid) begin
+            if (uart_rx_valid_r && !uart_rx_read) begin
+                uart_rx_overrun_r <= 1'b1;
+            end else begin
+                uart_rx_data_r  <= uart_rx_byte;
+                uart_rx_valid_r <= 1'b1;
+            end
+        end
+    end
+end
+
+// ═════════════════════════════════════════════════════════════════════════════
 // M1 Response Mux (MMIO bypass takes priority over cached L2 path)
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -281,7 +494,7 @@ wire [31:0] m1_resp_data_int;
 reg         mmio_resp_valid_r;
 reg  [31:0] mmio_resp_data_r;
 
-// Handle TUBE MMIO - deterministic bypass
+// Handle TUBE + UART MMIO - deterministic bypass
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         tube_status <= 8'd0;
@@ -298,6 +511,16 @@ always @(posedge clk or negedge rstn) begin
                 mmio_resp_data_r <= m1_req_write ? 32'd0 : clint_read_data;
             end else if (addr_is_plic_m1) begin
                 mmio_resp_data_r <= m1_req_write ? 32'd0 : plic_read_data;
+            end else if (addr_is_uart_status_m1 && !m1_req_write) begin
+                mmio_resp_data_r <= uart_status_word;
+            end else if (addr_is_uart_rx_m1 && !m1_req_write) begin
+                mmio_resp_data_r <= {24'd0, uart_rx_data_r};
+            end else if (addr_is_uart_ctrl_m1 && !m1_req_write) begin
+                mmio_resp_data_r <= uart_ctrl_word;
+`ifdef ENABLE_DDR3
+            end else if (addr_is_ddr3_status_m1 && !m1_req_write) begin
+                mmio_resp_data_r <= {31'd0, ddr3_init_calib_complete};
+`endif
             end else begin
                 mmio_resp_data_r <= 32'd0;
             end
@@ -307,8 +530,28 @@ end
 
 // Response mux - MMIO returns a registered single-cycle response so LSU_REQ can
 // handshake the request first and then observe the completion in LSU_WAIT_RESP.
+`ifdef ENABLE_DDR3
+assign m1_resp_valid = mmio_resp_valid_r ? 1'b1
+                    : ddr3_resp_valid   ? 1'b1
+                    : m1_resp_valid_int;
+assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r
+                    : ddr3_resp_valid   ? ddr3_resp_data
+                    : m1_resp_data_int;
+`else
 assign m1_resp_valid = mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
 assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
+`endif
+
+// ═════════════════════════════════════════════════════════════════════════════
+// DDR3 External Port Assignments
+// ═════════════════════════════════════════════════════════════════════════════
+`ifdef ENABLE_DDR3
+assign ddr3_req_valid = m1_ddr3_req;
+assign ddr3_req_addr  = {2'b0, m1_req_addr[29:0]};   // Strip bit[31:30], DDR3 uses [29:0]
+assign ddr3_req_write = m1_req_write;
+assign ddr3_req_wdata = m1_req_wdata;
+assign ddr3_req_wen   = m1_req_wen;
+`endif
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RAM Preload Interface (for testbench)

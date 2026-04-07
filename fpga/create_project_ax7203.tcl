@@ -21,6 +21,7 @@ set data_coe "$bram_init_dir/data_mem.coe"
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -35,6 +36,7 @@ puts "Target part: $target_part"
 puts "Project directory: $project_dir"
 puts "AX7203_ENABLE_ROCC: $enable_rocc"
 puts "AX7203_ENABLE_MEM_SUBSYS: $enable_mem_subsys"
+puts "AX7203_ENABLE_DDR3: $enable_ddr3"
 puts "AX7203_SMT_MODE: $smt_mode"
 puts "AX7203_RS_DEPTH: $rs_depth"
 puts "AX7203_RS_IDX_W: $rs_idx_w"
@@ -46,6 +48,22 @@ puts "AX7203_TOP_MODULE: $top_module"
 
 puts "Preparing board ROM image..."
 ax7203_build_board_rom $script_dir
+
+# When using mem_subsys, regenerate the combined hex from inst.hex + data.hex.
+if {$enable_mem_subsys} {
+    set merge_py "$script_dir/scripts/merge_hex_for_mem_subsys.py"
+    if {[file exists $merge_py]} {
+        foreach launcher [list [list py -3] [list python] [list python3]] {
+            set resolved [auto_execok [lindex $launcher 0]]
+            if {$resolved ne ""} {
+                if {![catch {exec {*}$launcher $merge_py} merge_out]} {
+                    puts "INFO: $merge_out"
+                    break
+                }
+            }
+        }
+    }
+}
 
 # Create project
 create_project -force $project_name $project_dir -part $target_part
@@ -189,6 +207,25 @@ if {[file exists $data_word_hex]} {
     add_files -norecurse $data_word_hex
     set_property file_type {Memory File} [get_files $data_word_hex]
 }
+set mem_subsys_ram_hex "$script_dir/../rom/mem_subsys_ram.hex"
+if {[file exists $mem_subsys_ram_hex]} {
+    add_files -norecurse $mem_subsys_ram_hex
+    set_property file_type {Memory File} [get_files $mem_subsys_ram_hex]
+}
+
+# Generate MIG 7-Series DDR3 IP (when DDR3 is enabled)
+if {$enable_ddr3} {
+    set mig_tcl "$script_dir/ip/create_mig_ax7203.tcl"
+    if {[file exists $mig_tcl]} {
+        puts "Generating MIG 7-Series DDR3 IP from: $mig_tcl"
+        set _saved_script_dir $script_dir
+        source $mig_tcl
+        set script_dir $_saved_script_dir
+    } else {
+        puts "ERROR: Missing MIG IP script: $mig_tcl"
+        exit 1
+    }
+}
 
 # Generate Clock Wizard IP (required by adam_riscv when FPGA_MODE is defined)
 set clk_wiz_tcl "$script_dir/ip/create_clk_wiz_ax7203.tcl"
@@ -236,6 +273,19 @@ if {[file exists $bram_ip_tcl]} {
 set_property top $top_module [get_filesets sources_1]
 
 # Define FPGA build knobs explicitly so board synthesis is reproducible.
+# When using mem_subsys with on-chip SRAM, bypass the L2 cache arrays
+# to avoid 185K-LUT distributed-RAM explosion.  Phase 2 (DDR3) will
+# replace this with a BRAM-backed L2.
+if {$enable_mem_subsys} {
+    set l2_pt "L2_PASSTHROUGH=1"
+} else {
+    set l2_pt ""
+}
+if {$enable_ddr3} {
+    set ddr3_def "ENABLE_DDR3=1"
+} else {
+    set ddr3_def ""
+}
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -245,6 +295,8 @@ set_property verilog_define [list \
     FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w \
     FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth \
     FPGA_UART_CLK_DIV=$uart_clk_div \
+    {*}$l2_pt \
+    {*}$ddr3_def \
 ] [get_filesets sources_1]
 
 # Keep FPGA bring-up synthesis biased toward runtime so the batch flow can
@@ -260,6 +312,9 @@ if {[file exists $constraints_dir/ax7203_base.xdc]} {
 if {[file exists $constraints_dir/ax7203_uart_led.xdc]} {
     add_files -fileset constrs_1 $constraints_dir/ax7203_uart_led.xdc
 }
+if {$enable_ddr3 && [file exists $constraints_dir/ax7203_ddr3.xdc]} {
+    add_files -fileset constrs_1 $constraints_dir/ax7203_ddr3.xdc
+}
 
 # Create directories
 file mkdir $project_dir/logs
@@ -269,7 +324,7 @@ file mkdir $project_dir/checkpoints
 puts "Project created successfully!"
 puts "Part: $target_part"
 puts "Top: $top_module"
-puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys SMT_MODE=$smt_mode FPGA_SCOREBOARD_RS_DEPTH=$rs_depth FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth"
+puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys ENABLE_DDR3=$enable_ddr3 SMT_MODE=$smt_mode FPGA_SCOREBOARD_RS_DEPTH=$rs_depth FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth"
 puts "To build: vivado -mode batch -source fpga/build_ax7203_bitstream.tcl"
 
 # Save evidence

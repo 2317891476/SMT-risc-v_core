@@ -66,6 +66,20 @@ module adam_riscv(
     output wire [31:0] debug_rs_seq_lo_flat,
     output wire [7:0] debug_branch_issue_count,
     output wire [7:0] debug_branch_complete_count
+
+`ifdef ENABLE_DDR3
+    ,
+    // DDR3 external memory port (from mem_subsys, active for addr >= 0x8000_0000)
+    output wire        ddr3_req_valid,
+    input  wire        ddr3_req_ready,
+    output wire [31:0] ddr3_req_addr,
+    output wire        ddr3_req_write,
+    output wire [31:0] ddr3_req_wdata,
+    output wire [3:0]  ddr3_req_wen,
+    input  wire        ddr3_resp_valid,
+    input  wire [31:0] ddr3_resp_data,
+    input  wire        ddr3_init_calib_complete
+`endif
 );
 
 // SMT mode parameter (0=single-thread, 1=SMT)
@@ -1749,6 +1763,7 @@ wire [31:0] m2_resp_data;
 wire [7:0]  mem_subsys_tube_status;
 wire        mem_subsys_ext_timer_irq;     // CLINT timer interrupt (MTIP)
 wire        mem_subsys_ext_external_irq;  // PLIC external interrupt (MEIP)
+wire        mem_subsys_uart_tx;           // UART TX from mem_subsys MMIO
 wire        ext_timer_irq;
 wire        ext_external_irq;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
@@ -1806,7 +1821,25 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         // External interrupt wiring
         .ext_irq_src       (ext_irq_src_clean),
         .ext_timer_irq     (mem_subsys_ext_timer_irq),
-        .ext_external_irq  (mem_subsys_ext_external_irq)
+        .ext_external_irq  (mem_subsys_ext_external_irq),
+
+        // UART physical interface
+        .uart_rx           (uart_rx),
+        .uart_tx           (mem_subsys_uart_tx)
+
+`ifdef ENABLE_DDR3
+        ,
+        // DDR3 external memory port
+        .ddr3_req_valid    (ddr3_req_valid),
+        .ddr3_req_ready    (ddr3_req_ready),
+        .ddr3_req_addr     (ddr3_req_addr),
+        .ddr3_req_write    (ddr3_req_write),
+        .ddr3_req_wdata    (ddr3_req_wdata),
+        .ddr3_req_wen      (ddr3_req_wen),
+        .ddr3_resp_valid   (ddr3_resp_valid),
+        .ddr3_resp_data    (ddr3_resp_data),
+        .ddr3_init_calib_complete (ddr3_init_calib_complete)
+`endif
     );
 end else begin : gen_mem_subsys_tieoff
     assign m0_req_ready              = 1'b0;
@@ -1822,13 +1855,14 @@ end else begin : gen_mem_subsys_tieoff
     assign mem_subsys_tube_status    = 8'd0;
     assign mem_subsys_ext_timer_irq  = 1'b0;
     assign mem_subsys_ext_external_irq = 1'b0;
+    assign mem_subsys_uart_tx        = 1'b1;
 end
 endgenerate
 
 assign ext_timer_irq    = use_mem_subsys ? mem_subsys_ext_timer_irq : 1'b0;
 assign ext_external_irq = use_mem_subsys ? mem_subsys_ext_external_irq : 1'b0;
 assign tube_status      = use_mem_subsys ? mem_subsys_tube_status : legacy_tube_status;
-assign uart_tx          = use_mem_subsys ? 1'b1 : legacy_uart_tx;
+assign uart_tx          = use_mem_subsys ? mem_subsys_uart_tx : legacy_uart_tx;
 assign debug_core_ready = rstn;
 assign debug_core_clk = clk;
 assign debug_retire_seen = retire_seen_r;

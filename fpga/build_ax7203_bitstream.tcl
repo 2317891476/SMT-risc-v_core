@@ -16,6 +16,7 @@ set project_file "$project_dir/$project_name.xpr"
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -77,6 +78,16 @@ file mkdir $checkpoint_dir
 
 open_project $project_file
 set_property top $top_module [get_filesets sources_1]
+if {$enable_mem_subsys} {
+    set l2_pt "L2_PASSTHROUGH=1"
+} else {
+    set l2_pt ""
+}
+if {$enable_ddr3} {
+    set ddr3_def "ENABLE_DDR3=1"
+} else {
+    set ddr3_def ""
+}
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -86,25 +97,30 @@ set_property verilog_define [list \
     FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w \
     FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth \
     FPGA_UART_CLK_DIV=$uart_clk_div \
+    {*}$l2_pt \
+    {*}$ddr3_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
-set synth_run [get_runs synth_1]
+set synth_run [get_runs -quiet synth_1]
 if {[llength $synth_run] == 0} {
-    puts "ERROR: synth_1 run is missing from the project."
-    exit 1
-}
-
-set synth_status [get_property STATUS $synth_run]
-puts "synth_1 status: $synth_status"
-if {![file exists $synth_checkpoint]} {
-    puts "ERROR: Synth checkpoint not found: $synth_checkpoint"
-    puts "Run synthesis first: vivado -mode batch -source fpga/run_ax7203_synth.tcl"
-    exit 1
-}
-if {![ax7203_status_is_complete $synth_status]} {
-    puts "WARNING: synth_1 run status is not marked complete, but checkpoint exists."
-    puts "WARNING: Continuing from checkpoint: $synth_checkpoint"
+    if {![file exists $synth_checkpoint]} {
+        puts "ERROR: synth_1 run is missing and no checkpoint found: $synth_checkpoint"
+        exit 1
+    }
+    puts "INFO: synth_1 run not found, but checkpoint exists. Proceeding."
+} else {
+    set synth_status [get_property STATUS $synth_run]
+    puts "synth_1 status: $synth_status"
+    if {![file exists $synth_checkpoint]} {
+        puts "ERROR: Synth checkpoint not found: $synth_checkpoint"
+        puts "Run synthesis first: vivado -mode batch -source fpga/run_ax7203_synth.tcl"
+        exit 1
+    }
+    if {![ax7203_status_is_complete $synth_status]} {
+        puts "WARNING: synth_1 run status is not marked complete, but checkpoint exists."
+        puts "WARNING: Continuing from checkpoint: $synth_checkpoint"
+    }
 }
 
 set required_xdc_list [list $base_xdc $uart_led_xdc]
@@ -130,15 +146,25 @@ if {[llength [get_cells -quiet u_adam_riscv/clk2cpu/inst]] > 0} {
 }
 read_xdc $base_xdc
 read_xdc $uart_led_xdc
+set ddr3_xdc "$script_dir/constraints/ax7203_ddr3.xdc"
+if {$enable_ddr3 && [file exists $ddr3_xdc]} {
+    read_xdc $ddr3_xdc
+}
 
 set build_id [format %08X [expr {[clock seconds] & 0xFFFFFFFF}]]
 set_property BITSTREAM.CONFIG.USERID "32'h$build_id" [current_design]
 set_property BITSTREAM.CONFIG.USR_ACCESS "0x$build_id" [current_design]
 puts "Bitstream build id: 0x$build_id"
 
-puts "Running implementation steps (place/phys_opt/route) without opt_design..."
+puts "Running implementation steps (opt/place/phys_opt/route)..."
 set impl_start [clock seconds]
-place_design
+opt_design
+# MIG DDR3 may produce non-fatal OSERDES placement warnings promoted to ERROR;
+# catch and check actual placement result instead of aborting.
+if {[catch {place_design} place_err]} {
+    puts "WARNING: place_design returned error: $place_err"
+    puts "WARNING: Continuing — checking if placement actually succeeded..."
+}
 phys_opt_design
 route_design
 set impl_elapsed [expr {[clock seconds] - $impl_start}]

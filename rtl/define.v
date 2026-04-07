@@ -172,6 +172,7 @@
 `define UART_STATUS_ADDR    32'h1300_0014
 `define UART_RXDATA_ADDR    32'h1300_0018
 `define UART_CTRL_ADDR      32'h1300_001C
+`define DDR3_STATUS_ADDR    32'h1300_0020
 
 // CLINT (Core Local Interruptor) - Machine Timer
 `define CLINT_BASE          32'h0200_0000
@@ -187,3 +188,7 @@
 `define PLIC_ENABLE         32'h0C002000
 `define PLIC_THRESHOLD      32'h0C200000
 `define PLIC_CLAIM_COMPLETE 32'h0C200004
+
+// DDR3 SDRAM (external, active when ENABLE_DDR3)
+`define DDR3_BASE           32'h8000_0000
+`define DDR3_TOP            32'hBFFF_FFFF

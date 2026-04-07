@@ -10,6 +10,7 @@ set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -44,6 +45,18 @@ puts "Synthesis timeout budget: ${synth_timeout_min} minute(s)"
 puts "Refreshing board ROM image before synthesis..."
 ax7203_build_board_rom $script_dir
 
+if {$enable_mem_subsys} {
+    set merge_py "$script_dir/scripts/merge_hex_for_mem_subsys.py"
+    if {[file exists $merge_py]} {
+        puts "Re-merging mem_subsys_ram.hex from updated inst/data hex..."
+        if {[catch {exec python $merge_py} merge_out]} {
+            puts "WARNING: merge_hex_for_mem_subsys.py failed: $merge_out"
+        } else {
+            puts $merge_out
+        }
+    }
+}
+
 open_project $project_file
 
 set current_part [get_property part [current_project]]
@@ -52,6 +65,16 @@ if {$current_part != $target_part} {
     set_property part $target_part [current_project]
 }
 
+if {$enable_mem_subsys} {
+    set l2_pt "L2_PASSTHROUGH=1"
+} else {
+    set l2_pt ""
+}
+if {$enable_ddr3} {
+    set ddr3_def "ENABLE_DDR3=1"
+} else {
+    set ddr3_def ""
+}
 set_property top $top_module [get_filesets sources_1]
 set_property verilog_define [list \
     FPGA_MODE=1 \
@@ -62,6 +85,8 @@ set_property verilog_define [list \
     FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w \
     FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth \
     FPGA_UART_CLK_DIV=$uart_clk_div \
+    {*}$l2_pt \
+    {*}$ddr3_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
