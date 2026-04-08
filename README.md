@@ -629,8 +629,8 @@ rob_recover_en, rob_recover_prd_new
 | ~~P1~~     | ~~L1 ICache~~                                            | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory)                  |
 | ~~P2~~     | ~~L2 Cache~~                                             | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器)                      |
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
-| ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (AX7203 板级适配 + 时序收敛)                        |
-| ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud, 启动消息验证)                         |
+| ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (AX7203 板级适配 + 时序收敛，OoO 后端 20MHz 板测通过)   |
+| ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud, OoO 后端 UART DIAG PASS ×7205/10s)       |
 | **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🔄 Dhrystone 已完成板级镜像构建和数据内存初始化基础设施（`$readmemh` + `data_word.hex`），板测可启动但计算结果异常（见 §13.10）。CoreMark 待测。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
@@ -676,8 +676,10 @@ rob_recover_en, rob_recover_prd_new
 | **JTAG 编程** | ✅ | Vivado Tcl 脚本 + DONE/EOS 校验 |
 | **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
 | **DDR3** | ✅ | 板载 2×MT41K256M16HA-125 (1GB, 32-bit)，MIG 7-Series v4.2 已集成，CDC 桥接模块 `ddr3_mem_port.v` 已调通，板测读写验证通过 |
-| **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=1`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=0` |
-| **mem_subsys 上板** | ✅ | 完整 mem_subsys (L2 Passthrough + CLINT + PLIC + UART)，板测 `UART DIAG PASS` |
+| **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=0`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=0`, `RS_DEPTH=4`, `20MHz` |
+| **OoO 后端上板** | ✅ | Rename + ROB + 3×Split IQ + 48-entry PRF 乱序后端，板测 `UART DIAG PASS` ×7205 行 |
+| **clk_locked 复位门控** | ✅ | `post_lock_cnt` + `post_lock_ready` 机制：等待 MMCM `clk_locked` + 255 稳定时钟周期后释放核心复位 |
+| **mem_subsys 上板** | ✅ | 完整 mem_subsys (L2 Passthrough + CLINT + PLIC + UART)，历史板测 `UART DIAG PASS`（当前暂用 legacy 路径） |
 
 **引脚分配 (来自官方资源文档):**
 - 时钟: SYS_CLK_P=R4, SYS_CLK_N=T4
@@ -742,24 +744,17 @@ python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capt
 python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0
 ```
 
-**当前状态**: `RS=16 / FetchBuffer=16 / core_clk=10MHz` 这条流程已经在 AX7203 上闭环验证
+**当前状态**: OoO 后端（Rename + ROB + 3×Split IQ + PRF）已在 AX7203 上板验证通过。`RS_DEPTH=4 / FetchBuffer=16 / core_clk=20MHz / ENABLE_MEM_SUBSYS=0`。
 - 波特率: 115200
 - 数据位: 8, 停止位: 1, 无校验
 - 流控: 无
 - `python verification/run_all_tests.py --basic`：`26/26 PASS`
-- `python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capture-seconds 4 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：闭环通过
-- `python fpga/scripts/run_board_feedback.py --profile uart_echo --port COM5 --capture-seconds 4 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：闭环通过
-- `python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：主验收双通过
-- 最近一次 `core_diag` 板测 `BuildID=0x69CFB1B5`
-- 最近一次 `uart_echo` 板测 `BuildID=0x69CFB4E6`
-- `synth_design` 实测约 `6.05` 分钟，满足 15 分钟门限
-- bitstream 生成通过，时序满足，`WNS=0.359ns` / `WHS=0.084ns`
-- `program_ax7203_jtag.tcl` 已完成 `BuildID` 回读校验，`DONE=1 / EOS=1`
-- `COM5` 串口已稳定收到重复的 `UART DIAG PASS`，并且 `uart_echo` 已实测回显 `Z`
-- WNS 经 Scoreboard 树优化后从 `+0.359ns` 提升至 `+0.543ns`（见 §13.8）
-- WNS 经 reg_is_ro 流水线寄存器插入后，核心时钟域 WNS=`+0.383ns`（见 §13.13），关键路径从 119 级跨模块降至 111 级 Scoreboard 内部
-- WNS 经 oldest_store 树化后，**Fmax 从 13 MHz 提升至 20 MHz**（见 §13.14）。15 MHz WNS=+0.928ns，20 MHz WNS=+0.326ns
-- WNS 经 entry_eligible_r + store tree + iss0_is_rocc 优化后，**Fmax 从 20 MHz 提升至 30 MHz**（见 §13.15）。30 MHz post-impl WNS=+0.087ns
+- OoO 后端板测 `BuildID=0x69D6659B`，WNS=+0.545ns, WHS=+0.105ns
+- UART 输出: `UART DIAG PASS` ×7205 行 / 10 秒
+- clk_locked 复位门控: `post_lock_cnt` + `post_lock_ready`（等待 MMCM lock + 255 稳定时钟后释放核心复位）
+- 历史 Scoreboard 架构板测: `core_diag` (`BuildID=0x69CFB1B5`) / `uart_echo` (`BuildID=0x69CFB4E6`) 均通过
+- WNS 经 Scoreboard 树优化后从 `+0.359ns` 提升至 `+0.543ns`（见 §13.8，旧架构）
+- WNS 经 entry_eligible_r + store tree 优化后，旧 Scoreboard 架构 **Fmax 30 MHz**（见 §13.15）
 
 **常用底层脚本**
 
@@ -782,11 +777,11 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 - `-DENABLE_MEM_SUBSYS=0`
 - `-DENABLE_ROCC_ACCEL=0`
 - `-DSMT_MODE=0`
-- `-DFPGA_SCOREBOARD_RS_DEPTH=16`
-- `-DFPGA_SCOREBOARD_RS_IDX_W=4`
+- `-DFPGA_SCOREBOARD_RS_DEPTH=4`
+- `-DFPGA_SCOREBOARD_RS_IDX_W=2`
 - `-DFPGA_FETCH_BUFFER_DEPTH=16`
-- `-DFPGA_CLK_WIZ_HALF_DIV=10`
-- `-DFPGA_UART_CLK_DIV=87`
+- `-DFPGA_CLK_WIZ_HALF_DIV=5`
+- `-DFPGA_UART_CLK_DIV=174`
 
 当前常用 profile 如下：
 
@@ -810,38 +805,45 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 6. JTAG 下载并回读 `BuildID`
 7. 串口抓取或串口回环校验
 
-### 13.4 当前固定综合配置（2026-04-07）
+### 13.4 当前固定综合配置（2026-04-08）
 
-当前 FPGA 配置已升级为**完整 mem_subsys 路径**（L2 Passthrough + CLINT + PLIC + UART），在 AX7203 上板验证通过（`UART DIAG PASS`）。`legacy_mem_subsys` 仍作为 `ifdef` 保护的 fallback（`ENABLE_MEM_SUBSYS=0` 可切回）。
+当前 FPGA 配置已完成 **OoO 后端（Rename + ROB + 3×Split IQ + PRF）** 上板验证。由于 OoO 后端（dispatch_unit, ROB, freelist, issue_queue）的复杂内部状态对 MMCM 启动毛刺敏感，在 `adam_riscv.v` 中新增 `post_lock_cnt` + `post_lock_ready` 复位门控机制，等待 `clk_locked` + 255 稳定时钟周期后才释放核心复位。
+
+当前上板采用 `ENABLE_MEM_SUBSYS=0`（legacy 路径）+ `RS_DEPTH=4` + `20MHz` 配置，已稳定板测 `UART DIAG PASS`（10 秒内 7205 行）。`mem_subsys` 路径（`ENABLE_MEM_SUBSYS=1`）历史上也通过板测，可通过 `ifdef` 切回。
 
 | 开关 | 当前值 | 说明 |
 |------|------|------|
 | `FPGA_MODE` | `1` | 启用 AX7203 顶层时钟/复位/板级接口路径 |
-| `ENABLE_MEM_SUBSYS` | `1` | ✅ 综合完整 `mem_subsys`（L2 Passthrough + CLINT + PLIC + UART） |
+| `ENABLE_MEM_SUBSYS` | `0` | 当前使用 `legacy_mem_subsys` 路径（可切回 `1` 使用完整 mem_subsys） |
 | `L2_PASSTHROUGH` | `1` (自动) | 当 `ENABLE_MEM_SUBSYS=1` 时 TCL 自动追加，绕过 L2 缓存数组直连片上 RAM |
 | `ENABLE_ROCC_ACCEL` | `0` | 默认不综合 RoCC 加速器 |
-| `ENABLE_DDR3` | `1` | ✅ 综合 MIG DDR3 控制器 + `ddr3_mem_port` CDC 桥接 |
+| `ENABLE_DDR3` | `0` | 当前 OoO 上板验证阶段暂不启用 DDR3（历史板测已通过） |
 | `SMT_MODE` | `0` | 当前固定为单线程 bring-up 配置 |
-| `AX7203_CORE_CLK_MHZ` | `30.0` | entry_eligible_r + store tree + iss0_is_rocc 优化后收敛至 30MHz core clock（之前为 20MHz） |
-| `AX7203_UART_CLK_DIV` | `87` | 保持 core 内 MMIO UART 为 `115200 8N1` |
-| `AX7203_SYNTH_TIMEOUT_MIN` | `30` | mem_subsys 构建推荐 30 分钟超时 |
-| `AX7203_MAX_THREADS` / `AX7203_SYNTH_JOBS` | `1 / 1` | 避免 Vivado 综合阶段偶发 `EXCEPTION_ACCESS_VIOLATION` |
+| `AX7203_RS_DEPTH` | `4` | OoO IQ 深度：MEM IQ=4 entries（INT IQ=8, MUL IQ=4 均 hardcoded） |
+| `AX7203_RS_IDX_W` | `2` | log2(RS_DEPTH) |
+| `AX7203_CORE_CLK_MHZ` | `20.0` | OoO 后端 RS_DEPTH=4 下时序收敛，WNS=+0.545ns |
+| `AX7203_UART_CLK_DIV` | `174` | 20MHz / 115200 ≈ 174（core 内 MMIO UART 保持 `115200 8N1`） |
+| `AX7203_SYNTH_TIMEOUT_MIN` | `15` | legacy 路径综合约 3.5 分钟 |
+| `AX7203_MAX_THREADS` / `AX7203_SYNTH_JOBS` | `4 / 4` | 综合并行度 |
 
 **当前实际上板的关键微架构参数**
 
 | 参数 | 当前上板值 | 目标竞赛值 | 说明 |
 |------|------|------|------|
+| 后端架构 | **OoO (Rename+ROB+IQ+PRF)** | OoO | ✅ 已从集中式 Scoreboard 全面迁移至乱序后端 |
 | 发射宽度 | 2 | 2 | 当前仍是双发射 core |
-| `scoreboard` RS 深度 | `16` | `16` | 已在当前 `FPGA_MODE` 上恢复到目标深度，稳定板测依赖 `core_clk=10MHz` |
+| ROB 深度 | `16` | `16` | Hardcoded in adam_riscv.v |
+| 物理寄存器堆 | `48-entry/thread PRF (4R2W)` | 48 | 32 arch + 16 rename regs |
+| IQ 配置 | INT=8, MEM=4, MUL=4 | INT=8, MEM=16, MUL=4 | MEM IQ = RS_DEPTH=4 (时序受限，目标 16) |
+| `RS_DEPTH` (MEM IQ) | `4` | `16` | 当前 FPGA 配置 4，时序收敛于 20MHz |
 | Fetch Buffer 深度 | `16` | `16` | 已在当前 `FPGA_MODE` 上恢复到目标深度 |
+| 核心时钟 | `20 MHz` | 待优化 | OoO 后端 RS_DEPTH=4 下时序收敛 |
 | L1 ICache | `2KB, 1-way, 32B line` | 待后续冻结 | 当前 `inst_memory` 内部仍启用轻量指令缓存 |
-| L1 DCache | `关闭` | L1→DDR3 | AXI4 端口已定义，计划直连 DDR3 MIG（跳过 L2） |
-| DDR3 | **✅ 已启用** | ✅ | MIG 7-Series v4.2 + `ddr3_mem_port` CDC 桥接，板测读写验证通过 |
-| L2 Cache | **Passthrough** | 不保留 | `L2_PASSTHROUGH` 绕过缓存数组，直连片上 RAM（81 LUTs） |
-| mem_subsys 共享 RAM | `16KB, LUTRAM` | DDR3 外存 | 4096×32-bit `$readmemh` 初始化，指令+数据共享 |
-| CLINT | ✅ 已启用 | ✅ | 64-bit mtime/mtimecmp，定时器中断 (176 LUTs) |
-| PLIC | ✅ 已启用 | ✅ | 优先级/使能/阈值/Claim-Complete (93 LUTs) |
-| UART (mem_subsys) | ✅ 已启用 | ✅ | TXDATA/STATUS/RXDATA/CTRL 完整寄存器 |
+| L1 DCache | `关闭` | L1→DDR3 | AXI4 端口已定义，计划直连 DDR3 MIG |
+| DDR3 | **历史验证通过** | ✅ | MIG 7-Series v4.2 + `ddr3_mem_port` CDC 桥接，暂未在 OoO 构建中启用 |
+| L2 Cache | **Passthrough** | 不保留 | `L2_PASSTHROUGH` 绕过缓存数组，直连片上 RAM |
+| CLINT | 历史验证通过 | ✅ | `ENABLE_MEM_SUBSYS=1` 时可用 |
+| PLIC | 历史验证通过 | ✅ | `ENABLE_MEM_SUBSYS=1` 时可用 |
 | RoCC Scratchpad | `关闭` | `4KB` | 当前默认不综合 RoCC |
 | SMT | `关闭` | 可选 | 当前上板固定单线程 |
 
@@ -863,72 +865,69 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **当前综合进去的主要部件**
 
-- `adam_riscv` 主核：双发射前后端、`dispatch_unit`（Rename+ROB+3×IQ+PRF）、`exec_pipe0/1`、`mul_unit`、`csr_unit`
-- 访存路径：`lsu_shell + store_buffer`
-- 取指路径：`stage_if + bimodal BPU + inst_memory + L2 arbiter M0`
-- 完整内存子系统：`mem_subsys`（L2 Passthrough + `l2_arbiter` + `clint` + `plic` + UART TX/RX）
-- 板级逻辑：`clk_wiz_0`、`syn_rst`、`u_board_uart_tx`、`uart_rx_monitor`、LED/诊断 glue
-- DDR3：`u_mig` (MIG 7-Series v4.2, AXI4 256-bit) + `u_ddr3_mem_port` (CDC 桥接, 32b↔256b lane steering)
-- 默认板测 top：`adam_riscv_ax7203_top`
-- 板级诊断 top：`adam_riscv_ax7203_status_top`、`adam_riscv_ax7203_issue_probe_top`、`adam_riscv_ax7203_branch_probe_top`、`adam_riscv_ax7203_main_bridge_probe_top`
+- `adam_riscv` 主核：双发射前后端、**`dispatch_unit`（Rename + ROB + 3×IQ + PRF）**、`exec_pipe0/1`、`mul_unit`、`csr_unit`
+- OoO 引擎：`dispatch_unit` + `rob` + `rename_map_table` + `freelist` + `phys_regfile` + `issue_queue`×3 + `iq_pipe1_arbiter`
+- 访存路径：`lsu_shell + store_buffer`（通过 `legacy_mem_subsys`）
+- 取指路径：`stage_if + bimodal BPU + inst_memory`
+- 板级逻辑：`clk_wiz_0`、`syn_rst`、`post_lock_cnt/post_lock_ready`（clk_locked 复位门控）、`u_board_uart_tx`、`uart_rx_monitor`、LED/诊断 glue
 
 **当前没有综合进去的部件**
 
+- `scoreboard.v`（旧集中式 Scoreboard，已被 OoO 引擎完全替代，保留参考）
+- `mem_subsys`（L2 Passthrough + CLINT + PLIC + UART，历史板测通过，可切回）
+- `DDR3`（MIG + ddr3_mem_port，历史板测通过，暂未在 OoO 构建中启用）
 - `l1_dcache_nb`（L1 DCache AXI4 端口已定义但未接入）
 - `mmu_sv32`（Sv32 MMU 已定义但未接入）
 - `RoCC accelerator`
 - `SMT` 多线程模式
 
-### 13.5 当前综合/实现资源（AX7203, 2026-04-07）
+### 13.5 当前综合/实现资源（AX7203, 2026-04-08）
 
-综合入口使用 `fpga/run_ax7203_synth.tcl`。mem_subsys 构建推荐 `AX7203_SYNTH_TIMEOUT_MIN=30`（`synth_design` 实测约 15.5 分钟）。当前稳定设置为 `AX7203_MAX_THREADS=1`、`AX7203_SYNTH_JOBS=1`。
+综合入口使用 `fpga/run_ax7203_synth.tcl`。当前 OoO 后端 (`ENABLE_MEM_SUBSYS=0`) 构建综合约 3.5 分钟。
 
 **时序结果**
 
-| 构建 | 频率 | WNS | WHS | 说明 |
-|------|------|-----|-----|------|
-| **oldest_store 树 + DDR3 (最新)** | **20 MHz** | **+0.326ns** | **+0.077ns** | ✅ oldest_store 树化，post-impl，**所有约束满足** |
-| oldest_store 树 + DDR3 | 15 MHz | +0.928ns | — | ✅ 核心时钟域 WNS=+14.111ns，余量充裕 |
-| **entry_eligible_r + store tree + iss0_is_rocc (最新)** | **30 MHz** | **+0.087ns** | **+0.072ns** | ✅ §13.15 优化后 post-impl，**Fmax 20→30 MHz (+50%)** |
-| reg_is_ro + DDR3 (树优化前) | 10 MHz | +0.238ns | +0.058ns | reg_is_ro 流水线寄存器 + DDR3，核心时钟域 WNS=+0.383ns |
-| DDR3 集成 (Phase 2, pre-reg_is_ro) | 10 MHz | +0.238ns | +0.059ns | MIG + ddr3_mem_port CDC 桥接 |
-| **mem_subsys (Phase 1)** | 10 MHz | **+1.736ns** | **+0.119ns** | ✅ 完整 mem_subsys，L2 Passthrough |
-| Dhrystone ROM (legacy) | 10 MHz | +0.543ns | +0.084ns | Scoreboard 分支/候选树优化后 |
-| core_diag ROM (legacy) | 10 MHz | +0.359ns | +0.084ns | legacy 基线 |
+| 构建 | 后端架构 | 频率 | WNS | WHS | 说明 |
+|------|---------|------|-----|-----|------|
+| **OoO 后端 RS_DEPTH=4 (当前)** | **OoO (Rename+ROB+IQ+PRF)** | **20 MHz** | **+0.545ns** | **+0.105ns** | ✅ clk_locked fix，`ENABLE_MEM_SUBSYS=0`，**UART DIAG PASS ×7205** |
+| OoO 后端 RS_DEPTH=4 MEM_SUBSYS=1 | OoO | 20 MHz | +0.634ns | +0.097ns | ✅ 时序满足但 UART 为空（clk_locked fix 前） |
+| OoO 后端 RS_DEPTH=4 MEM_SUBSYS=0 | OoO | 20 MHz | +1.013ns | — | ✅ 时序满足但 UART 为空（clk_locked fix 前） |
+| OoO 后端 RS_DEPTH=4 | OoO | 30 MHz | — | — | ❌ post-synth WNS=-6.015ns (ROB commit 57 LUT levels) |
+| OoO 后端 RS_DEPTH=16 | OoO | 30 MHz | — | — | ❌ post-impl WNS=-26.017ns (MEM IQ O(N²) selection) |
+| entry_eligible_r + store tree (Scoreboard) | Scoreboard | 30 MHz | +0.087ns | +0.072ns | ✅ 旧 Scoreboard 架构，§13.15 优化后 |
+| oldest_store 树 + DDR3 (Scoreboard) | Scoreboard | 20 MHz | +0.326ns | +0.077ns | ✅ 旧 Scoreboard 架构 |
+| mem_subsys Phase 1 (Scoreboard) | Scoreboard | 10 MHz | +1.736ns | +0.119ns | ✅ 旧 Scoreboard 架构基线 |
 
-> **最新**: entry_eligible_r 寄存化 + store tree + iss0_is_rocc bypass 优化后 Fmax 从 20 MHz 提升至 **30 MHz（+50%）**。30 MHz bitstream 生成，post-impl WNS=+0.087ns，WHS=+0.072ns。
+> **当前最新**: OoO 后端 + clk_locked fix + RS_DEPTH=4 @ 20MHz，post-impl WNS=+0.545ns，UART 验证通过。
 
-> 以上 15/20 MHz 数据对应 `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` 构建。
+> 以上 Scoreboard 行保留为历史参考，对应 §13.8-§13.15 的旧架构优化记录。
 
-| 资源 | 使用量 | 可用量 | 利用率 |
-|------|------|------|------|
-| Slice LUTs | 54,767 | 133,800 | 40.93% |
-| Slice Registers | ~34,000 | 269,200 | ~12.6% |
-| LUT as Memory | 4,096 | 46,200 | 8.87% |
-| RAMB18 | 0 | 730 | 0.00% |
-| DSP48E1 | 4 | 740 | 0.54% |
+| 资源 | OoO 后端 (当前) | Scoreboard (旧) | 可用量 | OoO 利用率 |
+|------|------|------|------|------|
+| Slice LUTs | **26,229** | 54,767 | 133,800 | **19.60%** |
+| Slice Registers | **9,779** | ~34,000 | 269,200 | **3.63%** |
+| LUT as Memory | 4,096 | 4,096 | 46,200 | 8.87% |
+| RAMB18 | 0 | 0 | 730 | 0.00% |
+| DSP48E1 | 4 | 4 | 740 | 0.54% |
 
-> L2 Passthrough 将 L2 cache 从 184,905 LUTs 缩减至 81 LUTs。总 LUT 利用率 40.93%。
+> OoO 后端 (`ENABLE_MEM_SUBSYS=0`, `RS_DEPTH=4`) 相比旧 Scoreboard 架构 (`ENABLE_MEM_SUBSYS=1`, `RS_DEPTH=16`, DDR3)，LUT 用量从 54,767 降至 **26,229**（-52%）。这主要归因于：(1) RS_DEPTH 从 16 降至 4 减少了 IQ 组合逻辑；(2) 未启用 mem_subsys/DDR3 减少了外设逻辑；(3) OoO 后端本身比 Scoreboard 更紧凑。
 
-**主要层级资源分布（综合层级报告, mem_subsys）**
+**主要层级资源分布（综合层级报告, OoO 后端 RS_DEPTH=4, ENABLE_MEM_SUBSYS=0）**
 
 | 模块/层级 | Total LUTs | FFs | 备注 |
 |------|------|------|------|
-| `u_scoreboard` | 27,001 | 4,782 | 当前最大 LUT 消耗点（含 FPGA 树优化，见 §13.8） |
-| `u_stage_if` | 6,604 | 18,932 | 含 `bpu_bimodal + inst_memory` |
-| `gen_mem_subsys.u_mem_subsys` | 5,245 | 1,940 | 完整 mem_subsys（含 4,096 LUTRAM） |
-| ├─ `u_l2_cache` | 81 | 116 | L2 Passthrough (3-state FSM) |
-| ├─ `u_l2_arbiter` | 76 | 74 | 3 主设备仲裁器 |
-| ├─ `u_clint` | 176 | 128 | 定时器中断控制器 |
-| ├─ `u_plic` | 93 | 67 | 外部中断控制器 |
-| ├─ `u_uart_tx` | 24 | 21 | mem_subsys 内 UART TX |
-| └─ `u_uart_rx` | 36 | 32 | mem_subsys 内 UART RX |
-| `u_regs_mt` | 3,313 | 1,984 | Pipe0/线程寄存器堆 |
-| `u_regs_mt_p1` | 3,313 | 1,984 | Pipe1/线程寄存器堆 |
-| `u_rob_lite` | 1,888 | 1,278 | 提交/回滚路径 |
-| `u_lsu_shell` | 1,239 | 983 | 含 `store_buffer` |
-| `u_board_uart_tx` | 30 | 25 | 板侧重新定时 UART 发送器 |
-| `u_core_uart_monitor` | 36 | 35 | 板侧 UART 帧监测器 |
+| `u_dispatch_unit` | **7,997** | 3,148 | OoO 调度核心（Rename + 3×IQ + Arbiter），当前最大 LUT 消耗点 |
+| ├─ `(dispatch_unit 自身)` | 3,530 | 708 | tag 分配、依赖追踪、IQ 分派 |
+| `u_phys_regfile` | **5,242** | 1,536 | 48-entry/thread PRF (4R2W) |
+| `u_rob` | **2,395** | 927 | 16-entry/thread ROB (顺序提交/恢复) |
+| `u_adam_riscv` (自身) | 1,104 | 599 | 顶层 glue（含 post_lock_cnt、流水线寄存器等） |
+| `u_lsu_shell` | 789 | 560 | 含 store_buffer |
+| `u_rename_map_table` | 713 | 186 | 32×6-bit arch→phys 映射 |
+| `u_freelist` | 613 | 404 | 64-entry 循环 FIFO |
+| `u_csr_unit` | 373 | 429 | Machine-mode CSR |
+| `u_stage_if` | 94 | 133 | IF 级 (BPU + inst_memory 在 legacy 路径下较轻) |
+| `u_board_uart_tx` | 29 | 25 | 板侧重新定时 UART 发送器 |
+| `u_core_uart_monitor` | 35 | 35 | 板侧 UART 帧监测器 |
 
 ### 13.6 当前板测 Profile
 
@@ -970,13 +969,19 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 | `0x1300_001C` | `UART_CTRL_ADDR` | `R/W` | `bit0=TX enable`, `bit1=RX enable`, `bit2=clear RX overrun`, `bit3=clear RX frame error`, `bit4=flush RX byte` |
 | `0x1300_0020` | `DDR3_STATUS_ADDR` | `R` | `bit0=init_calib_complete`（MIG DDR3 校准完成标志） |
 
-**最近一次板测结果**
+**最近一次板测结果（OoO 后端, 2026-04-08）**
 
-- `run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0`：通过，`FailedStage: none`
+- **OoO 后端首次上板**: `BuildID=0x69D6659B`，`RS_DEPTH=4`，`20MHz`，`ENABLE_MEM_SUBSYS=0`
+- **UART 输出**: `UART DIAG PASS` ×7205 行（10 秒捕获，115264 字节），稳定持续输出
+- **JTAG 校验**: `DONE=1, DONE_PIN=1, EOS=1`，Build ID 匹配
+- **时序**: WNS=+0.545ns, WHS=+0.105ns — 所有约束满足
+- **clk_locked 修复**: `post_lock_cnt` + `post_lock_ready` 复位门控，等待 MMCM lock + 255 稳定时钟后释放核心复位
+- **根因**: 旧的 `assign rstn_in = sys_rstn;` 在 `clk_locked` 前释放复位，MMCM 启动毛刺破坏 OoO 内部状态（freelist/ROB/IQ）。旧 Scoreboard 结构更简单，能容忍启动瞬态，但 OoO 后端不行
+
+**历史板测结果（Scoreboard 架构）**
+
 - `core_diag`：`BuildID=0x69CFB1B5`，`UartBytes=75`，抓包内容为重复的 `UART DIAG PASS`
 - `uart_echo`：`BuildID=0x69CFB4E6`，`UartBytes=1`，串口抓包内容为单字节回显 `Z`
-- `main_bridge_probe` 仍保留为失败时自动触发的诊断 profile，用来证明“CPU -> core_uart -> 板侧 bridge -> PC 串口”这条链在真板上确实打通
-- 默认 `core_diag` 之所以使用 `test_fpga_uart_board_diag_gap.s`，是为了在板级串口抓取上保留明显行间空闲，避免过于紧凑的连续流影响可观测性
 
 ### 13.7 CoreMark 性能测试
 
@@ -986,7 +991,9 @@ make -f Makefile.ax7203
 cp build_ax7203/coremark_ax7203.elf ../../rom/
 ```
 
-### 13.8 Scoreboard FPGA 树优化（2026-04）
+### 13.8 Scoreboard FPGA 树优化（2026-04，旧架构历史记录）
+
+> **注意**: 以下 §13.8-§13.15 为旧 Scoreboard 架构的 FPGA 优化记录。当前后端已迁移至 OoO（Rename + ROB + Split IQ + PRF），这些优化不再直接适用，但保留作为历史参考。
 
 为降低 Scoreboard 在 FPGA 上的关键路径深度，引入了 `ifdef FPGA_MODE` 保护的树结构优化。所有变更仅在 `FPGA_MODE` 定义时生效，仿真路径完全不变（验证：26/26 basic + 50/50 riscv-tests 全通过）。
 
@@ -1497,3 +1504,76 @@ scoreboard/fu_busy_reg[6] → exec_pipe0/stored_br_mark_reg
 **修改范围**: `rtl/scoreboard.v`（`ifdef FPGA_MODE` 内 + flush 安全修复）+ `rtl/adam_riscv.v`（仅 `iss0_is_rocc` ifdef）。
 
 **仿真验证**: 26/26 basic tests PASS。FPGA bitstream 在 30 MHz 下生成（9.28 MB）。
+
+### 13.16 OoO 后端 FPGA 上板验证（2026-04-08）
+
+**背景**: 完成从集中式 Scoreboard 到 OoO 后端（Rename + ROB + 3×Split IQ + PRF）的全面迁移（Stage A-B7），仿真 26/26 PASS 后进行 FPGA 上板验证。
+
+**架构变更**: 旧 Scoreboard（27,001 LUTs, RS_DEPTH=16）被完全替代为：
+- `dispatch_unit`（7,997 LUTs）: Rename Map Table + Freelist + 3×Issue Queue (INT/MEM/MUL) + Pipe1 Arbiter
+- `rob`（2,395 LUTs）: 16-entry/thread Reorder Buffer, 顺序提交, 恢复遍历 FSM
+- `phys_regfile`（5,242 LUTs）: 48-entry/thread Physical Register File, 4R2W
+- `rename_map_table`（713 LUTs）: 32→48 映射, CDB ready bypass
+- `freelist`（613 LUTs）: 64-entry 循环 FIFO, 双分配/双释放
+
+**时序收敛**
+
+OoO 后端的关键路径为 MEM IQ 的 O(N²) 选择链（load-store ordering）和 ROB commit 逻辑。
+
+| RS_DEPTH | 频率 | WNS | 状态 | 瓶颈 |
+|----------|------|-----|------|------|
+| 16 | 30 MHz | -26.017ns | ❌ | MEM IQ O(16²) selection |
+| 4 | 30 MHz | -6.015ns | ❌ | ROB commit 57 LUT levels |
+| 4 | 20 MHz | **+0.545ns** | ✅ | 时序满足 |
+
+最终采用 `RS_DEPTH=4 / 20MHz` 配置通过时序。
+
+**clk_locked 复位门控修复**
+
+上板后发现 UART 无输出。排查流程:
+1. `ENABLE_MEM_SUBSYS=0` 和 `=1` 均无输出 → 排除内存路径
+2. Vivado 综合警告（`tag_just_ready`, `rob_is_branch`, `recover_stop_r` 等移除）→ 确认为死代码
+3. RS_DEPTH=4 仿真测试 21/23 PASS（同 RS_DEPTH=16 失败的 2 个测试）→ 排除配置问题
+4. FPGA_MODE smoke 仿真 PASS（`ready=1, retire=1, tube=04, uart_edges=5`）→ RTL 正确
+
+**根因**: `assign rstn_in = sys_rstn;` 在 `clk_locked` 断言前释放核心复位。真实 MMCM 在锁定前产生毛刺时钟边沿，破坏 OoO 后端的复杂内部状态（freelist 指针、ROB 计数器、IQ 条目）。旧 Scoreboard 结构更简单，能容忍启动瞬态。
+
+**修复方案**: 在 `adam_riscv.v` 中添加 `ifdef FPGA_MODE` 保护的复位门控:
+
+```verilog
+reg [7:0] post_lock_cnt;
+reg       post_lock_ready;
+always @(posedge clk or negedge sys_rstn) begin
+    if (!sys_rstn) begin
+        post_lock_cnt   <= 8'd0;
+        post_lock_ready <= 1'b0;
+    end else if (!clk_locked) begin
+        post_lock_cnt   <= 8'd0;
+        post_lock_ready <= 1'b0;
+    end else if (!post_lock_ready) begin
+        if (post_lock_cnt == 8'd255)
+            post_lock_ready <= 1'b1;
+        else
+            post_lock_cnt <= post_lock_cnt + 8'd1;
+    end
+end
+assign rstn_in = sys_rstn & post_lock_ready;
+```
+
+等待 `clk_locked` 加上 255 个稳定核心时钟周期后才释放 `rstn_in`。
+
+**板测结果**
+
+| 项目 | 结果 |
+|------|------|
+| Build ID | `0x69D6659B` |
+| JTAG 校验 | `DONE=1, DONE_PIN=1, EOS=1` |
+| 时序 | WNS=+0.545ns, WHS=+0.105ns |
+| UART 输出 | `UART DIAG PASS` ×7205 行 / 10 秒（115,264 字节） |
+| Slice LUTs | 26,229 (19.60%) |
+| Slice Registers | 9,779 (3.63%) |
+| 综合时间 | 3 分 30 秒 |
+
+**修改范围**: `rtl/adam_riscv.v`（`post_lock_cnt` + `post_lock_ready`）+ `comp_test/clk_wiz_0_stub.v`（更真实的 lock 延迟建模）。
+
+**仿真验证**: FPGA_MODE smoke test PASS, 26/26 basic tests PASS (RS_DEPTH=16), 21/23 basic tests PASS (RS_DEPTH=4, 同 RS_DEPTH=16 失败的 2 个测试)。

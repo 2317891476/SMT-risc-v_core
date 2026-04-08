@@ -133,13 +133,31 @@ wire rstn_in;
     assign clk_locked = 1'b1;
 `endif
 
-// The AX7203 top-level already applies a long power-on-reset window before the
-// core is released. Keeping an additional `clk_locked` gate here has proven
-// brittle in hardware builds because stale/mis-modeled clock-wizard lock
-// behavior can collapse the whole core into permanent reset during synthesis.
-// For FPGA_MODE bring-up we therefore rely on the board wrapper POR and only
-// use the local synchronizer below to release reset cleanly into `clk`.
+// The OoO backend (dispatch_unit, ROB, freelist, issue queues) has complex
+// internal state that is sensitive to glitchy clock edges during MMCM startup.
+// Gate the reset release with clk_locked AND a short post-lock delay to ensure
+// the core only begins execution on a stable clock.
+`ifdef FPGA_MODE
+reg [7:0] post_lock_cnt;
+reg       post_lock_ready;
+always @(posedge clk or negedge sys_rstn) begin
+    if (!sys_rstn) begin
+        post_lock_cnt   <= 8'd0;
+        post_lock_ready <= 1'b0;
+    end else if (!clk_locked) begin
+        post_lock_cnt   <= 8'd0;
+        post_lock_ready <= 1'b0;
+    end else if (!post_lock_ready) begin
+        if (post_lock_cnt == 8'd255)
+            post_lock_ready <= 1'b1;
+        else
+            post_lock_cnt <= post_lock_cnt + 8'd1;
+    end
+end
+assign rstn_in = sys_rstn & post_lock_ready;
+`else
 assign rstn_in = sys_rstn;
+`endif
 
 syn_rst u_syn_rst(
     .clock    (clk     ),
@@ -155,9 +173,15 @@ localparam FETCH_BUFFER_DEPTH_CFG = `FPGA_FETCH_BUFFER_DEPTH;
 localparam SCOREBOARD_RS_DEPTH_CFG = `FPGA_SCOREBOARD_RS_DEPTH;
 localparam SCOREBOARD_RS_IDX_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
 `else
+`ifdef SIM_SCOREBOARD_RS_DEPTH
+localparam FETCH_BUFFER_DEPTH_CFG = 16;
+localparam SCOREBOARD_RS_DEPTH_CFG = `SIM_SCOREBOARD_RS_DEPTH;
+localparam SCOREBOARD_RS_IDX_W_CFG = `SIM_SCOREBOARD_RS_IDX_W;
+`else
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
 localparam SCOREBOARD_RS_DEPTH_CFG = 16;
 localparam SCOREBOARD_RS_IDX_W_CFG = 4;
+`endif
 `endif
 
 // ─── Thread Scheduler ──────────────────────────────────────────────────────

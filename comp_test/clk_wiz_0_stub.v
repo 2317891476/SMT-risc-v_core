@@ -29,13 +29,15 @@ module clk_wiz_0 (
             locked   <= 1'b0;
             div_cnt  <= {DIV_CNT_W{1'b0}};
         end else begin
-            locked <= 1'b1;
             if (div_cnt == (HALF_DIV - 1)) begin
                 div_cnt  <= {DIV_CNT_W{1'b0}};
                 clk_out1 <= ~clk_out1;
             end else begin
                 div_cnt <= div_cnt + {{(DIV_CNT_W-1){1'b0}}, 1'b1};
             end
+            // Model realistic lock delay: lock after a few output toggles
+            if (!locked && clk_out1)
+                locked <= 1'b1;
         end
     end
 endmodule
