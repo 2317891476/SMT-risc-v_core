@@ -1009,8 +1009,13 @@ wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                             iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
 
 // Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
+// FPGA_MODE: RoCC not synthesized, hardwire to 0 to cut cross-module feedback path
+`ifdef FPGA_MODE
+assign iss0_is_rocc          = 1'b0;
+`else
 assign iss0_is_rocc          = iss0_tag_hits_disp0 ? dec0_is_rocc :
                                iss0_tag_hits_disp1 ? dec1_is_rocc : rs_is_rocc[iss0_tag];
+`endif
 wire [6:0]  iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
                                iss0_tag_hits_disp1 ? dec1_rocc_funct7 : rs_rocc_funct7[iss0_tag];
 

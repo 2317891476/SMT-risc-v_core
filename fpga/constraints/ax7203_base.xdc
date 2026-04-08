@@ -47,6 +47,12 @@ set_property PULLUP true [get_ports sys_rst_n]
 # Reset button is asynchronous to sys_clk; exclude direct reset path timing.
 set_false_path -from [get_ports sys_rst_n]
 
+# POR reset synchronizer: por_rst_n (sys_clk domain) feeds the core clock
+# domain rst synchronizer via ASYNC_REG chain.  This CDC path is safe by
+# construction (reset de-asserts cleanly after multiple sys_clk cycles).
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *por_rst_n_reg*}] \
+               -to   [get_cells -hierarchical -filter {NAME =~ *u_syn_rst/rst_nr*_reg*}]
+
 # If extra clocks are added later (e.g., PLL/MMCM outputs or UART virtual clock),
 # place asynchronous clock-group constraints in the corresponding XDC.
 # Example:

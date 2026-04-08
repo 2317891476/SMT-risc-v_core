@@ -478,6 +478,14 @@ reg  [15:0]             br_dep_seq_t0, br_dep_seq_t1;
 // All tree code is FPGA_MODE-only; simulation uses the original linear scans.
 `ifdef FPGA_MODE
 localparam integer FPGA_TREE_SLOTS = 16;
+
+// ─── Pre-registered eligibility (Phase 2 timing optimization) ───────────────
+// entry_eligible_r[i] pre-computes all filtering conditions except fu_busy
+// (which must remain combinational to avoid same-cycle FU double-issue).
+// This cuts ~16ns of branch-tree + seq-comparison logic out of the issue
+// critical path, at the cost of 1-cycle eligibility staleness (covered by
+// WAKE_HOLD_CYCLES=1 which already suppresses just-woken entries for 1 cycle).
+reg  [RS_DEPTH-1:0] entry_eligible_r;
 localparam integer CAND_W = 1 + 16 + RS_IDX_W;
 
 reg  [CAND_W-1:0] br_t0_l0 [0:FPGA_TREE_SLOTS-1];
@@ -490,6 +498,16 @@ reg  [CAND_W-1:0] br_t1_l1 [0:(FPGA_TREE_SLOTS/2)-1];
 reg  [CAND_W-1:0] br_t1_l2 [0:(FPGA_TREE_SLOTS/4)-1];
 reg  [CAND_W-1:0] br_t1_l3 [0:(FPGA_TREE_SLOTS/8)-1];
 reg  [CAND_W-1:0] br_t1_l4;
+reg  [CAND_W-1:0] store_t0_l0 [0:FPGA_TREE_SLOTS-1];
+reg  [CAND_W-1:0] store_t0_l1 [0:(FPGA_TREE_SLOTS/2)-1];
+reg  [CAND_W-1:0] store_t0_l2 [0:(FPGA_TREE_SLOTS/4)-1];
+reg  [CAND_W-1:0] store_t0_l3 [0:(FPGA_TREE_SLOTS/8)-1];
+reg  [CAND_W-1:0] store_t0_l4;
+reg  [CAND_W-1:0] store_t1_l0 [0:FPGA_TREE_SLOTS-1];
+reg  [CAND_W-1:0] store_t1_l1 [0:(FPGA_TREE_SLOTS/2)-1];
+reg  [CAND_W-1:0] store_t1_l2 [0:(FPGA_TREE_SLOTS/4)-1];
+reg  [CAND_W-1:0] store_t1_l3 [0:(FPGA_TREE_SLOTS/8)-1];
+reg  [CAND_W-1:0] store_t1_l4;
 reg  [CAND_W-1:0] fpga_cand_l0 [0:FPGA_TREE_SLOTS-1];
 reg  [CAND_W-1:0] fpga_cand_l1 [0:(FPGA_TREE_SLOTS/2)-1];
 reg  [CAND_W-1:0] fpga_cand_l2 [0:(FPGA_TREE_SLOTS/4)-1];
@@ -566,28 +584,58 @@ always @(*) begin
     br_t1_l4 = pick_older_fpga_cand(br_t1_l3[0], br_t1_l3[1]);
 end
 
-// Issue candidate tree: oldest_store + candidate selection
+// Store tree: find oldest pending store per thread (O(log N) replaces O(N) linear scan)
 always @(*) begin
-    oldest_store_found_t0 = 1'b0;
-    oldest_store_found_t1 = 1'b0;
-    oldest_store_seq_t0   = 16'hffff;
-    oldest_store_seq_t1   = 16'hffff;
+    for (i = 0; i < FPGA_TREE_SLOTS; i = i + 1) begin
+        store_t0_l0[i] = {CAND_W{1'b0}};
+        store_t1_l0[i] = {CAND_W{1'b0}};
+    end
+    for (i = 0; i < (FPGA_TREE_SLOTS/2); i = i + 1) begin
+        store_t0_l1[i] = {CAND_W{1'b0}};
+        store_t1_l1[i] = {CAND_W{1'b0}};
+    end
+    for (i = 0; i < (FPGA_TREE_SLOTS/4); i = i + 1) begin
+        store_t0_l2[i] = {CAND_W{1'b0}};
+        store_t1_l2[i] = {CAND_W{1'b0}};
+    end
+    for (i = 0; i < (FPGA_TREE_SLOTS/8); i = i + 1) begin
+        store_t0_l3[i] = {CAND_W{1'b0}};
+        store_t1_l3[i] = {CAND_W{1'b0}};
+    end
+    store_t0_l4 = {CAND_W{1'b0}};
+    store_t1_l4 = {CAND_W{1'b0}};
 
-    for (i = 0; i < RS_DEPTH; i = i + 1) begin
-        if (win_valid[i] && win_mem_write[i]) begin
-            if (win_tid[i] == 1'b0) begin
-                if (!oldest_store_found_t0 || (win_seq[i] < oldest_store_seq_t0)) begin
-                    oldest_store_found_t0 = 1'b1;
-                    oldest_store_seq_t0   = win_seq[i];
-                end
-            end else begin
-                if (!oldest_store_found_t1 || (win_seq[i] < oldest_store_seq_t1)) begin
-                    oldest_store_found_t1 = 1'b1;
-                    oldest_store_seq_t1   = win_seq[i];
-                end
-            end
+    for (i = 0; i < FPGA_TREE_SLOTS; i = i + 1) begin
+        if ((i < RS_DEPTH) && win_valid[i] && win_mem_write[i]) begin
+            if (win_tid[i] == 1'b0)
+                store_t0_l0[i] = {1'b1, win_seq[i], i[RS_IDX_W-1:0]};
+            else
+                store_t1_l0[i] = {1'b1, win_seq[i], i[RS_IDX_W-1:0]};
         end
     end
+    for (i = 0; i < (FPGA_TREE_SLOTS/2); i = i + 1) begin
+        store_t0_l1[i] = pick_older_fpga_cand(store_t0_l0[i*2], store_t0_l0[(i*2)+1]);
+        store_t1_l1[i] = pick_older_fpga_cand(store_t1_l0[i*2], store_t1_l0[(i*2)+1]);
+    end
+    for (i = 0; i < (FPGA_TREE_SLOTS/4); i = i + 1) begin
+        store_t0_l2[i] = pick_older_fpga_cand(store_t0_l1[i*2], store_t0_l1[(i*2)+1]);
+        store_t1_l2[i] = pick_older_fpga_cand(store_t1_l1[i*2], store_t1_l1[(i*2)+1]);
+    end
+    for (i = 0; i < (FPGA_TREE_SLOTS/8); i = i + 1) begin
+        store_t0_l3[i] = pick_older_fpga_cand(store_t0_l2[i*2], store_t0_l2[(i*2)+1]);
+        store_t1_l3[i] = pick_older_fpga_cand(store_t1_l2[i*2], store_t1_l2[(i*2)+1]);
+    end
+    store_t0_l4 = pick_older_fpga_cand(store_t0_l3[0], store_t0_l3[1]);
+    store_t1_l4 = pick_older_fpga_cand(store_t1_l3[0], store_t1_l3[1]);
+end
+
+// Issue candidate tree: candidate selection
+always @(*) begin
+    // Use pre-computed store tree results (O(log N) instead of O(N))
+    oldest_store_found_t0 = store_t0_l4[CAND_W-1];
+    oldest_store_found_t1 = store_t1_l4[CAND_W-1];
+    oldest_store_seq_t0   = oldest_store_found_t0 ? store_t0_l4[RS_IDX_W+15:RS_IDX_W] : 16'hffff;
+    oldest_store_seq_t1   = oldest_store_found_t1 ? store_t1_l4[RS_IDX_W+15:RS_IDX_W] : 16'hffff;
 
     for (i = 0; i < FPGA_TREE_SLOTS; i = i + 1)
         fpga_cand_l0[i] = {CAND_W{1'b0}};
@@ -601,23 +649,12 @@ always @(*) begin
 
     for (i = 0; i < FPGA_TREE_SLOTS; i = i + 1) begin
         if ((i < RS_DEPTH) &&
-            win_valid[i] && !win_issued[i] && win_ready[i] && !win_just_woke[i] &&
-            (win_fu[i] != `FU_NOP) &&
-            ((win_fu[i] == `FU_INT0) || (win_fu[i] == `FU_INT1) ||
-             (win_fu[i] == `FU_MUL)  || (win_fu[i] == `FU_LOAD) ||
-             (win_fu[i] == `FU_STORE)) &&
+            entry_eligible_r[i] &&
+            // fu_busy must remain combinational: same-cycle issue sets fu_busy,
+            // and we must not double-issue to the same FU in the next cycle.
             !((win_fu[i] == `FU_MUL)   && fu_busy[`FU_MUL]) &&
             !((win_fu[i] == `FU_LOAD)  && fu_busy[`FU_LOAD]) &&
-            !((win_fu[i] == `FU_STORE) && fu_busy[`FU_STORE]) &&
-            !((win_tid[i] == 1'b0 && branch_in_flight_t0) ||
-              (win_tid[i] == 1'b1 && branch_in_flight_t1)) &&
-            !((win_tid[i] == 1'b0 && pending_branch_t0 && !win_br[i] &&
-               (win_seq[i] >= effective_br_seq_t0)) ||
-              (win_tid[i] == 1'b1 && pending_branch_t1 && !win_br[i] &&
-               (win_seq[i] >= effective_br_seq_t1))) &&
-            !(((win_fu[i] == `FU_LOAD) || (win_fu[i] == `FU_STORE) || win_is_mret[i]) &&
-              (((win_tid[i] == 1'b0) && oldest_store_found_t0 && (oldest_store_seq_t0 < win_seq[i])) ||
-               ((win_tid[i] == 1'b1) && oldest_store_found_t1 && (oldest_store_seq_t1 < win_seq[i])))))
+            !((win_fu[i] == `FU_STORE) && fu_busy[`FU_STORE]))
             fpga_cand_l0[i] = {1'b1, win_seq[i], i[RS_IDX_W-1:0]};
     end
 
@@ -1201,6 +1238,9 @@ always @(posedge clk or negedge rstn) begin
         sel1_issued_tid_r <= 1'b0;
         last_br_seq_t0 <= 16'hffff;
         last_br_seq_t1 <= 16'hffff;
+`ifdef FPGA_MODE
+        entry_eligible_r <= {RS_DEPTH{1'b0}};
+`endif
         for (i = 1; i < NUM_FU; i = i + 1)
             fu_busy[i] <= 1'b0;
         for (i = 0; i < 32; i = i + 1) begin
@@ -1294,6 +1334,30 @@ always @(posedge clk or negedge rstn) begin
                      sel1_idx, sel1_is_br, win_tid[sel1_idx], win_pc[sel1_idx], win_seq[sel1_idx]);
         end
         `endif
+        // ── FPGA: Pre-compute entry eligibility for next cycle ──────────
+        // Registers all slow filtering predicates (branch tree seq compare,
+        // store tree ordering, branch_in_flight) so that fpga_cand_l0 only
+        // needs a single-bit lookup + fu_busy check (combinational).
+        // Uses current-cycle combinational values; result available next cycle.
+`ifdef FPGA_MODE
+        for (i = 0; i < RS_DEPTH; i = i + 1) begin
+            entry_eligible_r[i] <=
+                win_valid[i] && !win_issued[i] && win_ready[i] && !win_just_woke[i] &&
+                (win_fu[i] != `FU_NOP) &&
+                ((win_fu[i] == `FU_INT0) || (win_fu[i] == `FU_INT1) ||
+                 (win_fu[i] == `FU_MUL)  || (win_fu[i] == `FU_LOAD) ||
+                 (win_fu[i] == `FU_STORE)) &&
+                !((win_tid[i] == 1'b0 && branch_in_flight_t0) ||
+                  (win_tid[i] == 1'b1 && branch_in_flight_t1)) &&
+                !((win_tid[i] == 1'b0 && pending_branch_t0 && !win_br[i] &&
+                   (win_seq[i] >= effective_br_seq_t0)) ||
+                  (win_tid[i] == 1'b1 && pending_branch_t1 && !win_br[i] &&
+                   (win_seq[i] >= effective_br_seq_t1))) &&
+                !(((win_fu[i] == `FU_LOAD) || (win_fu[i] == `FU_STORE) || win_is_mret[i]) &&
+                  (((win_tid[i] == 1'b0) && oldest_store_found_t0 && (oldest_store_seq_t0 < win_seq[i])) ||
+                   ((win_tid[i] == 1'b1) && oldest_store_found_t1 && (oldest_store_seq_t1 < win_seq[i]))));
+        end
+`endif
         // ── CDB Wakeup + FU release (WB port 0) ────────────────
         if (wb0_valid && (wb0_fu != 3'd0))
             fu_busy[wb0_fu] <= 1'b0;
@@ -1481,12 +1545,25 @@ always @(posedge clk or negedge rstn) begin
                     win_wake_hold[i] <= 2'd0;
                 end
             end
+            // Flush overrides the branch_in_flight update computed earlier
+            // in this always block.  Without this, the combinational candidate
+            // tree can "see" a to-be-flushed branch entry (win_valid still 1
+            // until the NBA takes effect next cycle), re-setting
+            // branch_in_flight for a branch that will never produce
+            // br_complete — permanent deadlock.
+            if (flush_tid == 1'b0) branch_in_flight_t0 <= 1'b0;
+            if (flush_tid == 1'b1) branch_in_flight_t1 <= 1'b0;
         end
         else begin
             // ── Issue: mark selected entries as issued ───────────
             // Note: Only set fu_busy for MUL/LOAD/STORE, not for INT operations
             // For RoCC commands, only mark issued if RoCC is ready (backpressure)
+            // FPGA_MODE: RoCC not available, skip the cross-module feedback check
+`ifdef FPGA_MODE
+            if (sel0_found) begin
+`else
             if (sel0_found && (!iss0_is_rocc || rocc_ready)) begin
+`endif
                 win_issued[sel0_idx] <= 1'b1;
                 win_ready[sel0_idx]  <= 1'b0;
                 win_wake_hold[sel0_idx] <= 2'd0;

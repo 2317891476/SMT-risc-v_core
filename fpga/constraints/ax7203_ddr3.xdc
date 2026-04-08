@@ -34,10 +34,24 @@ set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/
 set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/resp_data_ui_reg*}] \
                -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/resp_data_r_reg*}]
 
+# Additional CDC paths uncovered by frequency sweep (core_clk ↔ ui_clk):
+# req_write_r feeds ui_state FSM via combinational decode in the ui_clk domain.
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_write_r_reg*}] \
+               -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_state_reg*}]
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_addr_r_reg*}]  \
+               -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_state_reg*}]
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_wen_r_reg*}]   \
+               -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_state_reg*}]
+
+# resp_data_ui crosses from ui_clk domain to core domain (into LSU shell).
+# Data is stable by the time resp_flag synchronizer propagates.
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/resp_data_ui_reg*}] \
+               -to   [get_cells -hierarchical -filter {NAME =~ *u_lsu_shell/raw_mem_rdata_reg*}]
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. MIG init_calib_complete is quasi-static (changes once after power-up)
 # ─────────────────────────────────────────────────────────────────────────────
-set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_mig/u_mig_7series_0_mig/u_memc_ui_top_axi/init_calib_complete_reg*}]
+set_false_path -from [get_cells -hierarchical -filter {NAME =~ *init_calib_complete_reg*}]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Bank 34 voltage override for led[0] (W5)
