@@ -234,9 +234,11 @@ assign flush_any    = pipe0_br_ctrl;
 // accept an instruction that the ROB silently drops.
 wire rob0_full, rob1_full;
 wire sb_disp_stall;
+wire sb_disp1_blocked;  // d1 valid but IQ-blocked (d0 went through)
 wire rob_disp_stall;
+wire fl_disp_stall;
 wire stall;
-assign stall       = sb_disp_stall || rob_disp_stall;
+assign stall       = sb_disp_stall || rob_disp_stall || fl_disp_stall;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn)
@@ -316,6 +318,16 @@ wire [31:0] rob_commit0_data, rob_commit1_data;
 wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
 wire        rob_commit0_is_store, rob_commit1_is_store;
 wire [1:0]  rob_instr_retired;
+// Expanded ROB rename support outputs (Stage A: unused, wired to defaults)
+wire [5:0]  rob_commit0_prd_old, rob_commit1_prd_old;
+wire        rob_commit0_regs_write, rob_commit1_regs_write;
+wire        rob_recover_walk_active;
+wire        rob_recover_en;
+wire [4:0]  rob_recover_rd;
+wire [5:0]  rob_recover_prd_old, rob_recover_prd_new;
+wire        rob_recover_regs_write;
+wire [0:0]  rob_recover_tid;
+wire [3:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
 wire [4:0]  sb_disp0_tag, sb_disp1_tag;
 wire        iss0_is_rocc;
 reg         retire_seen_r;
@@ -507,7 +519,8 @@ decoder_dual u_decoder_dual(
     .dec1_is_rocc    (dec1_is_rocc    ),
     .dec1_rocc_funct7(dec1_rocc_funct7),
     .consume_0       (fb_consume_0    ),
-    .consume_1       (fb_consume_1    )
+    .consume_1       (fb_consume_1    ),
+    .disp1_blocked   (sb_disp1_blocked)
 );
 
 // Squash dispatches if flush active
@@ -515,8 +528,14 @@ wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
 wire disp1_valid_pre_rob = dec1_valid && !smt_flush[dec1_tid];
 assign rob_disp_stall = (disp0_valid_pre_rob && rob0_full) ||
                         (disp1_valid_pre_rob && rob1_full);
-wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall;
-wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall;
+// Freelist stall: prevent dispatch when freelist can't provide physical regs
+wire d0_needs_alloc = disp0_valid_pre_rob && dec0_regs_write && (dec0_rd != 5'd0);
+wire d1_needs_alloc = disp1_valid_pre_rob && dec1_regs_write && (dec1_rd != 5'd0);
+assign fl_disp_stall = (d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
+                       (d0_needs_alloc || d1_needs_alloc) ? !fl_can_alloc_1 :
+                       1'b0;
+wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall;
+wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall && !fl_disp_stall;
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
 // disp0 gets current order_id for its thread
@@ -527,6 +546,42 @@ wire [15:0] disp1_order_id = (dec1_tid == 1'b0) ?
     ((dec0_tid == 1'b1 && disp0_accepted) ? order_id_t1 + 16'd1 : order_id_t1);
 wire [7:0] disp0_epoch = (dec0_tid == 1'b0) ? epoch_t0 : epoch_t1;
 wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
+
+// ════════════════════════════════════════════════════════════════════════════
+// Tag → Physical Register Sideband Maps
+// ════════════════════════════════════════════════════════════════════════════
+// These tables map RS tags to physical register addresses. They are written at
+// dispatch (alongside scoreboard allocation) and read at WB time (PRF write)
+// and at issue time (PRF source operand read).
+reg [5:0] tag_prd_map  [0:31];   // dest phys reg for each RS tag
+reg [5:0] tag_prs1_map [0:31];   // source 1 phys reg for each RS tag
+reg [5:0] tag_prs2_map [0:31];   // source 2 phys reg for each RS tag
+reg [0:0] tag_tid_map  [0:31];   // thread ID for each RS tag
+integer tp_idx;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (tp_idx = 0; tp_idx < 32; tp_idx = tp_idx + 1) begin
+            tag_prd_map[tp_idx]  <= 6'd0;
+            tag_prs1_map[tp_idx] <= 6'd0;
+            tag_prs2_map[tp_idx] <= 6'd0;
+            tag_tid_map[tp_idx]  <= 1'b0;
+        end
+    end else begin
+        if (disp0_accepted && sb_disp0_tag != 5'd0) begin
+            tag_prd_map[sb_disp0_tag]  <= shadow_alloc0_valid ? fl_alloc0_prd : 6'd0;
+            tag_prs1_map[sb_disp0_tag] <= rmt_prs0_1;
+            tag_prs2_map[sb_disp0_tag] <= rmt_prs0_2;
+            tag_tid_map[sb_disp0_tag]  <= dec0_tid;
+        end
+        if (disp1_accepted && sb_disp1_tag != 5'd0) begin
+            tag_prd_map[sb_disp1_tag]  <= shadow_alloc1_valid ? fl_alloc1_prd : 6'd0;
+            tag_prs1_map[sb_disp1_tag] <= rmt_prs1_1;
+            tag_prs2_map[sb_disp1_tag] <= rmt_prs1_2;
+            tag_tid_map[sb_disp1_tag]  <= dec1_tid;
+        end
+    end
+end
 
 // ════════════════════════════════════════════════════════════════════════════
 // STAGE 4: Scoreboard (16-entry RS, Dual-Issue)
@@ -602,17 +657,18 @@ wire        wb0_regs_write, wb1_regs_write;
 wire [2:0]  wb0_fu,    wb1_fu;
 wire [0:0]  wb0_tid,   wb1_tid;
 
-scoreboard #(
+dispatch_unit #(
     .RS_DEPTH(SCOREBOARD_RS_DEPTH_CFG),
     .RS_IDX_W(SCOREBOARD_RS_IDX_W_CFG),
     .RS_TAG_W(5)
-) u_scoreboard (
+) u_dispatch_unit (
     .clk         (clk              ),
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),
     .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_order_valid(!trap_redirect_valid && pipe0_br_ctrl),
     .flush_order_id(pipe0_br_order_id),
+    .flush_new_epoch((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
 
     // Dispatch 0
     .disp0_valid       (disp0_valid_gated ),
@@ -663,6 +719,7 @@ scoreboard #(
     .disp1_is_mret     (dec1_is_mret      ),
 
     .disp_stall  (sb_disp_stall    ),
+    .disp1_blocked(sb_disp1_blocked ),
 
     // Dispatch Tag Outputs (for ROB)
     .disp0_tag   (sb_disp0_tag     ),
@@ -804,12 +861,13 @@ reg        rs_is_rocc    [0:31];
 reg [6:0]  rs_rocc_funct7[0:31];
 integer    rocc_meta_idx;
 
-rob_lite #(
-    .ROB_DEPTH      (8),
-    .ROB_IDX_W      (3),
+rob #(
+    .ROB_DEPTH      (16),
+    .ROB_IDX_W      (4),
     .RS_TAG_W       (5),
+    .PHYS_REG_W     (6),
     .NUM_THREAD     (2)
-) u_rob_lite (
+) u_rob (
     .clk                (clk),
     .rstn               (rstn),
 
@@ -828,7 +886,13 @@ rob_lite #(
     .disp0_epoch        (disp0_epoch),
     .disp0_rd           (dec0_rd),
     .disp0_is_store     (disp0_is_store),
+    .disp0_prd_new      (shadow_alloc0_valid ? fl_alloc0_prd : 6'd0),
+    .disp0_prd_old      (rmt_prd0_old),
+    .disp0_is_branch    (dec0_br),
+    .disp0_regs_write   (dec0_regs_write),
+    .disp0_pc           (dec0_pc),
     .rob0_full          (rob0_full),
+    .disp0_rob_idx      (rob_disp0_rob_idx),
 
     // Dispatch Port 1
     .disp1_valid        (disp1_accepted),
@@ -838,7 +902,13 @@ rob_lite #(
     .disp1_epoch        (disp1_epoch),
     .disp1_rd           (dec1_rd),
     .disp1_is_store     (disp1_is_store),
+    .disp1_prd_new      (shadow_alloc1_valid ? fl_alloc1_prd : 6'd0),
+    .disp1_prd_old      (rmt_prd1_old),
+    .disp1_is_branch    (dec1_br),
+    .disp1_regs_write   (dec1_regs_write),
+    .disp1_pc           (dec1_pc),
     .rob1_full          (rob1_full),
+    .disp1_rob_idx      (rob_disp1_rob_idx),
 
     // Writeback Port 0
     .wb0_valid          (wb0_valid),
@@ -873,7 +943,121 @@ rob_lite #(
     .commit0_order_id   (rob_commit0_order_id),
     .commit1_order_id   (rob_commit1_order_id),
     .commit0_is_store   (rob_commit0_is_store),
-    .commit1_is_store   (rob_commit1_is_store)
+    .commit1_is_store   (rob_commit1_is_store),
+
+    // Rename Commit Outputs (Stage A: unused)
+    .commit0_prd_old         (rob_commit0_prd_old),
+    .commit0_regs_write_out  (rob_commit0_regs_write),
+    .commit1_prd_old         (rob_commit1_prd_old),
+    .commit1_regs_write_out  (rob_commit1_regs_write),
+
+    // Recovery Walk Interface (Stage A: unused)
+    .recover_walk_active (rob_recover_walk_active),
+    .recover_en          (rob_recover_en),
+    .recover_rd          (rob_recover_rd),
+    .recover_prd_old     (rob_recover_prd_old),
+    .recover_prd_new     (rob_recover_prd_new),
+    .recover_regs_write  (rob_recover_regs_write),
+    .recover_tid         (rob_recover_tid)
+);
+
+// ════════════════════════════════════════════════════════════════════════════
+// STAGE 4b: Rename Map Table + Freelist (Shadow – not yet on critical path)
+// ════════════════════════════════════════════════════════════════════════════
+// Rename outputs (shadow – unused by scoreboard path for now)
+wire [5:0] rmt_prs0_1, rmt_prs0_2, rmt_prd0_old;
+wire [5:0] rmt_prs1_1, rmt_prs1_2, rmt_prd1_old;
+wire       rmt_prs0_1_ready, rmt_prs0_2_ready;
+wire       rmt_prs1_1_ready, rmt_prs1_2_ready;
+
+// Freelist outputs (shadow)
+wire [5:0] fl_alloc0_prd, fl_alloc1_prd;
+wire       fl_can_alloc_1, fl_can_alloc_2;
+
+// Shadow rename alloc valid: inst writes to rd != x0
+wire shadow_alloc0_valid = disp0_accepted && dec0_regs_write && (dec0_rd != 5'd0);
+wire shadow_alloc1_valid = disp1_accepted && dec1_regs_write && (dec1_rd != 5'd0);
+
+rename_map_table #(
+    .PHYS_REG_W   (6),
+    .NUM_PHYS_REG (48)
+) u_rename_map_table (
+    .clk            (clk),
+    .rstn           (rstn),
+    .tid            (dec0_tid),
+    // Inst 0 lookup
+    .lookup0_rs1    (dec0_rs1),
+    .lookup0_rs2    (dec0_rs2),
+    .lookup0_rd     (dec0_rd),
+    // Inst 1 lookup
+    .lookup1_rs1    (dec1_rs1),
+    .lookup1_rs2    (dec1_rs2),
+    .lookup1_rd     (dec1_rd),
+    // Inst 0 rename outputs
+    .prs0_1         (rmt_prs0_1),
+    .prs0_2         (rmt_prs0_2),
+    .prd0_old       (rmt_prd0_old),
+    // Inst 1 rename outputs
+    .prs1_1         (rmt_prs1_1),
+    .prs1_2         (rmt_prs1_2),
+    .prd1_old       (rmt_prd1_old),
+    // Ready bits
+    .prs0_1_ready   (rmt_prs0_1_ready),
+    .prs0_2_ready   (rmt_prs0_2_ready),
+    .prs1_1_ready   (rmt_prs1_1_ready),
+    .prs1_2_ready   (rmt_prs1_2_ready),
+    // Rename update
+    .alloc0_valid   (shadow_alloc0_valid),
+    .alloc0_rd      (dec0_rd),
+    .alloc0_prd_new (fl_alloc0_prd),
+    .alloc1_valid   (shadow_alloc1_valid),
+    .alloc1_rd      (dec1_rd),
+    .alloc1_prd_new (fl_alloc1_prd),
+    // CDB writeback (mark phys reg as ready at WB time)
+    .cdb0_valid     (wb0_valid && wb0_regs_write),
+    .cdb0_prd       (tag_prd_map[wb0_tag]),
+    .cdb1_valid     (wb1_valid && wb1_regs_write),
+    .cdb1_prd       (tag_prd_map[wb1_tag]),
+    // Recovery
+    .recover_en     (rob_recover_en),
+    .recover_rd     (rob_recover_rd),
+    .recover_prd    (rob_recover_prd_old),
+    .recover_tid    (rob_recover_tid),
+    // Bulk reset
+    .reset_to_arch  (1'b0),
+    .reset_tid      (1'b0)
+);
+
+freelist #(
+    .PHYS_REG_W (6),
+    .NUM_FREE   (16),
+    .FL_DEPTH   (64),
+    .FL_IDX_W   (6)
+) u_freelist (
+    .clk                (clk),
+    .rstn               (rstn),
+    .tid                (dec0_tid),
+    // Alloc
+    .alloc0_req         (shadow_alloc0_valid),
+    .alloc0_prd         (fl_alloc0_prd),
+    .alloc1_req         (shadow_alloc1_valid),
+    .alloc1_prd         (fl_alloc1_prd),
+    .can_alloc_1        (fl_can_alloc_1),
+    .can_alloc_2        (fl_can_alloc_2),
+    // Free at commit
+    .free0_valid        (rob_commit0_valid && rob_commit0_regs_write),
+    .free0_prd          (rob_commit0_prd_old),
+    .free0_tid          (1'b0),   // commit0 is always thread 0
+    .free1_valid        (rob_commit1_valid && rob_commit1_regs_write),
+    .free1_prd          (rob_commit1_prd_old),
+    .free1_tid          (1'b1),   // commit1 is always thread 1
+    // Recovery push
+    .recover_push_valid (rob_recover_en && rob_recover_regs_write),
+    .recover_push_prd   (rob_recover_prd_new),
+    .recover_push_tid   (rob_recover_tid),
+    // Bulk reset
+    .reset_list         (1'b0),
+    .reset_tid          (1'b0)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -941,10 +1125,40 @@ regs_mt #(.N_T(2)) u_regs_mt_p1(
     .r_regs_o2      (ro1_data2       )
 );
 
+// ═══ Physical Register File — written at WB time (speculative state) ═══
+wire [31:0] prf_r0_data, prf_r1_data, prf_r2_data, prf_r3_data;
+
+// PRF write signals: write at WB using phys reg from tag_prd_map
+wire        prf_w0_en   = wb0_valid && wb0_regs_write && (tag_prd_map[wb0_tag] != 6'd0);
+wire [5:0]  prf_w0_addr = tag_prd_map[wb0_tag];
+wire [0:0]  prf_w0_tid  = tag_tid_map[wb0_tag];
+wire [31:0] prf_w0_data = wb0_result_data;
+
+wire        prf_w1_en   = wb1_valid && wb1_regs_write && (tag_prd_map[wb1_tag] != 6'd0);
+wire [5:0]  prf_w1_addr = tag_prd_map[wb1_tag];
+wire [0:0]  prf_w1_tid  = tag_tid_map[wb1_tag];
+wire [31:0] prf_w1_data = wb1_result_data;
+
+phys_regfile #(
+    .NUM_PHYS_REG (48),
+    .PHYS_REG_W   (6)
+) u_phys_regfile (
+    .clk    (clk),
+    .rstn   (rstn),
+    // Read ports (using phys reg addresses from tag→prs sideband maps)
+    .r0_tid  (iss0_tid),  .r0_addr (tag_prs1_map[iss0_tag]), .r0_data (prf_r0_data),
+    .r1_tid  (iss0_tid),  .r1_addr (tag_prs2_map[iss0_tag]), .r1_data (prf_r1_data),
+    .r2_tid  (iss1_tid),  .r2_addr (tag_prs1_map[iss1_tag]), .r2_data (prf_r2_data),
+    .r3_tid  (iss1_tid),  .r3_addr (tag_prs2_map[iss1_tag]), .r3_data (prf_r3_data),
+    // Write ports (at WB time — speculative writes)
+    .w0_en   (prf_w0_en),  .w0_tid (prf_w0_tid), .w0_addr (prf_w0_addr), .w0_data (prf_w0_data),
+    .w1_en   (prf_w1_en),  .w1_tid (prf_w1_tid), .w1_addr (prf_w1_addr), .w1_data (prf_w1_data)
+);
+
 // Order ID increment logic (after scoreboard is defined)
 // Dispatch is accepted when valid is asserted and stall is not asserted
 wire disp0_accepted = disp0_valid_gated && !sb_disp_stall;
-wire disp1_accepted = disp1_valid_gated && !sb_disp_stall;
+wire disp1_accepted = disp1_valid_gated && !sb_disp_stall && !sb_disp1_blocked;
 
 // Best-effort trap resume PC for interrupt entry.
 // Prefer the oldest visible in-flight PC, and avoid overwriting it with
@@ -1078,8 +1292,8 @@ wire [31:0] p0_tagbuf_a_data,  p0_tagbuf_b_data;
 bypass_network u_bypass0(
     .ro_rs1_addr     (iss0_rs1       ),
     .ro_rs2_addr     (iss0_rs2       ),
-    .ro_rs1_regdata  (ro0_data1      ),
-    .ro_rs2_regdata  (ro0_data2      ),
+    .ro_rs1_regdata  (prf_r0_data    ),
+    .ro_rs2_regdata  (prf_r1_data    ),
     .ro_tid          (iss0_tid       ),
     .tagbuf_rs1_valid(p0_tagbuf_a_valid),
     .tagbuf_rs1_data (p0_tagbuf_a_data ),
@@ -1115,8 +1329,8 @@ wire [31:0] p1_tagbuf_a_data,  p1_tagbuf_b_data;
 bypass_network u_bypass1(
     .ro_rs1_addr     (iss1_rs1       ),
     .ro_rs2_addr     (iss1_rs2       ),
-    .ro_rs1_regdata  (ro1_data1      ),
-    .ro_rs2_regdata  (ro1_data2      ),
+    .ro_rs1_regdata  (prf_r2_data    ),
+    .ro_rs2_regdata  (prf_r3_data    ),
     .ro_tid          (iss1_tid       ),
     .tagbuf_rs1_valid(p1_tagbuf_a_valid),
     .tagbuf_rs1_data (p1_tagbuf_a_data ),
@@ -1281,6 +1495,8 @@ wire [4:0]  p1_mul_rd;
 wire        p1_mul_regs_write;
 wire [2:0]  p1_mul_fu;
 wire [0:0]  p1_mul_tid;
+
+
 
 exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .clk           (clk              ),

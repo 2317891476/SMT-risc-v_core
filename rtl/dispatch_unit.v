@@ -1,0 +1,1183 @@
+`timescale 1ns/1ns
+// =============================================================================
+// Module : dispatch_unit
+// Description: Drop-in replacement for the scoreboard.
+//   Internally uses 3 split issue-queues (INT/MEM/MUL) plus a shared
+//   tag pool and reg_result table for dependency tracking.
+//
+//   IQ_INT  : 8 entries — FU_INT0, FU_INT1, FU_NOP → issues to pipe0
+//   IQ_MEM  : 4 entries — FU_LOAD, FU_STORE          → issues to pipe1
+//   IQ_MUL  : 4 entries — FU_MUL                     → issues to pipe1
+//   Pipe1 winner is chosen by iq_pipe1_arbiter (oldest-first).
+//
+//   Port interface is identical to scoreboard.v for drop-in swap.
+// =============================================================================
+`include "define.v"
+
+module dispatch_unit #(
+    parameter RS_DEPTH   = 16,
+    parameter RS_IDX_W   = 4,
+    parameter RS_TAG_W   = 5,
+    parameter NUM_FU     = 8,
+    parameter NUM_THREAD = 2
+)(
+    input  wire        clk,
+    input  wire        rstn,
+
+    // ─── Flush ───────────────────────────────────────────────────
+    input  wire        flush,
+    input  wire [0:0]  flush_tid,
+    input  wire        flush_order_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
+    input  wire [`METADATA_EPOCH_W-1:0]  flush_new_epoch,
+
+    // ─── Dispatch Port 0 ────────────────────────────────────────
+    input  wire        disp0_valid,
+    input  wire [31:0] disp0_pc,
+    input  wire [31:0] disp0_imm,
+    input  wire [2:0]  disp0_func3,
+    input  wire        disp0_func7,
+    input  wire [4:0]  disp0_rd,
+    input  wire        disp0_br,
+    input  wire        disp0_mem_read,
+    input  wire        disp0_mem2reg,
+    input  wire [2:0]  disp0_alu_op,
+    input  wire        disp0_mem_write,
+    input  wire [1:0]  disp0_alu_src1,
+    input  wire [1:0]  disp0_alu_src2,
+    input  wire        disp0_br_addr_mode,
+    input  wire        disp0_regs_write,
+    input  wire [4:0]  disp0_rs1,
+    input  wire [4:0]  disp0_rs2,
+    input  wire        disp0_rs1_used,
+    input  wire        disp0_rs2_used,
+    input  wire [2:0]  disp0_fu,
+    input  wire [0:0]  disp0_tid,
+    input  wire        disp0_is_mret,
+
+    // ─── Dispatch Port 1 ────────────────────────────────────────
+    input  wire        disp1_valid,
+    input  wire [31:0] disp1_pc,
+    input  wire [31:0] disp1_imm,
+    input  wire [2:0]  disp1_func3,
+    input  wire        disp1_func7,
+    input  wire [4:0]  disp1_rd,
+    input  wire        disp1_br,
+    input  wire        disp1_mem_read,
+    input  wire        disp1_mem2reg,
+    input  wire [2:0]  disp1_alu_op,
+    input  wire        disp1_mem_write,
+    input  wire [1:0]  disp1_alu_src1,
+    input  wire [1:0]  disp1_alu_src2,
+    input  wire        disp1_br_addr_mode,
+    input  wire        disp1_regs_write,
+    input  wire [4:0]  disp1_rs1,
+    input  wire [4:0]  disp1_rs2,
+    input  wire        disp1_rs1_used,
+    input  wire        disp1_rs2_used,
+    input  wire [2:0]  disp1_fu,
+    input  wire [0:0]  disp1_tid,
+    input  wire        disp1_is_mret,
+
+    // ─── Stall ───────────────────────────────────────────────────
+    output wire        disp_stall,
+    output wire        disp1_blocked,  // d1 valid but couldn't dispatch (d0 went)
+
+    // ─── Dispatch Tag Outputs ────────────────────────────────────
+    output wire [RS_TAG_W-1:0] disp0_tag,
+    output wire [RS_TAG_W-1:0] disp1_tag,
+
+    // ─── Dispatch Metadata ──────────────────────────────────────
+    input  wire [`METADATA_ORDER_ID_W-1:0] disp0_order_id,
+    input  wire [`METADATA_EPOCH_W-1:0]    disp0_epoch,
+    input  wire [`METADATA_ORDER_ID_W-1:0] disp1_order_id,
+    input  wire [`METADATA_EPOCH_W-1:0]    disp1_epoch,
+
+    // ─── Issue Port 0 (Pipe0: INT) ──────────────────────────────
+    output wire        iss0_valid,
+    output wire [RS_TAG_W-1:0] iss0_tag,
+    output wire [31:0] iss0_pc,
+    output wire [31:0] iss0_imm,
+    output wire [2:0]  iss0_func3,
+    output wire        iss0_func7,
+    output wire [4:0]  iss0_rd,
+    output wire [4:0]  iss0_rs1,
+    output wire [4:0]  iss0_rs2,
+    output wire        iss0_rs1_used,
+    output wire        iss0_rs2_used,
+    output wire [RS_TAG_W-1:0] iss0_src1_tag,
+    output wire [RS_TAG_W-1:0] iss0_src2_tag,
+    output wire        iss0_br,
+    output wire        iss0_mem_read,
+    output wire        iss0_mem2reg,
+    output wire [2:0]  iss0_alu_op,
+    output wire        iss0_mem_write,
+    output wire [1:0]  iss0_alu_src1,
+    output wire [1:0]  iss0_alu_src2,
+    output wire        iss0_br_addr_mode,
+    output wire        iss0_regs_write,
+    output wire [2:0]  iss0_fu,
+    output wire [0:0]  iss0_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id,
+    output wire [`METADATA_EPOCH_W-1:0]    iss0_epoch,
+
+    // ─── Issue Port 1 (Pipe1: MEM/MUL) ─────────────────────────
+    output wire        iss1_valid,
+    output wire [RS_TAG_W-1:0] iss1_tag,
+    output wire [31:0] iss1_pc,
+    output wire [31:0] iss1_imm,
+    output wire [2:0]  iss1_func3,
+    output wire        iss1_func7,
+    output wire [4:0]  iss1_rd,
+    output wire [4:0]  iss1_rs1,
+    output wire [4:0]  iss1_rs2,
+    output wire        iss1_rs1_used,
+    output wire        iss1_rs2_used,
+    output wire [RS_TAG_W-1:0] iss1_src1_tag,
+    output wire [RS_TAG_W-1:0] iss1_src2_tag,
+    output wire        iss1_br,
+    output wire        iss1_mem_read,
+    output wire        iss1_mem2reg,
+    output wire [2:0]  iss1_alu_op,
+    output wire        iss1_mem_write,
+    output wire [1:0]  iss1_alu_src1,
+    output wire [1:0]  iss1_alu_src2,
+    output wire        iss1_br_addr_mode,
+    output wire        iss1_regs_write,
+    output wire [2:0]  iss1_fu,
+    output wire [0:0]  iss1_tid,
+    output wire        branch_pending_any,
+    output wire        debug_br_found_t0,
+    output wire        debug_branch_in_flight_t0,
+    output wire        debug_oldest_br_ready_t0,
+    output wire        debug_oldest_br_just_woke_t0,
+    output wire [3:0]  debug_oldest_br_qj_t0,
+    output wire [3:0]  debug_oldest_br_qk_t0,
+    output wire [3:0]  debug_slot1_flags,
+    output wire [7:0]  debug_slot1_pc_lo,
+    output wire [3:0]  debug_slot1_qj,
+    output wire [3:0]  debug_slot1_qk,
+    output wire [3:0]  debug_tag2_flags,
+    output wire [3:0]  debug_reg_x12_tag_t0,
+    output wire [3:0]  debug_slot1_issue_flags,
+    output wire [3:0]  debug_sel0_idx,
+    output wire [3:0]  debug_slot1_fu,
+    output wire [7:0]  debug_oldest_br_seq_lo_t0,
+    output wire [15:0] debug_rs_flags_flat,
+    output wire [31:0] debug_rs_pc_lo_flat,
+    output wire [15:0] debug_rs_fu_flat,
+    output wire [15:0] debug_rs_qj_flat,
+    output wire [15:0] debug_rs_qk_flat,
+    output wire [31:0] debug_rs_seq_lo_flat,
+    output wire [`METADATA_ORDER_ID_W-1:0] iss1_order_id,
+    output wire [`METADATA_EPOCH_W-1:0]    iss1_epoch,
+
+    // ─── Writeback Ports ────────────────────────────────────────
+    input  wire        wb0_valid,
+    input  wire [RS_TAG_W-1:0] wb0_tag,
+    input  wire [4:0]  wb0_rd,
+    input  wire        wb0_regs_write,
+    input  wire [2:0]  wb0_fu,
+    input  wire [0:0]  wb0_tid,
+    input  wire        wb1_valid,
+    input  wire [RS_TAG_W-1:0] wb1_tag,
+    input  wire [4:0]  wb1_rd,
+    input  wire        wb1_regs_write,
+    input  wire [2:0]  wb1_fu,
+    input  wire [0:0]  wb1_tid,
+
+    // ─── Commit Ports ───────────────────────────────────────────
+    input  wire        commit0_valid,
+    input  wire [RS_TAG_W-1:0] commit0_tag,
+    input  wire [0:0]  commit0_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] commit0_order_id,
+    input  wire        commit1_valid,
+    input  wire [RS_TAG_W-1:0] commit1_tag,
+    input  wire [0:0]  commit1_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
+
+    // ─── Branch Completion ──────────────────────────────────────
+    input  wire        br_complete,
+
+    // ─── RoCC ───────────────────────────────────────────────────
+    input  wire        rocc_ready,
+    output wire        iss0_is_rocc
+);
+
+// ═════════════════════════════════════════════════════════════════
+// Tag Pool (tags 1 .. RS_DEPTH)
+// ═════════════════════════════════════════════════════════════════
+reg  tag_in_use    [0:RS_DEPTH];  // index 0 unused
+reg  [0:RS_DEPTH]  tag_ready_v;   // packed — Icarus needs this for always @(*) sensitivity
+reg  tag_just_ready[0:RS_DEPTH];
+reg [RS_TAG_W-1:0] tag_live_order [0:RS_DEPTH]; // NOT USED YET but reserved
+
+// Combinational free-tag scan
+reg                free0_found, free1_found;
+reg [RS_TAG_W-1:0] free0_tag,   free1_tag;
+integer fti;
+always @(*) begin
+    free0_found = 1'b0; free1_found = 1'b0;
+    free0_tag   = {RS_TAG_W{1'b0}};
+    free1_tag   = {RS_TAG_W{1'b0}};
+    for (fti = 1; fti <= RS_DEPTH; fti = fti + 1) begin
+        if (!tag_in_use[fti] && !free0_found) begin
+            free0_found = 1'b1;
+            free0_tag   = fti[RS_TAG_W-1:0];
+        end
+        else if (!tag_in_use[fti] && free0_found && !free1_found) begin
+            free1_found = 1'b1;
+            free1_tag   = fti[RS_TAG_W-1:0];
+        end
+    end
+end
+
+wire can_accept_1 = free0_found;
+wire can_accept_2 = free0_found && free1_found;
+
+assign disp0_tag = free0_tag;
+assign disp1_tag = free1_tag;
+
+// ═════════════════════════════════════════════════════════════════
+// 2. reg_result Table (per-thread × 32 arch regs → producing tag)
+// ═════════════════════════════════════════════════════════════════
+reg [RS_TAG_W-1:0] reg_result       [0:NUM_THREAD-1][0:31];
+reg [`METADATA_ORDER_ID_W-1:0] reg_result_order [0:NUM_THREAD-1][0:31];
+
+// Tag-liveness tracking (matches scoreboard's approach)
+reg  [0:RS_DEPTH]  tag_live_valid_v;
+reg [`METADATA_ORDER_ID_W-1:0] tag_live_seq [0:RS_DEPTH];
+
+// ═════════════════════════════════════════════════════════════════
+// 3. Dependency Lookup (combinational)
+// ═════════════════════════════════════════════════════════════════
+// Inline dependency checks using packed vectors for proper Icarus
+// Verilog sensitivity tracking in always @(*) blocks.
+
+wire alloc0_wr = disp0_valid && disp0_regs_write && (disp0_rd != 5'd0);
+wire alloc1_wr = disp1_valid && disp1_regs_write && (disp1_rd != 5'd0);
+
+// Disp0 deps — no same-cycle forwarding from disp0 itself
+reg [RS_TAG_W-1:0] d0_src1, d0_src2;
+always @(*) begin : dep_lookup_d0
+    reg [RS_TAG_W-1:0] t1, t2;
+    t1 = reg_result[disp0_tid][disp0_rs1];
+    t2 = reg_result[disp0_tid][disp0_rs2];
+
+    // d0_src1
+    if (!disp0_rs1_used)
+        d0_src1 = {RS_TAG_W{1'b0}};
+    else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
+             tag_live_seq[t1] == reg_result_order[disp0_tid][disp0_rs1]) begin
+        if (tag_ready_v[t1])
+            d0_src1 = {RS_TAG_W{1'b0}};
+        else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
+            d0_src1 = {RS_TAG_W{1'b0}};
+        else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
+            d0_src1 = {RS_TAG_W{1'b0}};
+        else
+            d0_src1 = t1;
+    end
+    else
+        d0_src1 = {RS_TAG_W{1'b0}};
+
+    // d0_src2
+    if (!disp0_rs2_used)
+        d0_src2 = {RS_TAG_W{1'b0}};
+    else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
+             tag_live_seq[t2] == reg_result_order[disp0_tid][disp0_rs2]) begin
+        if (tag_ready_v[t2])
+            d0_src2 = {RS_TAG_W{1'b0}};
+        else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
+            d0_src2 = {RS_TAG_W{1'b0}};
+        else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
+            d0_src2 = {RS_TAG_W{1'b0}};
+        else
+            d0_src2 = t2;
+    end
+    else
+        d0_src2 = {RS_TAG_W{1'b0}};
+end
+
+// Disp1 deps — check same-cycle RAW from disp0
+reg [RS_TAG_W-1:0] d1_src1, d1_src2;
+always @(*) begin : dep_lookup_d1
+    reg [RS_TAG_W-1:0] t1, t2;
+    t1 = reg_result[disp1_tid][disp1_rs1];
+    t2 = reg_result[disp1_tid][disp1_rs2];
+
+    // d1_src1
+    if (!disp1_rs1_used)
+        d1_src1 = {RS_TAG_W{1'b0}};
+    else if (alloc0_wr && disp0_rd == disp1_rs1 && disp0_tid == disp1_tid)
+        d1_src1 = free0_tag;
+    else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
+             tag_live_seq[t1] == reg_result_order[disp1_tid][disp1_rs1]) begin
+        if (tag_ready_v[t1])
+            d1_src1 = {RS_TAG_W{1'b0}};
+        else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
+            d1_src1 = {RS_TAG_W{1'b0}};
+        else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
+            d1_src1 = {RS_TAG_W{1'b0}};
+        else
+            d1_src1 = t1;
+    end
+    else
+        d1_src1 = {RS_TAG_W{1'b0}};
+
+    // d1_src2
+    if (!disp1_rs2_used)
+        d1_src2 = {RS_TAG_W{1'b0}};
+    else if (alloc0_wr && disp0_rd == disp1_rs2 && disp0_tid == disp1_tid)
+        d1_src2 = free0_tag;
+    else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
+             tag_live_seq[t2] == reg_result_order[disp1_tid][disp1_rs2]) begin
+        if (tag_ready_v[t2])
+            d1_src2 = {RS_TAG_W{1'b0}};
+        else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
+            d1_src2 = {RS_TAG_W{1'b0}};
+        else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
+            d1_src2 = {RS_TAG_W{1'b0}};
+        else
+            d1_src2 = t2;
+    end
+    else
+        d1_src2 = {RS_TAG_W{1'b0}};
+end
+
+// ═════════════════════════════════════════════════════════════════
+// 4. Dispatch Routing (FU → IQ)
+// ═════════════════════════════════════════════════════════════════
+wire d0_is_int = (disp0_fu == `FU_INT0) || (disp0_fu == `FU_INT1) || (disp0_fu == `FU_NOP);
+wire d0_is_mem = (disp0_fu == `FU_LOAD) || (disp0_fu == `FU_STORE);
+wire d0_is_mul = (disp0_fu == `FU_MUL);
+
+wire d1_is_int = (disp1_fu == `FU_INT0) || (disp1_fu == `FU_INT1) || (disp1_fu == `FU_NOP);
+wire d1_is_mem = (disp1_fu == `FU_LOAD) || (disp1_fu == `FU_STORE);
+wire d1_is_mul = (disp1_fu == `FU_MUL);
+
+// For each IQ: connect disp0 port from first matching dispatch,
+//              disp1 port from second matching dispatch.
+// IQ_INT dispatch:
+wire iq_int_dp0_valid = disp0_valid && d0_is_int;
+wire iq_int_dp0_from1 = !d0_is_int && d1_is_int;  // d1 goes to IQ_INT dp0
+wire iq_int_dp1_valid = d0_is_int && disp1_valid && d1_is_int; // both INT
+// If d0 not INT, d1 connects on dp0; dp1 unused
+wire iq_int_d0_valid = iq_int_dp0_from1 ? (disp1_valid && d1_is_int) : iq_int_dp0_valid;
+wire iq_int_d1_valid = iq_int_dp0_from1 ? 1'b0 : iq_int_dp1_valid;
+
+// IQ_MEM dispatch:
+wire iq_mem_dp0_from1 = !d0_is_mem && d1_is_mem;
+wire iq_mem_d0_valid = iq_mem_dp0_from1 ? (disp1_valid && d1_is_mem) : (disp0_valid && d0_is_mem);
+wire iq_mem_d1_valid = (d0_is_mem && disp1_valid && d1_is_mem) && !iq_mem_dp0_from1;
+
+// IQ_MUL dispatch:
+wire iq_mul_dp0_from1 = !d0_is_mul && d1_is_mul;
+wire iq_mul_d0_valid = iq_mul_dp0_from1 ? (disp1_valid && d1_is_mul) : (disp0_valid && d0_is_mul);
+wire iq_mul_d1_valid = (d0_is_mul && disp1_valid && d1_is_mul) && !iq_mul_dp0_from1;
+
+// Dispatch data mux: when dp0_from1, IQ's disp0 port gets disp1 fields
+
+// ═════════════════════════════════════════════════════════════════
+// 5. Branch Tracking
+// ═════════════════════════════════════════════════════════════════
+reg branch_in_flight_t0, branch_in_flight_t1;
+reg br_found_t0_r, br_found_t1_r; // registered version
+
+// Branch found: any INT IQ entry is valid, not issued, is branch
+// (We cannot easily scan IQ internals, so we track at dispatch)
+reg br_pending_cnt_t0, br_pending_cnt_t1;
+
+wire pending_branch_t0 = branch_in_flight_t0 || br_pending_cnt_t0;
+wire pending_branch_t1 = branch_in_flight_t1 || br_pending_cnt_t1;
+assign branch_pending_any = pending_branch_t0 || pending_branch_t1;
+
+// IQ issue inhibit: Disabled — the branch dispatch stall is sufficient
+// to serialize branches. Instructions already in-flight can issue freely;
+// incorrect speculative results are flushed via epoch by the ROB.
+wire issue_inhibit_t0 = 1'b0;
+wire issue_inhibit_t1 = 1'b0;
+
+// Branch tracking sequential logic
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        branch_in_flight_t0 <= 1'b0;
+        branch_in_flight_t1 <= 1'b0;
+        br_pending_cnt_t0   <= 1'b0;
+        br_pending_cnt_t1   <= 1'b0;
+    end else begin
+        // Branch in flight cleared by br_complete or flush
+        if (br_complete || (flush && !flush_tid))
+            branch_in_flight_t0 <= 1'b0;
+        if (br_complete || (flush && flush_tid))
+            branch_in_flight_t1 <= 1'b0;
+
+        // Set on branch issue (from IQ_INT)
+        if (int_iss_valid && int_iss_br) begin
+            if (int_iss_tid == 1'b0) branch_in_flight_t0 <= 1'b1;
+            else                     branch_in_flight_t1 <= 1'b1;
+        end
+
+        // Track branches dispatched but not yet issued
+        // Increment on dispatch, decrement on INT issue of branch
+        // Simplified: just track any branch in IQs
+        if (flush) begin
+            if (!flush_tid) br_pending_cnt_t0 <= 1'b0;
+            else            br_pending_cnt_t1 <= 1'b0;
+        end
+
+        // Update pending count based on dispatch/issue of branches
+        // Dispatch adds, issue removes
+        begin : br_cnt_update
+            reg inc_t0, inc_t1, dec_t0, dec_t1;
+            inc_t0 = 1'b0; inc_t1 = 1'b0;
+            dec_t0 = 1'b0; dec_t1 = 1'b0;
+
+            if (disp0_valid && disp0_br && !disp_stall) begin
+                if (disp0_tid == 1'b0) inc_t0 = 1'b1;
+                else                   inc_t1 = 1'b1;
+            end
+            if (d1_go && disp1_br) begin
+                if (disp1_tid == 1'b0) inc_t0 = 1'b1;
+                else                   inc_t1 = 1'b1;
+            end
+            if (int_iss_valid && int_iss_br) begin
+                if (int_iss_tid == 1'b0) dec_t0 = 1'b1;
+                else                     dec_t1 = 1'b1;
+            end
+
+            if (!flush || flush_tid) begin
+                if (inc_t0 && !dec_t0) br_pending_cnt_t0 <= 1'b1;
+                else if (dec_t0 && !inc_t0) br_pending_cnt_t0 <= 1'b0;
+            end
+            if (!flush || !flush_tid) begin
+                if (inc_t1 && !dec_t1) br_pending_cnt_t1 <= 1'b1;
+                else if (dec_t1 && !inc_t1) br_pending_cnt_t1 <= 1'b0;
+            end
+        end
+    end
+end
+
+// ═════════════════════════════════════════════════════════════════
+// 6. Stall Logic — Per-port to avoid type-specific IQ deadlocks.
+//    disp_stall  = d0 can't proceed → pipeline freezes.
+//    disp1_blocked = d1 can't proceed (IQ full / no tag) but d0 can.
+//      Upstream decoder consumes only d0 via consume_1 suppression.
+// ═════════════════════════════════════════════════════════════════
+wire iq_int_full, iq_int_almost_full;
+wire iq_mem_full, iq_mem_almost_full;
+wire iq_mul_full, iq_mul_almost_full;
+
+// d0: branch stall for d0's thread
+wire d0_br_stall = (disp0_tid == 1'b0 && pending_branch_t0) ||
+                   (disp0_tid == 1'b1 && pending_branch_t1);
+
+// d0: target IQ has capacity?
+wire d0_cap_ok = (!d0_is_int || !iq_int_full) &&
+                 (!d0_is_mem || !iq_mem_full) &&
+                 (!d0_is_mul || !iq_mul_full);
+
+// d0: tag available?
+wire d0_tag_ok = can_accept_1;
+
+// disp_stall: pipeline-wide stall if d0 can't proceed
+assign disp_stall = disp0_valid && (!d0_cap_ok || d0_br_stall || !d0_tag_ok);
+
+wire d0_go = disp0_valid && !disp_stall;
+
+// d1: branch stall for d1's thread
+wire d1_br_stall = (disp1_tid == 1'b0 && pending_branch_t0) ||
+                   (disp1_tid == 1'b1 && pending_branch_t1);
+
+// d1: target IQ has capacity (after d0 may have taken a slot)?
+wire d1_int_ok = !d1_is_int || ((d0_is_int && d0_go) ? !iq_int_almost_full : !iq_int_full);
+wire d1_mem_ok = !d1_is_mem || ((d0_is_mem && d0_go) ? !iq_mem_almost_full : !iq_mem_full);
+wire d1_mul_ok = !d1_is_mul || ((d0_is_mul && d0_go) ? !iq_mul_almost_full : !iq_mul_full);
+wire d1_cap_ok = d1_int_ok && d1_mem_ok && d1_mul_ok;
+
+// d1: need 2 tags total (d0 uses 1)
+wire d1_tag_ok = can_accept_2;
+
+wire d1_go = disp1_valid && d0_go && d1_cap_ok && !d1_br_stall && d1_tag_ok;
+
+// Signal upstream: d1 was valid but couldn't dispatch (d0 did go)
+assign disp1_blocked = disp1_valid && d0_go && !d1_go;
+
+// ═════════════════════════════════════════════════════════════════
+// 7. IQ Instantiation Wiring Helpers
+// ═════════════════════════════════════════════════════════════════
+
+// IQ_INT disp data mux
+// dp0 source: disp0 when d0 is INT, else disp1 when d1 is INT
+// dp1 source: disp1 (only when both are INT)
+
+// Helper: select between disp0 and disp1 data for an IQ port
+// "from1" means this IQ port should use disp1 data
+
+// INT IQ issue wires
+wire        int_iss_valid;
+wire [RS_TAG_W-1:0] int_iss_tag;
+wire [31:0] int_iss_pc, int_iss_imm;
+wire [2:0]  int_iss_func3;
+wire        int_iss_func7;
+wire [4:0]  int_iss_rd, int_iss_rs1, int_iss_rs2;
+wire        int_iss_rs1_used, int_iss_rs2_used;
+wire [RS_TAG_W-1:0] int_iss_src1_tag, int_iss_src2_tag;
+wire        int_iss_br, int_iss_mem_read, int_iss_mem2reg;
+wire [2:0]  int_iss_alu_op;
+wire        int_iss_mem_write;
+wire [1:0]  int_iss_alu_src1, int_iss_alu_src2;
+wire        int_iss_br_addr_mode, int_iss_regs_write;
+wire [2:0]  int_iss_fu;
+wire [0:0]  int_iss_tid;
+wire        int_iss_is_mret;
+wire [`METADATA_ORDER_ID_W-1:0] int_iss_order_id;
+wire [`METADATA_EPOCH_W-1:0]    int_iss_epoch;
+
+// MEM IQ issue wires
+wire        mem_iss_valid;
+wire [RS_TAG_W-1:0] mem_iss_tag;
+wire [31:0] mem_iss_pc, mem_iss_imm;
+wire [2:0]  mem_iss_func3;
+wire        mem_iss_func7;
+wire [4:0]  mem_iss_rd, mem_iss_rs1, mem_iss_rs2;
+wire        mem_iss_rs1_used, mem_iss_rs2_used;
+wire [RS_TAG_W-1:0] mem_iss_src1_tag, mem_iss_src2_tag;
+wire        mem_iss_br, mem_iss_mem_read, mem_iss_mem2reg;
+wire [2:0]  mem_iss_alu_op;
+wire        mem_iss_mem_write;
+wire [1:0]  mem_iss_alu_src1, mem_iss_alu_src2;
+wire        mem_iss_br_addr_mode, mem_iss_regs_write;
+wire [2:0]  mem_iss_fu;
+wire [0:0]  mem_iss_tid;
+wire        mem_iss_is_mret;
+wire [`METADATA_ORDER_ID_W-1:0] mem_iss_order_id;
+wire [`METADATA_EPOCH_W-1:0]    mem_iss_epoch;
+
+// MUL IQ issue wires
+wire        mul_iss_valid;
+wire [RS_TAG_W-1:0] mul_iss_tag;
+wire [31:0] mul_iss_pc, mul_iss_imm;
+wire [2:0]  mul_iss_func3;
+wire        mul_iss_func7;
+wire [4:0]  mul_iss_rd, mul_iss_rs1, mul_iss_rs2;
+wire        mul_iss_rs1_used, mul_iss_rs2_used;
+wire [RS_TAG_W-1:0] mul_iss_src1_tag, mul_iss_src2_tag;
+wire        mul_iss_br, mul_iss_mem_read, mul_iss_mem2reg;
+wire [2:0]  mul_iss_alu_op;
+wire        mul_iss_mem_write;
+wire [1:0]  mul_iss_alu_src1, mul_iss_alu_src2;
+wire        mul_iss_br_addr_mode, mul_iss_regs_write;
+wire [2:0]  mul_iss_fu;
+wire [0:0]  mul_iss_tid;
+wire        mul_iss_is_mret;
+wire [`METADATA_ORDER_ID_W-1:0] mul_iss_order_id;
+wire [`METADATA_EPOCH_W-1:0]    mul_iss_epoch;
+
+// ═════════════════════════════════════════════════════════════════
+// 8. Issue Queue — INT (8 entries, commit-time dealloc)
+// ═════════════════════════════════════════════════════════════════
+issue_queue #(
+    .IQ_DEPTH  (8),
+    .IQ_IDX_W  (3),
+    .RS_TAG_W  (RS_TAG_W),
+    .NUM_THREAD(NUM_THREAD),
+    .WAKE_HOLD (1),
+    .DEALLOC_AT_COMMIT (1)
+) u_iq_int (
+    .clk        (clk),
+    .rstn       (rstn),
+    .flush      (flush),
+    .flush_tid  (flush_tid),
+    .flush_new_epoch (flush_new_epoch),
+    .flush_order_valid (flush_order_valid),
+    .flush_order_id    (flush_order_id),
+    // Dispatch 0 — from disp0 if INT, else from disp1 if INT
+    .disp0_valid       (iq_int_dp0_from1 ? (d1_go && d1_is_int) : (d0_go && d0_is_int)),
+    .disp0_tag         (iq_int_dp0_from1 ? free1_tag   : free0_tag),
+    .disp0_pc          (iq_int_dp0_from1 ? disp1_pc    : disp0_pc),
+    .disp0_imm         (iq_int_dp0_from1 ? disp1_imm   : disp0_imm),
+    .disp0_func3       (iq_int_dp0_from1 ? disp1_func3 : disp0_func3),
+    .disp0_func7       (iq_int_dp0_from1 ? disp1_func7 : disp0_func7),
+    .disp0_rd          (iq_int_dp0_from1 ? disp1_rd    : disp0_rd),
+    .disp0_br          (iq_int_dp0_from1 ? disp1_br    : disp0_br),
+    .disp0_mem_read    (iq_int_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
+    .disp0_mem2reg     (iq_int_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_alu_op      (iq_int_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
+    .disp0_mem_write   (iq_int_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_alu_src1    (iq_int_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
+    .disp0_alu_src2    (iq_int_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
+    .disp0_br_addr_mode(iq_int_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_regs_write  (iq_int_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
+    .disp0_rs1         (iq_int_dp0_from1 ? disp1_rs1   : disp0_rs1),
+    .disp0_rs2         (iq_int_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1_used    (iq_int_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
+    .disp0_rs2_used    (iq_int_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
+    .disp0_fu          (iq_int_dp0_from1 ? disp1_fu    : disp0_fu),
+    .disp0_tid         (iq_int_dp0_from1 ? disp1_tid   : disp0_tid),
+    .disp0_is_mret     (iq_int_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_order_id    (iq_int_dp0_from1 ? disp1_order_id    : disp0_order_id),
+    .disp0_epoch       (iq_int_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_src1_tag    (iq_int_dp0_from1 ? d1_src1   : d0_src1),
+    .disp0_src2_tag    (iq_int_dp0_from1 ? d1_src2   : d0_src2),
+    // Dispatch 1 — only when both disp0 and disp1 are INT
+    .disp1_valid       (d0_go && d0_is_int && d1_go && d1_is_int),
+    .disp1_tag         (free1_tag),
+    .disp1_pc          (disp1_pc),
+    .disp1_imm         (disp1_imm),
+    .disp1_func3       (disp1_func3),
+    .disp1_func7       (disp1_func7),
+    .disp1_rd          (disp1_rd),
+    .disp1_br          (disp1_br),
+    .disp1_mem_read    (disp1_mem_read),
+    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_alu_op      (disp1_alu_op),
+    .disp1_mem_write   (disp1_mem_write),
+    .disp1_alu_src1    (disp1_alu_src1),
+    .disp1_alu_src2    (disp1_alu_src2),
+    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_regs_write  (disp1_regs_write),
+    .disp1_rs1         (disp1_rs1),
+    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1_used    (disp1_rs1_used),
+    .disp1_rs2_used    (disp1_rs2_used),
+    .disp1_fu          (disp1_fu),
+    .disp1_tid         (disp1_tid),
+    .disp1_is_mret     (disp1_is_mret),
+    .disp1_order_id    (disp1_order_id),
+    .disp1_epoch       (disp1_epoch),
+    .disp1_src1_tag    (d1_src1),
+    .disp1_src2_tag    (d1_src2),
+    // Outputs
+    .iq_full        (iq_int_full),
+    .iq_almost_full (iq_int_almost_full),
+    // Issue
+    .iss_valid       (int_iss_valid),
+    .iss_tag         (int_iss_tag),
+    .iss_pc          (int_iss_pc),
+    .iss_imm         (int_iss_imm),
+    .iss_func3       (int_iss_func3),
+    .iss_func7       (int_iss_func7),
+    .iss_rd          (int_iss_rd),
+    .iss_rs1         (int_iss_rs1),
+    .iss_rs2         (int_iss_rs2),
+    .iss_rs1_used    (int_iss_rs1_used),
+    .iss_rs2_used    (int_iss_rs2_used),
+    .iss_src1_tag    (int_iss_src1_tag),
+    .iss_src2_tag    (int_iss_src2_tag),
+    .iss_br          (int_iss_br),
+    .iss_mem_read    (int_iss_mem_read),
+    .iss_mem2reg     (int_iss_mem2reg),
+    .iss_alu_op      (int_iss_alu_op),
+    .iss_mem_write   (int_iss_mem_write),
+    .iss_alu_src1    (int_iss_alu_src1),
+    .iss_alu_src2    (int_iss_alu_src2),
+    .iss_br_addr_mode(int_iss_br_addr_mode),
+    .iss_regs_write  (int_iss_regs_write),
+    .iss_fu          (int_iss_fu),
+    .iss_tid         (int_iss_tid),
+    .iss_is_mret     (int_iss_is_mret),
+    .iss_order_id    (int_iss_order_id),
+    .iss_epoch       (int_iss_epoch),
+    // Wakeup
+    .wb0_valid       (wb0_valid),
+    .wb0_tag         (wb0_tag),
+    .wb0_regs_write  (wb0_regs_write),
+    .wb1_valid       (wb1_valid),
+    .wb1_tag         (wb1_tag),
+    .wb1_regs_write  (wb1_regs_write),
+    // Commit
+    .commit0_valid   (commit0_valid),
+    .commit0_tag     (commit0_tag),
+    .commit0_tid     (commit0_tid),
+    .commit0_order_id(commit0_order_id),
+    .commit1_valid   (commit1_valid),
+    .commit1_tag     (commit1_tag),
+    .commit1_tid     (commit1_tid),
+    .commit1_order_id(commit1_order_id),
+    // Issue inhibit
+    .issue_inhibit_t0(issue_inhibit_t0),
+    .issue_inhibit_t1(issue_inhibit_t1)
+);
+
+// ═════════════════════════════════════════════════════════════════
+// 9. Issue Queue — MEM (16 entries, commit-time dealloc, load-store ordering)
+// ═════════════════════════════════════════════════════════════════
+issue_queue #(
+    .IQ_DEPTH  (RS_DEPTH),
+    .IQ_IDX_W  (RS_IDX_W),
+    .RS_TAG_W  (RS_TAG_W),
+    .NUM_THREAD(NUM_THREAD),
+    .WAKE_HOLD (1),
+    .DEALLOC_AT_COMMIT    (1),
+    .CHECK_LOAD_STORE_ORDER (1)
+) u_iq_mem (
+    .clk        (clk),
+    .rstn       (rstn),
+    .flush      (flush),
+    .flush_tid  (flush_tid),
+    .flush_new_epoch (flush_new_epoch),
+    .flush_order_valid (flush_order_valid),
+    .flush_order_id    (flush_order_id),
+    // Dispatch 0
+    .disp0_valid       (iq_mem_dp0_from1 ? (d1_go && d1_is_mem) : (d0_go && d0_is_mem)),
+    .disp0_tag         (iq_mem_dp0_from1 ? free1_tag   : free0_tag),
+    .disp0_pc          (iq_mem_dp0_from1 ? disp1_pc    : disp0_pc),
+    .disp0_imm         (iq_mem_dp0_from1 ? disp1_imm   : disp0_imm),
+    .disp0_func3       (iq_mem_dp0_from1 ? disp1_func3 : disp0_func3),
+    .disp0_func7       (iq_mem_dp0_from1 ? disp1_func7 : disp0_func7),
+    .disp0_rd          (iq_mem_dp0_from1 ? disp1_rd    : disp0_rd),
+    .disp0_br          (iq_mem_dp0_from1 ? disp1_br    : disp0_br),
+    .disp0_mem_read    (iq_mem_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
+    .disp0_mem2reg     (iq_mem_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_alu_op      (iq_mem_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
+    .disp0_mem_write   (iq_mem_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_alu_src1    (iq_mem_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
+    .disp0_alu_src2    (iq_mem_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
+    .disp0_br_addr_mode(iq_mem_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_regs_write  (iq_mem_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
+    .disp0_rs1         (iq_mem_dp0_from1 ? disp1_rs1   : disp0_rs1),
+    .disp0_rs2         (iq_mem_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1_used    (iq_mem_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
+    .disp0_rs2_used    (iq_mem_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
+    .disp0_fu          (iq_mem_dp0_from1 ? disp1_fu    : disp0_fu),
+    .disp0_tid         (iq_mem_dp0_from1 ? disp1_tid   : disp0_tid),
+    .disp0_is_mret     (iq_mem_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_order_id    (iq_mem_dp0_from1 ? disp1_order_id    : disp0_order_id),
+    .disp0_epoch       (iq_mem_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_src1_tag    (iq_mem_dp0_from1 ? d1_src1   : d0_src1),
+    .disp0_src2_tag    (iq_mem_dp0_from1 ? d1_src2   : d0_src2),
+    // Dispatch 1
+    .disp1_valid       (d0_go && d0_is_mem && d1_go && d1_is_mem),
+    .disp1_tag         (free1_tag),
+    .disp1_pc          (disp1_pc),
+    .disp1_imm         (disp1_imm),
+    .disp1_func3       (disp1_func3),
+    .disp1_func7       (disp1_func7),
+    .disp1_rd          (disp1_rd),
+    .disp1_br          (disp1_br),
+    .disp1_mem_read    (disp1_mem_read),
+    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_alu_op      (disp1_alu_op),
+    .disp1_mem_write   (disp1_mem_write),
+    .disp1_alu_src1    (disp1_alu_src1),
+    .disp1_alu_src2    (disp1_alu_src2),
+    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_regs_write  (disp1_regs_write),
+    .disp1_rs1         (disp1_rs1),
+    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1_used    (disp1_rs1_used),
+    .disp1_rs2_used    (disp1_rs2_used),
+    .disp1_fu          (disp1_fu),
+    .disp1_tid         (disp1_tid),
+    .disp1_is_mret     (disp1_is_mret),
+    .disp1_order_id    (disp1_order_id),
+    .disp1_epoch       (disp1_epoch),
+    .disp1_src1_tag    (d1_src1),
+    .disp1_src2_tag    (d1_src2),
+    // Outputs
+    .iq_full        (iq_mem_full),
+    .iq_almost_full (iq_mem_almost_full),
+    .iss_valid       (mem_iss_valid),
+    .iss_tag         (mem_iss_tag),
+    .iss_pc          (mem_iss_pc),
+    .iss_imm         (mem_iss_imm),
+    .iss_func3       (mem_iss_func3),
+    .iss_func7       (mem_iss_func7),
+    .iss_rd          (mem_iss_rd),
+    .iss_rs1         (mem_iss_rs1),
+    .iss_rs2         (mem_iss_rs2),
+    .iss_rs1_used    (mem_iss_rs1_used),
+    .iss_rs2_used    (mem_iss_rs2_used),
+    .iss_src1_tag    (mem_iss_src1_tag),
+    .iss_src2_tag    (mem_iss_src2_tag),
+    .iss_br          (mem_iss_br),
+    .iss_mem_read    (mem_iss_mem_read),
+    .iss_mem2reg     (mem_iss_mem2reg),
+    .iss_alu_op      (mem_iss_alu_op),
+    .iss_mem_write   (mem_iss_mem_write),
+    .iss_alu_src1    (mem_iss_alu_src1),
+    .iss_alu_src2    (mem_iss_alu_src2),
+    .iss_br_addr_mode(mem_iss_br_addr_mode),
+    .iss_regs_write  (mem_iss_regs_write),
+    .iss_fu          (mem_iss_fu),
+    .iss_tid         (mem_iss_tid),
+    .iss_is_mret     (mem_iss_is_mret),
+    .iss_order_id    (mem_iss_order_id),
+    .iss_epoch       (mem_iss_epoch),
+    .wb0_valid       (wb0_valid),
+    .wb0_tag         (wb0_tag),
+    .wb0_regs_write  (wb0_regs_write),
+    .wb1_valid       (wb1_valid),
+    .wb1_tag         (wb1_tag),
+    .wb1_regs_write  (wb1_regs_write),
+    .commit0_valid   (commit0_valid),
+    .commit0_tag     (commit0_tag),
+    .commit0_tid     (commit0_tid),
+    .commit0_order_id(commit0_order_id),
+    .commit1_valid   (commit1_valid),
+    .commit1_tag     (commit1_tag),
+    .commit1_tid     (commit1_tid),
+    .commit1_order_id(commit1_order_id),
+    .issue_inhibit_t0(mem_fu_busy),
+    .issue_inhibit_t1(mem_fu_busy)
+);
+
+// ═════════════════════════════════════════════════════════════════
+// 10. Issue Queue — MUL (4 entries, commit-time dealloc)
+// ═════════════════════════════════════════════════════════════════
+issue_queue #(
+    .IQ_DEPTH  (4),
+    .IQ_IDX_W  (2),
+    .RS_TAG_W  (RS_TAG_W),
+    .NUM_THREAD(NUM_THREAD),
+    .WAKE_HOLD (1),
+    .DEALLOC_AT_COMMIT (1)
+) u_iq_mul (
+    .clk        (clk),
+    .rstn       (rstn),
+    .flush      (flush),
+    .flush_tid  (flush_tid),
+    .flush_new_epoch (flush_new_epoch),
+    .flush_order_valid (flush_order_valid),
+    .flush_order_id    (flush_order_id),
+    // Dispatch 0
+    .disp0_valid       (iq_mul_dp0_from1 ? (d1_go && d1_is_mul) : (d0_go && d0_is_mul)),
+    .disp0_tag         (iq_mul_dp0_from1 ? free1_tag   : free0_tag),
+    .disp0_pc          (iq_mul_dp0_from1 ? disp1_pc    : disp0_pc),
+    .disp0_imm         (iq_mul_dp0_from1 ? disp1_imm   : disp0_imm),
+    .disp0_func3       (iq_mul_dp0_from1 ? disp1_func3 : disp0_func3),
+    .disp0_func7       (iq_mul_dp0_from1 ? disp1_func7 : disp0_func7),
+    .disp0_rd          (iq_mul_dp0_from1 ? disp1_rd    : disp0_rd),
+    .disp0_br          (iq_mul_dp0_from1 ? disp1_br    : disp0_br),
+    .disp0_mem_read    (iq_mul_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
+    .disp0_mem2reg     (iq_mul_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_alu_op      (iq_mul_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
+    .disp0_mem_write   (iq_mul_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_alu_src1    (iq_mul_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
+    .disp0_alu_src2    (iq_mul_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
+    .disp0_br_addr_mode(iq_mul_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_regs_write  (iq_mul_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
+    .disp0_rs1         (iq_mul_dp0_from1 ? disp1_rs1   : disp0_rs1),
+    .disp0_rs2         (iq_mul_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1_used    (iq_mul_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
+    .disp0_rs2_used    (iq_mul_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
+    .disp0_fu          (iq_mul_dp0_from1 ? disp1_fu    : disp0_fu),
+    .disp0_tid         (iq_mul_dp0_from1 ? disp1_tid   : disp0_tid),
+    .disp0_is_mret     (iq_mul_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_order_id    (iq_mul_dp0_from1 ? disp1_order_id    : disp0_order_id),
+    .disp0_epoch       (iq_mul_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_src1_tag    (iq_mul_dp0_from1 ? d1_src1   : d0_src1),
+    .disp0_src2_tag    (iq_mul_dp0_from1 ? d1_src2   : d0_src2),
+    // Dispatch 1
+    .disp1_valid       (d0_go && d0_is_mul && d1_go && d1_is_mul),
+    .disp1_tag         (free1_tag),
+    .disp1_pc          (disp1_pc),
+    .disp1_imm         (disp1_imm),
+    .disp1_func3       (disp1_func3),
+    .disp1_func7       (disp1_func7),
+    .disp1_rd          (disp1_rd),
+    .disp1_br          (disp1_br),
+    .disp1_mem_read    (disp1_mem_read),
+    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_alu_op      (disp1_alu_op),
+    .disp1_mem_write   (disp1_mem_write),
+    .disp1_alu_src1    (disp1_alu_src1),
+    .disp1_alu_src2    (disp1_alu_src2),
+    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_regs_write  (disp1_regs_write),
+    .disp1_rs1         (disp1_rs1),
+    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1_used    (disp1_rs1_used),
+    .disp1_rs2_used    (disp1_rs2_used),
+    .disp1_fu          (disp1_fu),
+    .disp1_tid         (disp1_tid),
+    .disp1_is_mret     (disp1_is_mret),
+    .disp1_order_id    (disp1_order_id),
+    .disp1_epoch       (disp1_epoch),
+    .disp1_src1_tag    (d1_src1),
+    .disp1_src2_tag    (d1_src2),
+    // Outputs
+    .iq_full        (iq_mul_full),
+    .iq_almost_full (iq_mul_almost_full),
+    .iss_valid       (mul_iss_valid),
+    .iss_tag         (mul_iss_tag),
+    .iss_pc          (mul_iss_pc),
+    .iss_imm         (mul_iss_imm),
+    .iss_func3       (mul_iss_func3),
+    .iss_func7       (mul_iss_func7),
+    .iss_rd          (mul_iss_rd),
+    .iss_rs1         (mul_iss_rs1),
+    .iss_rs2         (mul_iss_rs2),
+    .iss_rs1_used    (mul_iss_rs1_used),
+    .iss_rs2_used    (mul_iss_rs2_used),
+    .iss_src1_tag    (mul_iss_src1_tag),
+    .iss_src2_tag    (mul_iss_src2_tag),
+    .iss_br          (mul_iss_br),
+    .iss_mem_read    (mul_iss_mem_read),
+    .iss_mem2reg     (mul_iss_mem2reg),
+    .iss_alu_op      (mul_iss_alu_op),
+    .iss_mem_write   (mul_iss_mem_write),
+    .iss_alu_src1    (mul_iss_alu_src1),
+    .iss_alu_src2    (mul_iss_alu_src2),
+    .iss_br_addr_mode(mul_iss_br_addr_mode),
+    .iss_regs_write  (mul_iss_regs_write),
+    .iss_fu          (mul_iss_fu),
+    .iss_tid         (mul_iss_tid),
+    .iss_is_mret     (mul_iss_is_mret),
+    .iss_order_id    (mul_iss_order_id),
+    .iss_epoch       (mul_iss_epoch),
+    .wb0_valid       (wb0_valid),
+    .wb0_tag         (wb0_tag),
+    .wb0_regs_write  (wb0_regs_write),
+    .wb1_valid       (wb1_valid),
+    .wb1_tag         (wb1_tag),
+    .wb1_regs_write  (wb1_regs_write),
+    .commit0_valid   (commit0_valid),
+    .commit0_tag     (commit0_tag),
+    .commit0_tid     (commit0_tid),
+    .commit0_order_id(commit0_order_id),
+    .commit1_valid   (commit1_valid),
+    .commit1_tag     (commit1_tag),
+    .commit1_tid     (commit1_tid),
+    .commit1_order_id(commit1_order_id),
+    .issue_inhibit_t0(mul_fu_busy),
+    .issue_inhibit_t1(mul_fu_busy)
+);
+
+// ═════════════════════════════════════════════════════════════════
+// 11. FU Busy Tracking (prevents over-issue to shared pipe1 resources)
+//     MEM/MUL share pipe1. Only one mem op at a time (LSU single-port).
+//     Busy set at issue, cleared at WB completion of that FU type.
+// ═════════════════════════════════════════════════════════════════
+reg mem_fu_busy, mul_fu_busy;
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        mem_fu_busy <= 1'b0;
+        mul_fu_busy <= 1'b0;
+    end else begin
+        if (flush) begin
+            // Clear fu_busy on GLOBAL flush (trap/interrupt entry,
+            // flush_order_valid=0): the LSU kills all pending ops for the
+            // flushed thread, so no WB will arrive to clear fu_busy.
+            // Partial flushes (branch redirect, flush_order_valid=1) leave
+            // correct-path ops in flight, whose WB clears fu_busy normally.
+            if (!flush_order_valid) begin
+                mem_fu_busy <= 1'b0;
+                mul_fu_busy <= 1'b0;
+            end
+        end
+        // MEM busy: set when MEM IQ wins pipe1 arbiter, clear when WB1 returns LOAD/STORE
+        if (p1_winner_valid && p1_winner == 2'b10)
+            mem_fu_busy <= 1'b1;
+        if (wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE))
+            mem_fu_busy <= 1'b0;
+        // MUL busy: set when MUL IQ wins pipe1 arbiter, clear when WB1 returns MUL
+        if (p1_winner_valid && p1_winner == 2'b11)
+            mul_fu_busy <= 1'b1;
+        if (wb1_valid && wb1_fu == `FU_MUL)
+            mul_fu_busy <= 1'b0;
+    end
+end
+
+// ═════════════════════════════════════════════════════════════════
+// 12. Pipe1 Arbiter
+// ═════════════════════════════════════════════════════════════════
+wire [1:0]  p1_winner;
+wire        p1_winner_valid;
+
+iq_pipe1_arbiter #(
+    .RS_TAG_W(RS_TAG_W)
+) u_p1_arb (
+    .int_valid    (1'b0),        // INT issues to pipe0 only in this config
+    .int_order_id ({`METADATA_ORDER_ID_W{1'b1}}),
+    .int_tag      ({RS_TAG_W{1'b0}}),
+    .mem_valid    (mem_iss_valid),
+    .mem_order_id (mem_iss_order_id),
+    .mem_tag      (mem_iss_tag),
+    .mul_valid    (mul_iss_valid),
+    .mul_order_id (mul_iss_order_id),
+    .mul_tag      (mul_iss_tag),
+    .winner       (p1_winner),
+    .winner_valid (p1_winner_valid)
+);
+
+// ═════════════════════════════════════════════════════════════════
+// 12. Issue Output Muxing
+// ═════════════════════════════════════════════════════════════════
+
+// Pipe0 = INT IQ issue
+assign iss0_valid     = int_iss_valid;
+assign iss0_tag       = int_iss_tag;
+assign iss0_pc        = int_iss_pc;
+assign iss0_imm       = int_iss_imm;
+assign iss0_func3     = int_iss_func3;
+assign iss0_func7     = int_iss_func7;
+assign iss0_rd        = int_iss_rd;
+assign iss0_rs1       = int_iss_rs1;
+assign iss0_rs2       = int_iss_rs2;
+assign iss0_rs1_used  = int_iss_rs1_used;
+assign iss0_rs2_used  = int_iss_rs2_used;
+assign iss0_src1_tag  = int_iss_src1_tag;
+assign iss0_src2_tag  = int_iss_src2_tag;
+assign iss0_br        = int_iss_br;
+assign iss0_mem_read  = int_iss_mem_read;
+assign iss0_mem2reg   = int_iss_mem2reg;
+assign iss0_alu_op    = int_iss_alu_op;
+assign iss0_mem_write = int_iss_mem_write;
+assign iss0_alu_src1  = int_iss_alu_src1;
+assign iss0_alu_src2  = int_iss_alu_src2;
+assign iss0_br_addr_mode = int_iss_br_addr_mode;
+assign iss0_regs_write= int_iss_regs_write;
+assign iss0_fu        = int_iss_fu;
+assign iss0_tid       = int_iss_tid;
+assign iss0_order_id  = int_iss_order_id;
+assign iss0_epoch     = int_iss_epoch;
+
+// Pipe1 = MEM/MUL arbiter winner
+assign iss1_valid     = p1_winner_valid;
+assign iss1_tag       = (p1_winner == 2'b10) ? mem_iss_tag       : mul_iss_tag;
+assign iss1_pc        = (p1_winner == 2'b10) ? mem_iss_pc        : mul_iss_pc;
+assign iss1_imm       = (p1_winner == 2'b10) ? mem_iss_imm       : mul_iss_imm;
+assign iss1_func3     = (p1_winner == 2'b10) ? mem_iss_func3     : mul_iss_func3;
+assign iss1_func7     = (p1_winner == 2'b10) ? mem_iss_func7     : mul_iss_func7;
+assign iss1_rd        = (p1_winner == 2'b10) ? mem_iss_rd        : mul_iss_rd;
+assign iss1_rs1       = (p1_winner == 2'b10) ? mem_iss_rs1       : mul_iss_rs1;
+assign iss1_rs2       = (p1_winner == 2'b10) ? mem_iss_rs2       : mul_iss_rs2;
+assign iss1_rs1_used  = (p1_winner == 2'b10) ? mem_iss_rs1_used  : mul_iss_rs1_used;
+assign iss1_rs2_used  = (p1_winner == 2'b10) ? mem_iss_rs2_used  : mul_iss_rs2_used;
+assign iss1_src1_tag  = (p1_winner == 2'b10) ? mem_iss_src1_tag  : mul_iss_src1_tag;
+assign iss1_src2_tag  = (p1_winner == 2'b10) ? mem_iss_src2_tag  : mul_iss_src2_tag;
+assign iss1_br        = (p1_winner == 2'b10) ? mem_iss_br        : mul_iss_br;
+assign iss1_mem_read  = (p1_winner == 2'b10) ? mem_iss_mem_read  : mul_iss_mem_read;
+assign iss1_mem2reg   = (p1_winner == 2'b10) ? mem_iss_mem2reg   : mul_iss_mem2reg;
+assign iss1_alu_op    = (p1_winner == 2'b10) ? mem_iss_alu_op    : mul_iss_alu_op;
+assign iss1_mem_write = (p1_winner == 2'b10) ? mem_iss_mem_write : mul_iss_mem_write;
+assign iss1_alu_src1  = (p1_winner == 2'b10) ? mem_iss_alu_src1  : mul_iss_alu_src1;
+assign iss1_alu_src2  = (p1_winner == 2'b10) ? mem_iss_alu_src2  : mul_iss_alu_src2;
+assign iss1_br_addr_mode = (p1_winner == 2'b10) ? mem_iss_br_addr_mode : mul_iss_br_addr_mode;
+assign iss1_regs_write= (p1_winner == 2'b10) ? mem_iss_regs_write: mul_iss_regs_write;
+assign iss1_fu        = (p1_winner == 2'b10) ? mem_iss_fu        : mul_iss_fu;
+assign iss1_tid       = (p1_winner == 2'b10) ? mem_iss_tid       : mul_iss_tid;
+assign iss1_order_id  = (p1_winner == 2'b10) ? mem_iss_order_id  : mul_iss_order_id;
+assign iss1_epoch     = (p1_winner == 2'b10) ? mem_iss_epoch     : mul_iss_epoch;
+
+// ═════════════════════════════════════════════════════════════════
+// 13. Sequential: Tag alloc/free, reg_result update
+// ═════════════════════════════════════════════════════════════════
+integer ti, ri;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (ti = 0; ti <= RS_DEPTH; ti = ti + 1) begin
+            tag_in_use[ti]     <= 1'b0;
+            tag_ready_v[ti]    <= 1'b0;
+            tag_just_ready[ti] <= 1'b0;
+            tag_live_valid_v[ti] <= 1'b0;
+            tag_live_seq[ti]   <= {`METADATA_ORDER_ID_W{1'b0}};
+        end
+        for (ti = 0; ti < NUM_THREAD; ti = ti + 1)
+            for (ri = 0; ri < 32; ri = ri + 1) begin
+                reg_result[ti][ri]       <= {RS_TAG_W{1'b0}};
+                reg_result_order[ti][ri] <= {`METADATA_ORDER_ID_W{1'b0}};
+            end
+    end else begin
+        // Clear just_ready pulses
+        for (ti = 1; ti <= RS_DEPTH; ti = ti + 1)
+            tag_just_ready[ti] <= 1'b0;
+
+        // ── WB: mark tags ready ──
+        if (wb0_valid && wb0_regs_write && wb0_tag != {RS_TAG_W{1'b0}}) begin
+            tag_ready_v[wb0_tag]    <= 1'b1;
+            tag_just_ready[wb0_tag] <= 1'b1;
+        end
+        if (wb1_valid && wb1_regs_write && wb1_tag != {RS_TAG_W{1'b0}}) begin
+            tag_ready_v[wb1_tag]    <= 1'b1;
+            tag_just_ready[wb1_tag] <= 1'b1;
+        end
+
+        // ── Commit: free tags, clear reg_result ──
+        if (commit0_valid && commit0_tag != {RS_TAG_W{1'b0}}) begin
+            tag_in_use[commit0_tag]    <= 1'b0;
+            tag_ready_v[commit0_tag]   <= 1'b0;
+            tag_live_valid_v[commit0_tag]<= 1'b0;
+            // Clear reg_result if still pointing to this tag
+            for (ri = 0; ri < 32; ri = ri + 1) begin
+                if (reg_result[commit0_tid][ri] == commit0_tag &&
+                    reg_result_order[commit0_tid][ri] == commit0_order_id) begin
+                    reg_result[commit0_tid][ri] <= {RS_TAG_W{1'b0}};
+                end
+            end
+        end
+        if (commit1_valid && commit1_tag != {RS_TAG_W{1'b0}}) begin
+            tag_in_use[commit1_tag]    <= 1'b0;
+            tag_ready_v[commit1_tag]   <= 1'b0;
+            tag_live_valid_v[commit1_tag]<= 1'b0;
+            for (ri = 0; ri < 32; ri = ri + 1) begin
+                if (reg_result[commit1_tid][ri] == commit1_tag &&
+                    reg_result_order[commit1_tid][ri] == commit1_order_id) begin
+                    reg_result[commit1_tid][ri] <= {RS_TAG_W{1'b0}};
+                end
+            end
+        end
+
+        // ── Flush: clear reg_result for flushed thread ──
+        if (flush) begin
+            for (ri = 0; ri < 32; ri = ri + 1)
+                reg_result[flush_tid][ri] <= {RS_TAG_W{1'b0}};
+        end
+
+        // ── Dispatch: allocate tags, update reg_result ──
+        if (d0_go) begin
+            tag_in_use[free0_tag]    <= 1'b1;
+            tag_ready_v[free0_tag]   <= 1'b0;
+            tag_live_valid_v[free0_tag]<= 1'b1;
+            tag_live_seq[free0_tag]  <= disp0_order_id;
+            if (disp0_regs_write && disp0_rd != 5'd0) begin
+                reg_result[disp0_tid][disp0_rd]       <= free0_tag;
+                reg_result_order[disp0_tid][disp0_rd] <= disp0_order_id;
+            end
+        end
+        if (d1_go) begin
+            tag_in_use[free1_tag]    <= 1'b1;
+            tag_ready_v[free1_tag]   <= 1'b0;
+            tag_live_valid_v[free1_tag]<= 1'b1;
+            tag_live_seq[free1_tag]  <= disp1_order_id;
+            if (disp1_regs_write && disp1_rd != 5'd0) begin
+                reg_result[disp1_tid][disp1_rd]       <= free1_tag;
+                reg_result_order[disp1_tid][disp1_rd] <= disp1_order_id;
+            end
+        end
+    end
+end
+
+// ═════════════════════════════════════════════════════════════════
+// 14. Debug Signals (simplified — mostly zeroed)
+// ═════════════════════════════════════════════════════════════════
+assign debug_br_found_t0        = br_pending_cnt_t0;
+assign debug_branch_in_flight_t0= branch_in_flight_t0;
+assign debug_oldest_br_ready_t0 = 1'b0;
+assign debug_oldest_br_just_woke_t0 = 1'b0;
+assign debug_oldest_br_qj_t0   = 4'd0;
+assign debug_oldest_br_qk_t0   = 4'd0;
+assign debug_slot1_flags        = 4'd0;
+assign debug_slot1_pc_lo        = 8'd0;
+assign debug_slot1_qj           = 4'd0;
+assign debug_slot1_qk           = 4'd0;
+assign debug_tag2_flags         = 4'd0;
+assign debug_reg_x12_tag_t0     = reg_result[0][12][3:0];
+assign debug_slot1_issue_flags  = 4'd0;
+assign debug_sel0_idx           = 4'd0;
+assign debug_slot1_fu           = 4'd0;
+assign debug_oldest_br_seq_lo_t0= 8'd0;
+assign debug_rs_flags_flat      = 16'd0;
+assign debug_rs_pc_lo_flat      = 32'd0;
+assign debug_rs_fu_flat         = 16'd0;
+assign debug_rs_qj_flat         = 16'd0;
+assign debug_rs_qk_flat         = 16'd0;
+assign debug_rs_seq_lo_flat     = 32'd0;
+
+// RoCC (unused in FPGA mode)
+assign iss0_is_rocc = 1'b0;
+
+endmodule

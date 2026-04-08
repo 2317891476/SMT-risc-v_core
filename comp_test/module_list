@@ -19,6 +19,13 @@
 // ─── OoO Engine ───────────────────────────────────────────────────────────
 ../rtl/scoreboard.v
 ../rtl/rob_lite.v
+../rtl/rob.v
+../rtl/rename_map_table.v
+../rtl/freelist.v
+../rtl/phys_regfile.v
+../rtl/issue_queue.v
+../rtl/iq_pipe1_arbiter.v
+../rtl/dispatch_unit.v
 ../rtl/bypass_network.v
 ../rtl/exec_pipe0.v
 ../rtl/exec_pipe1.v
