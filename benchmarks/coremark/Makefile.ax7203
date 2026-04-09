@@ -19,6 +19,9 @@ COREMARK_SRCS := \
 # Platform sources
 PORT_SRCS := core_portme.c
 
+# Startup assembly
+STARTUP_SRC := start.S
+
 ALL_SRCS := $(COREMARK_SRCS) $(PORT_SRCS)
 
 # Build directory
@@ -50,16 +53,17 @@ DEFINES := \
 # Include paths
 INCLUDES := -I. -I$(BUILD_DIR)
 
-# Linker script (BRAM-based Harvard-style)
-LDSCRIPT := ../../rom/harvard_link.ld
+# Linker script
+LDSCRIPT := coremark_link.ld
 
 # Compiler flags
 CFLAGS := $(ARCH_FLAGS) $(OPT_FLAGS) $(WARN_FLAGS) $(DEFINES) $(INCLUDES)
 LDFLAGS := -T$(LDSCRIPT) -nostartfiles -nostdlib -Wl,--gc-sections
-LDFLAGS += -lgcc -lc
+LDFLAGS += -lgcc
 
 # Object files
-OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(ALL_SRCS))
+OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(COREMARK_SRCS) $(PORT_SRCS))
+OBJS += $(BUILD_DIR)/start.o
 
 # Default target
 .PHONY: all clean directories
@@ -67,11 +71,15 @@ OBJS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(ALL_SRCS))
 all: directories $(BUILD_DIR)/$(OUTPUT).hex $(BUILD_DIR)/$(OUTPUT).dis
 
 directories:
-	@mkdir -p $(BUILD_DIR)
+	@-mkdir $(BUILD_DIR) 2>nul || echo "" >nul
 
 # Compile CoreMark sources
 $(BUILD_DIR)/%.o: %.c | directories
 	$(CC) $(CFLAGS) -c $< -o $@
+
+# Compile startup assembly
+$(BUILD_DIR)/start.o: start.S | directories
+	$(CC) $(ARCH_FLAGS) -c $< -o $@
 
 # Link
 $(BUILD_DIR)/$(OUTPUT).elf: $(OBJS)

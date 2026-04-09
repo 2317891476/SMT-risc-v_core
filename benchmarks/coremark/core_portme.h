@@ -84,26 +84,47 @@ extern "C" {
 #define MEM_LOCATION "STATIC"
 #endif
 
+/* CoreMark base types */
+typedef uint8_t  ee_u8;
+typedef uint16_t ee_u16;
+typedef uint32_t ee_u32;
+typedef uint64_t ee_u64;
+typedef int8_t   ee_s8;
+typedef int16_t  ee_s16;
+typedef int32_t  ee_s32;
+typedef int64_t  ee_s64;
+typedef size_t   ee_size_t;
+typedef intptr_t ee_ptr_int;
+
 typedef uint64_t CORETIMETYPE;
 typedef uint64_t CORE_TICKS;
-typedef double secs_ret;
 
 #define EE_TICKS_PER_SEC ((ee_u32)AX7203_CPU_HZ)
 
-struct CORE_PORTABLE_S;
+/* Portable context structure for multithreading */
+typedef struct CORE_PORTABLE_S {
+    ee_u32 portable_id;
+} core_portable;
 
-void portable_init(struct CORE_PORTABLE_S *p, int *argc, char *argv[]);
-void portable_fini(struct CORE_PORTABLE_S *p);
+/* Default number of contexts (for multithread support) */
+#define default_num_contexts MULTITHREAD
+
+void portable_init(core_portable *p, int *argc, char *argv[]);
+void portable_fini(core_portable *p);
+
+/* Memory alignment helper */
+void *align_mem(void *memblk);
 
 void start_time(void);
 void stop_time(void);
 CORE_TICKS get_time(void);
-secs_ret time_in_secs(CORE_TICKS ticks);
 
-void *portable_malloc(size_t size);
+void *portable_malloc(ee_size_t size);
 void portable_free(void *p);
 
-int ee_printf(const char *fmt, ...);
+#if HAS_PRINTF
+#include <stdio.h>
+#endif
 
 #ifdef __cplusplus
 }
