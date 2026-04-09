@@ -53,7 +53,8 @@ module csr_unit #(
     input  wire [31:0]        exc_tval,        // trap value (e.g. faulting address)
 
     // ─── MRET ───────────────────────────────────────────────────
-    input  wire               mret_valid,      // MRET instruction executed
+    input  wire               mret_valid,      // MRET instruction executed (exec time — redirect)
+    input  wire               mret_commit,     // MRET committed from ROB (for mstatus update)
 
     // ─── Trap Entry / Return signals (to pipeline control) ──────
     output wire               trap_enter,      // take trap this cycle
@@ -237,13 +238,12 @@ always @(posedge clk or negedge rstn) begin
             mstatus[12:11] <= priv_mode;     // MPP = current mode
             priv_mode      <= 2'b11;         // Enter M-mode
         end
-        // ── MRET ────────────────────────────────────────────────
-        else if (mret_valid) begin
-            mstatus[3]     <= mstatus[7];    // MIE = MPIE
-            mstatus[7]     <= 1'b1;          // MPIE = 1
-            priv_mode      <= mstatus[12:11]; // mode = MPP
-            mstatus[12:11] <= 2'b00;         // MPP = U-mode
-        end
+        // ── MRET (execute-time: removed from priority chain) ─────
+        // mstatus restore is deferred to commit time below.
+        // mret_valid still drives trap_return for the PC redirect
+        // and order-based flush, but mstatus MIE is NOT restored
+        // here.  This prevents the interrupt from re-firing before
+        // the handler's stores have drained.
         // ── CSR write ───────────────────────────────────────────
         else if (csr_valid) begin
             case (csr_addr)
@@ -261,6 +261,18 @@ always @(posedge clk or negedge rstn) begin
                 12'h180: satp     <= csr_wval;
                 default: ;  // read-only or unimplemented
             endcase
+        end
+
+        // ── MRET commit-time mstatus restore ────────────────────
+        // Fires when the MRET instruction commits from the ROB.
+        // Placed outside the exc/irq/csr priority chain.
+        // No conflict possible: MIE=0 during handler → irq_valid=0,
+        // and MRET commits alone (one commit per cycle).
+        if (mret_commit && !exc_valid && !irq_valid) begin
+            mstatus[3]     <= mstatus[7];    // MIE = MPIE
+            mstatus[7]     <= 1'b1;          // MPIE = 1
+            priv_mode      <= mstatus[12:11]; // mode = MPP
+            mstatus[12:11] <= 2'b00;         // MPP = U-mode
         end
     end
 end

@@ -297,7 +297,7 @@ wire              flush_kills_pending =
                      (!flush_order_valid || (pending_order_id > flush_order_id)));
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
-                                ((lsu_state == LSU_IDLE) && !req_valid) :
+                                ((lsu_state == LSU_IDLE) && !(req_valid && req_accept)) :
                                 sb_mem_write_ready;
 
 // State machine
@@ -318,10 +318,23 @@ always @(posedge clk or negedge rstn) begin
                      pending_valid, pending_tid, pending_order_id,
                      flush_tid, flush_order_valid, flush_order_id, $time);
             `endif
-            lsu_state       <= LSU_IDLE;
             pending_valid   <= 1'b0;
             m1_req_valid    <= 1'b0;
             m1_txn_is_drain <= 1'b0;
+            // Allow drain to proceed concurrently with flush — committed
+            // stores must reach memory even during continuous trap/mret cycles.
+            if (lsu_state == LSU_IDLE && use_mem_subsys &&
+                sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
+                m1_txn_is_drain <= 1'b1;
+                lsu_state       <= LSU_REQ;
+                m1_req_valid    <= 1'b1;
+                m1_req_addr     <= sb_mem_write_addr_int;
+                m1_req_write    <= 1'b1;
+                m1_req_wdata    <= sb_mem_write_data_int;
+                m1_req_wen      <= sb_mem_write_wen_int;
+            end else begin
+                lsu_state       <= LSU_IDLE;
+            end
         end else begin
         case (lsu_state)
             LSU_IDLE: begin

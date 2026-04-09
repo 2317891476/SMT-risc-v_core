@@ -45,6 +45,7 @@ module rob #(
     input  wire [`METADATA_EPOCH_W-1:0]    disp0_epoch,
     input  wire [4:0]                  disp0_rd,
     input  wire                        disp0_is_store,
+    input  wire                        disp0_is_mret,
     input  wire [PHYS_REG_W-1:0]       disp0_prd_new,    // New phys dest (from freelist)
     input  wire [PHYS_REG_W-1:0]       disp0_prd_old,    // Old phys mapping (to free at commit)
     input  wire                        disp0_is_branch,
@@ -61,6 +62,7 @@ module rob #(
     input  wire [`METADATA_EPOCH_W-1:0]    disp1_epoch,
     input  wire [4:0]                  disp1_rd,
     input  wire                        disp1_is_store,
+    input  wire                        disp1_is_mret,
     input  wire [PHYS_REG_W-1:0]       disp1_prd_new,
     input  wire [PHYS_REG_W-1:0]       disp1_prd_old,
     input  wire                        disp1_is_branch,
@@ -103,6 +105,8 @@ module rob #(
     output wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
     output wire                        commit0_is_store,
     output wire                        commit1_is_store,
+    output wire                        commit0_is_mret,
+    output wire                        commit1_is_mret,
 
     // ─── Rename Commit Outputs (for freelist release) ────────────
     output wire [PHYS_REG_W-1:0]       commit0_prd_old,
@@ -132,6 +136,7 @@ reg  [`METADATA_ORDER_ID_W-1:0] rob_order_id [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg  [`METADATA_EPOCH_W-1:0]    rob_epoch    [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg  [4:0]              rob_rd         [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg                     rob_is_store   [0:NUM_THREAD-1][0:ROB_DEPTH-1];
+reg                     rob_is_mret    [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg                     rob_has_result [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg  [31:0]             rob_result     [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 
@@ -155,6 +160,7 @@ reg                     commit0_has_result_r, commit1_has_result_r;
 reg  [31:0]             commit0_data_r, commit1_data_r;
 reg  [`METADATA_ORDER_ID_W-1:0] commit0_order_id_r, commit1_order_id_r;
 reg                     commit0_is_store_r, commit1_is_store_r;
+reg                     commit0_is_mret_r,  commit1_is_mret_r;
 reg  [PHYS_REG_W-1:0]  commit0_prd_old_r, commit1_prd_old_r;
 reg                     commit0_regs_write_r, commit1_regs_write_r;
 
@@ -168,6 +174,22 @@ reg  [4:0]              recover_rd_r;
 reg  [PHYS_REG_W-1:0]  recover_prd_old_r;
 reg  [PHYS_REG_W-1:0]  recover_prd_new_r;
 reg                     recover_regs_write_r;
+
+// ─── Commit Pipeline Stage 0 Registers ───────────────────────────
+// S0 reads the head entry and latches the commit decision + payload.
+// S1 (next cycle) consumes these to drive commit outputs.
+reg                     s0_commit_valid  [0:NUM_THREAD-1];
+reg                     s0_commit_skip   [0:NUM_THREAD-1];
+reg  [4:0]              s0_rd            [0:NUM_THREAD-1];
+reg  [RS_TAG_W-1:0]     s0_tag           [0:NUM_THREAD-1];
+reg  [PHYS_REG_W-1:0]  s0_prd_old       [0:NUM_THREAD-1];
+reg                     s0_has_result    [0:NUM_THREAD-1];
+reg  [31:0]             s0_data          [0:NUM_THREAD-1];
+reg  [`METADATA_ORDER_ID_W-1:0] s0_order_id [0:NUM_THREAD-1];
+reg                     s0_is_store      [0:NUM_THREAD-1];
+reg                     s0_is_mret       [0:NUM_THREAD-1];
+reg                     s0_regs_write    [0:NUM_THREAD-1];
+reg  [ROB_IDX_W-1:0]   s0_head_idx      [0:NUM_THREAD-1];
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ROB Full Check
@@ -192,6 +214,15 @@ assign disp0_rob_idx = d0_tail;
 assign disp1_rob_idx = d1_tail + ((disp0_valid && d1_same_thread) ? {{(ROB_IDX_W-1){1'b0}}, 1'b1} : {ROB_IDX_W{1'b0}});
 
 // ═════════════════════════════════════════════════════════════════════════════
+// S1 → S0 Bypass (accounts for in-flight head advancement)
+// ═════════════════════════════════════════════════════════════════════════════
+// When S1 is advancing the head this cycle, S0 must read the NEXT entry.
+wire s1_advance_t0 = s0_commit_valid[0] || s0_commit_skip[0];
+wire s1_advance_t1 = s0_commit_valid[1] || s0_commit_skip[1];
+wire [ROB_IDX_W-1:0] eff_head_t0 = s1_advance_t0 ? (s0_head_idx[0] + 1) : rob_head[0];
+wire [ROB_IDX_W-1:0] eff_head_t1 = s1_advance_t1 ? (s0_head_idx[1] + 1) : rob_head[1];
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Commit Output Wiring
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -210,6 +241,8 @@ assign commit0_order_id   = commit0_order_id_r;
 assign commit1_order_id   = commit1_order_id_r;
 assign commit0_is_store   = commit0_is_store_r;
 assign commit1_is_store   = commit1_is_store_r;
+assign commit0_is_mret    = commit0_is_mret_r;
+assign commit1_is_mret    = commit1_is_mret_r;
 assign commit0_prd_old    = commit0_prd_old_r;
 assign commit0_regs_write_out = commit0_regs_write_r;
 assign commit1_prd_old    = commit1_prd_old_r;
@@ -227,6 +260,13 @@ assign recover_tid         = recover_tid_r;
 // ═════════════════════════════════════════════════════════════════════════════
 // Sequential Logic
 // ═════════════════════════════════════════════════════════════════════════════
+
+`ifndef SYNTHESIS
+always @(posedge clk) begin
+    if (disp0_valid && disp0_tid == 0)
+        $display("[MON DISP0] rd=%0d tag=%0d pc=%h @%0t", disp0_rd, disp0_tag, disp0_pc, $time);
+end
+`endif
 
 integer t, j;
 
@@ -246,6 +286,8 @@ always @(posedge clk or negedge rstn) begin
         commit1_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
         commit0_is_store_r <= 1'b0;
         commit1_is_store_r <= 1'b0;
+        commit0_is_mret_r  <= 1'b0;
+        commit1_is_mret_r  <= 1'b0;
         commit0_prd_old_r  <= {PHYS_REG_W{1'b0}};
         commit1_prd_old_r  <= {PHYS_REG_W{1'b0}};
         commit0_regs_write_r <= 1'b0;
@@ -262,6 +304,21 @@ always @(posedge clk or negedge rstn) begin
         recover_regs_write_r <= 1'b0;
 
         for (t = 0; t < NUM_THREAD; t = t + 1) begin
+            s0_commit_valid[t] <= 1'b0;
+            s0_commit_skip[t]  <= 1'b0;
+            s0_rd[t]           <= 5'd0;
+            s0_tag[t]          <= {RS_TAG_W{1'b0}};
+            s0_prd_old[t]      <= {PHYS_REG_W{1'b0}};
+            s0_has_result[t]   <= 1'b0;
+            s0_data[t]         <= 32'd0;
+            s0_order_id[t]     <= {`METADATA_ORDER_ID_W{1'b0}};
+            s0_is_store[t]     <= 1'b0;
+            s0_is_mret[t]      <= 1'b0;
+            s0_regs_write[t]   <= 1'b0;
+            s0_head_idx[t]     <= {ROB_IDX_W{1'b0}};
+        end
+
+        for (t = 0; t < NUM_THREAD; t = t + 1) begin
             rob_head[t]  <= {ROB_IDX_W{1'b0}};
             rob_tail[t]  <= {ROB_IDX_W{1'b0}};
             rob_count[t] <= {(ROB_IDX_W+1){1'b0}};
@@ -274,6 +331,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_epoch[t][j]      <= {`METADATA_EPOCH_W{1'b0}};
                 rob_rd[t][j]         <= 5'd0;
                 rob_is_store[t][j]   <= 1'b0;
+                rob_is_mret[t][j]    <= 1'b0;
                 rob_has_result[t][j] <= 1'b0;
                 rob_result[t][j]     <= 32'd0;
                 rob_prd_new[t][j]    <= {PHYS_REG_W{1'b0}};
@@ -286,7 +344,13 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         commit0_valid_r <= 1'b0;
         commit1_valid_r <= 1'b0;
+        commit0_is_mret_r <= 1'b0;
+        commit1_is_mret_r <= 1'b0;
         recover_en_r    <= 1'b0;
+        s0_commit_valid[0] <= 1'b0;
+        s0_commit_valid[1] <= 1'b0;
+        s0_commit_skip[0]  <= 1'b0;
+        s0_commit_skip[1]  <= 1'b0;
 
         // ── Recovery Walk ──────────────────────────────────────
         // Walk from tail-1 backward, restoring one rename
@@ -294,6 +358,10 @@ always @(posedge clk or negedge rstn) begin
         // prd_new.  Stops at the first non-flushed (or invalid)
         // entry and resets the tail pointer accordingly.
         // During recovery, no dispatch or commit occurs.
+        // A new flush CAN arrive mid-recovery (e.g. trap_enter
+        // after MRET).  In that case additional entries are
+        // marked flushed below, and the walk holds position for
+        // one cycle so it sees the newly-flushed entries next.
         if (recovering_r) begin
             if (rob_valid[recover_tid_r][recover_ptr_r] &&
                 rob_flushed[recover_tid_r][recover_ptr_r]) begin
@@ -311,6 +379,14 @@ always @(posedge clk or negedge rstn) begin
 
                 // Walk backward (toward head)
                 recover_ptr_r <= recover_ptr_r - 1;
+            end else if (flush && (flush_tid == recover_tid_r)) begin
+                // New flush arrived this cycle — entries just marked
+                // flushed via NB assign below.  Hold position so the
+                // walk re-checks this entry next cycle.
+                `ifndef SYNTHESIS
+                $display("[ROB FLUSH-EXTEND] walk held at ptr=%0d, new flush_order_valid=%0b @%0t",
+                         recover_ptr_r, flush_order_valid, $time);
+                `endif
             end else begin
                 // Walk complete — hit non-flushed or invalid entry
                 recovering_r <= 1'b0;
@@ -319,7 +395,12 @@ always @(posedge clk or negedge rstn) begin
         end
 
         // ── Flush Handling ─────────────────────────────────────
-        if (flush && !recovering_r) begin
+        // Allowed both when idle and during an active recovery
+        // walk.  During recovery the mark-flushed loop still
+        // runs so that a trap_enter following an MRET flush can
+        // mark older, previously-preserved entries.  Only the
+        // recovery-start is gated on !recovering_r.
+        if (flush) begin
             // Mark entries for flushed thread
             for (j = 0; j < ROB_DEPTH; j = j + 1) begin
                 if (rob_valid[flush_tid][j] &&
@@ -334,9 +415,10 @@ always @(posedge clk or negedge rstn) begin
                     `endif
                 end
             end
-            // Start recovery walk from tail-1 backward.
-            // Walk will restore rename map & free speculative phys regs.
-            if (rob_count[flush_tid] > 0) begin
+            // Start recovery walk from tail-1 backward (only if
+            // not already recovering — the running walk will pick
+            // up the newly-flushed entries automatically).
+            if (!recovering_r && rob_count[flush_tid] > 0) begin
                 recovering_r  <= 1'b1;
                 recover_tid_r <= flush_tid;
                 recover_ptr_r <= rob_tail[flush_tid] - 1;
@@ -378,49 +460,116 @@ always @(posedge clk or negedge rstn) begin
             end
         end
 
-        // ── Thread 0 Commit + Dispatch ─────────────────────────
+        // ── Commit Stage 0: Check head entry (per thread) ────
+        //   Reads rob[tid][eff_head], determines commit/skip/stall,
+        //   latches payload into s0_* for S1 next cycle.
+        //   No healing loop — one skip per cycle if head is invalid/flushed.
+        //   Suppressed during recovery (head entries are safe).
+
+        // Thread 0 — S0
+        if (!recovering_r && rob_count[0] != {(ROB_IDX_W+1){1'b0}}
+            && !(s1_advance_t0 && rob_count[0] == {{ROB_IDX_W{1'b0}}, 1'b1})) begin
+            s0_head_idx[0] <= eff_head_t0;
+            `ifndef SYNTHESIS
+            $display("[ROB S0] t0 eff_head=%0d valid=%0b complete=%0b flushed=%0b count=%0d s1adv=%0b @%0t",
+                     eff_head_t0, rob_valid[0][eff_head_t0], rob_complete[0][eff_head_t0],
+                     rob_flushed[0][eff_head_t0], rob_count[0], s1_advance_t0, $time);
+            `endif
+            if (!rob_valid[0][eff_head_t0]) begin
+                s0_commit_skip[0] <= 1'b1;
+            end else if (rob_flushed[0][eff_head_t0]) begin
+                s0_commit_skip[0] <= 1'b1;
+            end else if (rob_complete[0][eff_head_t0]) begin
+                s0_commit_valid[0] <= 1'b1;
+                s0_rd[0]           <= rob_rd[0][eff_head_t0];
+                s0_tag[0]          <= rob_tag[0][eff_head_t0];
+                s0_prd_old[0]      <= rob_prd_old[0][eff_head_t0];
+                s0_has_result[0]   <= rob_has_result[0][eff_head_t0];
+                s0_data[0]         <= rob_result[0][eff_head_t0];
+                s0_order_id[0]     <= rob_order_id[0][eff_head_t0];
+                s0_is_store[0]     <= rob_is_store[0][eff_head_t0];
+                s0_is_mret[0]      <= rob_is_mret[0][eff_head_t0];
+                s0_regs_write[0]   <= rob_regs_write[0][eff_head_t0];
+            end
+        end
+
+        // Thread 1 — S0
+        if (!recovering_r && rob_count[1] != {(ROB_IDX_W+1){1'b0}}
+            && !(s1_advance_t1 && rob_count[1] == {{ROB_IDX_W{1'b0}}, 1'b1})) begin
+            s0_head_idx[1] <= eff_head_t1;
+            if (!rob_valid[1][eff_head_t1]) begin
+                s0_commit_skip[1] <= 1'b1;
+            end else if (rob_flushed[1][eff_head_t1]) begin
+                s0_commit_skip[1] <= 1'b1;
+            end else if (rob_complete[1][eff_head_t1]) begin
+                s0_commit_valid[1] <= 1'b1;
+                s0_rd[1]           <= rob_rd[1][eff_head_t1];
+                s0_tag[1]          <= rob_tag[1][eff_head_t1];
+                s0_prd_old[1]      <= rob_prd_old[1][eff_head_t1];
+                s0_has_result[1]   <= rob_has_result[1][eff_head_t1];
+                s0_data[1]         <= rob_result[1][eff_head_t1];
+                s0_order_id[1]     <= rob_order_id[1][eff_head_t1];
+                s0_is_store[1]     <= rob_is_store[1][eff_head_t1];
+                s0_is_mret[1]      <= rob_is_mret[1][eff_head_t1];
+                s0_regs_write[1]   <= rob_regs_write[1][eff_head_t1];
+            end
+        end
+
+        // ── Commit S1 + Dispatch: Thread 0 ─────────────────────
+        //   S1 consumes the previous cycle's s0_* latches.
+        //   Combined with dispatch to share count via blocking vars.
         if (!recovering_r) begin : t0_next_state
             reg [ROB_IDX_W-1:0] next_head;
             reg [ROB_IDX_W-1:0] next_tail;
             reg [ROB_IDX_W:0]   next_count;
-            integer             skip_idx;
 
             next_head  = rob_head[0];
             next_tail  = rob_tail[0];
             next_count = rob_count[0];
 
-            // Heal stale head holes
-            for (skip_idx = 0; skip_idx < ROB_DEPTH; skip_idx = skip_idx + 1) begin
-                if ((next_count != {ROB_IDX_W+1{1'b0}}) && !rob_valid[0][next_head])
-                    next_head = next_head + 1;
+            // ── S1 Apply ──
+            if (s0_commit_valid[0]) begin
+                `ifndef SYNTHESIS
+                $display("[ROB S1] t0 COMMIT head_idx=%0d rd=%0d tag=%0d flushed=%0b data=%h @%0t",
+                         s0_head_idx[0], s0_rd[0], s0_tag[0],
+                         rob_flushed[0][s0_head_idx[0]], s0_data[0], $time);
+                `endif
+                if (!rob_flushed[0][s0_head_idx[0]]) begin
+                    commit0_valid_r      <= 1'b1;
+                    commit0_rd_r         <= s0_rd[0];
+                    commit0_tag_r        <= s0_tag[0];
+                    commit0_has_result_r <= s0_has_result[0];
+                    commit0_data_r       <= s0_data[0];
+                    commit0_order_id_r   <= s0_order_id[0];
+                    commit0_is_store_r   <= s0_is_store[0];
+                    commit0_is_mret_r    <= s0_is_mret[0];
+                    commit0_prd_old_r    <= s0_prd_old[0];
+                    commit0_regs_write_r <= s0_regs_write[0];
+                end
+                rob_valid[0][s0_head_idx[0]]      <= 1'b0;
+                rob_has_result[0][s0_head_idx[0]] <= 1'b0;
+                rob_result[0][s0_head_idx[0]]     <= 32'd0;
+                next_head = s0_head_idx[0] + 1;
+                next_count = next_count - 1;
+            end else if (s0_commit_skip[0]) begin
+                `ifndef SYNTHESIS
+                $display("[ROB S1] t0 SKIP head_idx=%0d valid=%0b flushed=%0b @%0t",
+                         s0_head_idx[0], rob_valid[0][s0_head_idx[0]],
+                         rob_flushed[0][s0_head_idx[0]], $time);
+                `endif
+                rob_valid[0][s0_head_idx[0]]      <= 1'b0;
+                rob_has_result[0][s0_head_idx[0]] <= 1'b0;
+                rob_result[0][s0_head_idx[0]]     <= 32'd0;
+                next_head = s0_head_idx[0] + 1;
+                next_count = next_count - 1;
             end
 
-            // Step 1: Commit or skip flushed
-            if (rob_valid[0][next_head] && rob_flushed[0][next_head]) begin
-                rob_valid[0][next_head] <= 1'b0;
-                rob_has_result[0][next_head] <= 1'b0;
-                rob_result[0][next_head] <= 32'd0;
-                next_head = next_head + 1;
-                next_count = next_count - 1;
-            end else if (rob_valid[0][next_head] && rob_complete[0][next_head] && !rob_flushed[0][next_head]) begin
-                commit0_valid_r      <= 1'b1;
-                commit0_rd_r         <= rob_rd[0][next_head];
-                commit0_tag_r        <= rob_tag[0][next_head];
-                commit0_has_result_r <= rob_has_result[0][next_head];
-                commit0_data_r       <= rob_result[0][next_head];
-                commit0_order_id_r   <= rob_order_id[0][next_head];
-                commit0_is_store_r   <= rob_is_store[0][next_head];
-                commit0_prd_old_r    <= rob_prd_old[0][next_head];
-                commit0_regs_write_r <= rob_regs_write[0][next_head];
-                rob_valid[0][next_head] <= 1'b0;
-                rob_has_result[0][next_head] <= 1'b0;
-                rob_result[0][next_head] <= 32'd0;
-                next_head = next_head + 1;
-                next_count = next_count - 1;
-            end
-
-            // Step 2: Dispatch allocation(s)
+            // ── Dispatch Allocation ──
             if (disp0_valid && !rob0_full && (disp0_tid == 1'b0)) begin
+                `ifndef SYNTHESIS
+                $display("[ROB DISP0] t0 tail=%0d tag=%0d rd=%0d pc=%h @%0t",
+                         next_tail, disp0_tag, disp0_rd, disp0_pc, $time);
+                `endif
                 rob_valid[0][next_tail]      <= 1'b1;
                 rob_complete[0][next_tail]   <= 1'b0;
                 rob_flushed[0][next_tail]    <= 1'b0;
@@ -429,6 +578,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_epoch[0][next_tail]      <= disp0_epoch;
                 rob_rd[0][next_tail]         <= disp0_rd;
                 rob_is_store[0][next_tail]   <= disp0_is_store;
+                rob_is_mret[0][next_tail]    <= disp0_is_mret;
                 rob_has_result[0][next_tail] <= 1'b0;
                 rob_result[0][next_tail]     <= 32'd0;
                 rob_prd_new[0][next_tail]    <= disp0_prd_new;
@@ -449,6 +599,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_epoch[0][next_tail]      <= disp1_epoch;
                 rob_rd[0][next_tail]         <= disp1_rd;
                 rob_is_store[0][next_tail]   <= disp1_is_store;
+                rob_is_mret[0][next_tail]    <= disp1_is_mret;
                 rob_has_result[0][next_tail] <= 1'b0;
                 rob_result[0][next_tail]     <= 32'd0;
                 rob_prd_new[0][next_tail]    <= disp1_prd_new;
@@ -465,48 +616,44 @@ always @(posedge clk or negedge rstn) begin
             rob_count[0] <= next_count;
         end
 
-        // ── Thread 1 Commit + Dispatch ─────────────────────────
+        // ── Commit S1 + Dispatch: Thread 1 ─────────────────────
         if (!recovering_r) begin : t1_next_state
             reg [ROB_IDX_W-1:0] next_head;
             reg [ROB_IDX_W-1:0] next_tail;
             reg [ROB_IDX_W:0]   next_count;
-            integer             skip_idx;
 
             next_head  = rob_head[1];
             next_tail  = rob_tail[1];
             next_count = rob_count[1];
 
-            // Heal stale head holes
-            for (skip_idx = 0; skip_idx < ROB_DEPTH; skip_idx = skip_idx + 1) begin
-                if ((next_count != {ROB_IDX_W+1{1'b0}}) && !rob_valid[1][next_head])
-                    next_head = next_head + 1;
-            end
-
-            // Step 1: Commit or skip flushed
-            if (rob_valid[1][next_head] && rob_flushed[1][next_head]) begin
-                rob_valid[1][next_head] <= 1'b0;
-                rob_has_result[1][next_head] <= 1'b0;
-                rob_result[1][next_head] <= 32'd0;
-                next_head = next_head + 1;
+            // ── S1 Apply ──
+            if (s0_commit_valid[1]) begin
+                if (!rob_flushed[1][s0_head_idx[1]]) begin
+                    commit1_valid_r      <= 1'b1;
+                    commit1_rd_r         <= s0_rd[1];
+                    commit1_tag_r        <= s0_tag[1];
+                    commit1_has_result_r <= s0_has_result[1];
+                    commit1_data_r       <= s0_data[1];
+                    commit1_order_id_r   <= s0_order_id[1];
+                    commit1_is_store_r   <= s0_is_store[1];
+                    commit1_is_mret_r    <= s0_is_mret[1];
+                    commit1_prd_old_r    <= s0_prd_old[1];
+                    commit1_regs_write_r <= s0_regs_write[1];
+                end
+                rob_valid[1][s0_head_idx[1]]      <= 1'b0;
+                rob_has_result[1][s0_head_idx[1]] <= 1'b0;
+                rob_result[1][s0_head_idx[1]]     <= 32'd0;
+                next_head = s0_head_idx[1] + 1;
                 next_count = next_count - 1;
-            end else if (rob_valid[1][next_head] && rob_complete[1][next_head] && !rob_flushed[1][next_head]) begin
-                commit1_valid_r      <= 1'b1;
-                commit1_rd_r         <= rob_rd[1][next_head];
-                commit1_tag_r        <= rob_tag[1][next_head];
-                commit1_has_result_r <= rob_has_result[1][next_head];
-                commit1_data_r       <= rob_result[1][next_head];
-                commit1_order_id_r   <= rob_order_id[1][next_head];
-                commit1_is_store_r   <= rob_is_store[1][next_head];
-                commit1_prd_old_r    <= rob_prd_old[1][next_head];
-                commit1_regs_write_r <= rob_regs_write[1][next_head];
-                rob_valid[1][next_head] <= 1'b0;
-                rob_has_result[1][next_head] <= 1'b0;
-                rob_result[1][next_head] <= 32'd0;
-                next_head = next_head + 1;
+            end else if (s0_commit_skip[1]) begin
+                rob_valid[1][s0_head_idx[1]]      <= 1'b0;
+                rob_has_result[1][s0_head_idx[1]] <= 1'b0;
+                rob_result[1][s0_head_idx[1]]     <= 32'd0;
+                next_head = s0_head_idx[1] + 1;
                 next_count = next_count - 1;
             end
 
-            // Step 2: Dispatch allocation(s)
+            // ── Dispatch Allocation ──
             if (disp0_valid && !rob0_full && (disp0_tid == 1'b1)) begin
                 rob_valid[1][next_tail]      <= 1'b1;
                 rob_complete[1][next_tail]   <= 1'b0;
@@ -516,6 +663,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_epoch[1][next_tail]      <= disp0_epoch;
                 rob_rd[1][next_tail]         <= disp0_rd;
                 rob_is_store[1][next_tail]   <= disp0_is_store;
+                rob_is_mret[1][next_tail]    <= disp0_is_mret;
                 rob_has_result[1][next_tail] <= 1'b0;
                 rob_result[1][next_tail]     <= 32'd0;
                 rob_prd_new[1][next_tail]    <= disp0_prd_new;
@@ -536,6 +684,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_epoch[1][next_tail]      <= disp1_epoch;
                 rob_rd[1][next_tail]         <= disp1_rd;
                 rob_is_store[1][next_tail]   <= disp1_is_store;
+                rob_is_mret[1][next_tail]    <= disp1_is_mret;
                 rob_has_result[1][next_tail] <= 1'b0;
                 rob_result[1][next_tail]     <= 32'd0;
                 rob_prd_new[1][next_tail]    <= disp1_prd_new;

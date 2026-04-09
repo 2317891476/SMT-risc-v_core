@@ -57,6 +57,7 @@ module exec_pipe0 #(
     output wire [2:0]         csr_op,        // CSR operation
     output wire [11:0]        csr_addr,      // CSR address
     output wire               mret_valid,    // MRET executed
+    output wire [`METADATA_ORDER_ID_W-1:0] mret_order_id, // MRET order ID for flush
 
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
@@ -193,7 +194,8 @@ assign csr_valid  = in_valid && in_is_csr;
 assign csr_wdata  = csr_write_data;
 assign csr_op     = in_func3;    // funct3 encodes CSR operation
 assign csr_addr   = in_csr_addr;
-assign mret_valid = in_valid && in_is_mret;
+assign mret_valid    = in_valid && in_is_mret;
+assign mret_order_id = in_order_id;
 
 assign br_ctrl     = br_ctrl_r;
 assign br_addr     = br_addr_r;

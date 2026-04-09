@@ -78,9 +78,10 @@ BASIC_TEST_IDS = {
 
 
 class TestRunner:
-    def __init__(self, verbose=False, enable_rocc=False):
+    def __init__(self, verbose=False, enable_rocc=False, fpga_config=False):
         self.verbose = verbose
         self.enable_rocc = enable_rocc
+        self.fpga_config = fpga_config
         self.results = []
         self.start_time = None
         
@@ -183,6 +184,13 @@ class TestRunner:
             f"-DROCC_ENABLE={1 if self.enable_rocc else 0}",
             f"-DENABLE_ROCC_ACCEL={1 if self.enable_rocc else 0}",
             f"-DTEST_ID={test_id}",
+        ]
+        if self.fpga_config:
+            compile_cmd += [
+                "-DSIM_SCOREBOARD_RS_DEPTH=16",
+                "-DSIM_SCOREBOARD_RS_IDX_W=4",
+            ]
+        compile_cmd += [
             "-s",
             "tb",
             "-o",
@@ -338,7 +346,8 @@ class TestRunner:
         
         # Run using run_riscv_tests.py
         ret, out, err = self.run_command(
-            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-tests"],
+            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-tests"]
+            + (["--fpga-config"] if self.fpga_config else []),
             cwd=VERIFICATION_DIR, timeout=600
         )
         
@@ -365,7 +374,8 @@ class TestRunner:
         
         # Run using run_riscv_tests.py
         ret, out, err = self.run_command(
-            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-arch-test"],
+            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-arch-test"]
+            + (["--fpga-config"] if self.fpga_config else []),
             cwd=VERIFICATION_DIR, timeout=1200
         )
         
@@ -439,9 +449,11 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--tests", nargs="+", help="Specific basic tests to run")
     parser.add_argument("--enable-rocc", action="store_true", help="Enable RoCC accelerator RTL and include RoCC tests")
+    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_DEPTH=16, RS_IDX_W=4) for simulation")
     args = parser.parse_args()
     
-    runner = TestRunner(verbose=args.verbose, enable_rocc=args.enable_rocc)
+    runner = TestRunner(verbose=args.verbose, enable_rocc=args.enable_rocc,
+                        fpga_config=args.fpga_config)
     runner.start_time = time.time()
     
     print("=" * 60)

@@ -219,10 +219,40 @@ module issue_queue #(
     // ═══ Issue Selection: Oldest Ready (combinational) ═══
     // With load-store ordering: a load cannot issue while an older
     // store from the same thread is still pending (valid & not issued).
+
+    // --- Pre-compute oldest pending store sequence per thread (O(N)) ---
+    // A "pending store" in the IQ is valid, un-issued, and is a store.
+    // Loads are blocked if their seq > oldest pending store seq in same thread.
+    reg [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t0, oldest_store_seq_t1;
+    reg                            any_store_t0,         any_store_t1;
+    integer ps;
+
+    always @(*) begin
+        oldest_store_seq_t0 = {`METADATA_ORDER_ID_W{1'b1}};
+        oldest_store_seq_t1 = {`METADATA_ORDER_ID_W{1'b1}};
+        any_store_t0        = 1'b0;
+        any_store_t1        = 1'b0;
+        if (CHECK_LOAD_STORE_ORDER) begin
+            for (ps = 0; ps < IQ_DEPTH; ps = ps + 1) begin
+                if (e_valid[ps] && e_mem_write[ps]) begin
+                    if (e_tid[ps] == 1'b0) begin
+                        any_store_t0 = 1'b1;
+                        if (e_seq[ps] < oldest_store_seq_t0)
+                            oldest_store_seq_t0 = e_seq[ps];
+                    end else begin
+                        any_store_t1 = 1'b1;
+                        if (e_seq[ps] < oldest_store_seq_t1)
+                            oldest_store_seq_t1 = e_seq[ps];
+                    end
+                end
+            end
+        end
+    end
+
     reg                            sel_found;
     reg [IQ_IDX_W-1:0]            sel_idx;
     reg [`METADATA_ORDER_ID_W-1:0] sel_seq;
-    integer si, lso;
+    integer si;
     reg has_older_store;
 
     always @(*) begin
@@ -237,16 +267,13 @@ module issue_queue #(
                     (e_tid[si] == 1'b1 && issue_inhibit_t1))
                     ; // skip
                 else begin
-                    // Load-store ordering (MEM IQ only): skip loads with older pending stores
+                    // Load-store ordering (MEM IQ only): O(1) per entry check
                     has_older_store = 1'b0;
                     if (CHECK_LOAD_STORE_ORDER && e_mem_read[si] && !e_mem_write[si]) begin
-                        for (lso = 0; lso < IQ_DEPTH; lso = lso + 1) begin
-                            if (e_valid[lso] &&
-                                e_mem_write[lso] &&
-                                e_tid[lso] == e_tid[si] &&
-                                e_seq[lso] < e_seq[si])
-                                has_older_store = 1'b1;
-                        end
+                        if (e_tid[si] == 1'b0)
+                            has_older_store = any_store_t0 && (oldest_store_seq_t0 < e_seq[si]);
+                        else
+                            has_older_store = any_store_t1 && (oldest_store_seq_t1 < e_seq[si]);
                     end
 
                     if (!has_older_store && (!sel_found || (e_seq[si] < sel_seq))) begin

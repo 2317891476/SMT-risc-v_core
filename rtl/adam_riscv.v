@@ -209,6 +209,7 @@ wire [31:0] pipe0_csr_wdata;
 wire [2:0] pipe0_csr_op;
 wire [11:0] pipe0_csr_addr_unused;
 wire       pipe0_mret_valid;
+wire [`METADATA_ORDER_ID_W-1:0] pipe0_mret_order_id;
 
 // CSR read data from csr_unit
 wire [31:0] csr_rdata;
@@ -341,6 +342,7 @@ wire        rob_commit0_has_result, rob_commit1_has_result;
 wire [31:0] rob_commit0_data, rob_commit1_data;
 wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
 wire        rob_commit0_is_store, rob_commit1_is_store;
+wire        rob_commit0_is_mret,  rob_commit1_is_mret;
 wire [1:0]  rob_instr_retired;
 // Expanded ROB rename support outputs (Stage A: unused, wired to defaults)
 wire [5:0]  rob_commit0_prd_old, rob_commit1_prd_old;
@@ -375,6 +377,10 @@ wire        trap_redirect_valid = trap_enter || trap_return;
 wire [31:0] trap_redirect_pc    = trap_enter ? trap_target : 
                                    trap_return ? mepc_out : 32'd0;
 wire [0:0]  trap_redirect_tid   = 1'b0;  // M-mode only, single context
+
+// flush_order_valid: order-based flush for branches and MRET (not trap_enter)
+wire flush_is_order_based = (!trap_redirect_valid && pipe0_br_ctrl) || (trap_return && !trap_enter);
+wire [`METADATA_ORDER_ID_W-1:0] flush_order_id_mux = (trap_return && !trap_enter) ? pipe0_mret_order_id : pipe0_br_order_id;
 
 // Combine flush signals: trap_redirect overrides branch
 wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'b1, 
@@ -690,8 +696,8 @@ dispatch_unit #(
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),
     .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
-    .flush_order_valid(!trap_redirect_valid && pipe0_br_ctrl),
-    .flush_order_id(pipe0_br_order_id),
+    .flush_order_valid(flush_is_order_based),
+    .flush_order_id(flush_order_id_mux),
     .flush_new_epoch((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
 
     // Dispatch 0
@@ -899,8 +905,8 @@ rob #(
     .flush              (combined_flush_any),
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
     .flush_new_epoch    ((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
-    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
-    .flush_order_id     (pipe0_br_order_id),
+    .flush_order_valid  (flush_is_order_based),
+    .flush_order_id     (flush_order_id_mux),
 
     // Dispatch Port 0
     .disp0_valid        (disp0_accepted),
@@ -910,6 +916,7 @@ rob #(
     .disp0_epoch        (disp0_epoch),
     .disp0_rd           (dec0_rd),
     .disp0_is_store     (disp0_is_store),
+    .disp0_is_mret      (dec0_is_mret),
     .disp0_prd_new      (shadow_alloc0_valid ? fl_alloc0_prd : 6'd0),
     .disp0_prd_old      (rmt_prd0_old),
     .disp0_is_branch    (dec0_br),
@@ -926,6 +933,7 @@ rob #(
     .disp1_epoch        (disp1_epoch),
     .disp1_rd           (dec1_rd),
     .disp1_is_store     (disp1_is_store),
+    .disp1_is_mret      (dec1_is_mret),
     .disp1_prd_new      (shadow_alloc1_valid ? fl_alloc1_prd : 6'd0),
     .disp1_prd_old      (rmt_prd1_old),
     .disp1_is_branch    (dec1_br),
@@ -968,6 +976,8 @@ rob #(
     .commit1_order_id   (rob_commit1_order_id),
     .commit0_is_store   (rob_commit0_is_store),
     .commit1_is_store   (rob_commit1_is_store),
+    .commit0_is_mret    (rob_commit0_is_mret),
+    .commit1_is_mret    (rob_commit1_is_mret),
 
     // Rename Commit Outputs (Stage A: unused)
     .commit0_prd_old         (rob_commit0_prd_old),
@@ -1490,6 +1500,7 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .csr_op           (pipe0_csr_op     ),
     .csr_addr         (pipe0_csr_addr_unused),
     .mret_valid       (pipe0_mret_valid ),
+    .mret_order_id    (pipe0_mret_order_id),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
     .br_tid           (pipe0_br_tid     ),
@@ -1627,8 +1638,8 @@ lsu_shell #(
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
-    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
-    .flush_order_id     (pipe0_br_order_id    ),
+    .flush_order_valid  (flush_is_order_based),
+    .flush_order_id     (flush_order_id_mux),
 
     // Request from exec_pipe1
     .req_valid          (p1_mem_req_valid     ),
@@ -1902,6 +1913,7 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .exc_pc          (trap_pc_r         ),
     .exc_tval        (32'd0             ),
     .mret_valid      (pipe0_mret_valid  ),
+    .mret_commit     (rob_commit0_is_mret || rob_commit1_is_mret),
     .trap_enter      (trap_enter        ),
     .trap_target     (trap_target       ),
     .trap_return     (trap_return       ),
