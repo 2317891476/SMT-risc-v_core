@@ -420,8 +420,15 @@ always @(posedge clk or negedge rstn) begin
         end
 
         // ── Store Allocation ───────────────────────────────────
-        // Accept new store into buffer (only if not flushing same cycle)
-        if (store_req_valid && store_req_accept && !(flush && (store_tid == flush_tid))) begin
+        // Accept new store into buffer.
+        // During a partial flush (branch redirect), only block stores that
+        // are YOUNGER than the flush point (wrong-path). Correct-path stores
+        // (older than the flush) must still be enqueued or they'll be lost.
+        // During a global flush (!flush_order_valid), block all stores from
+        // the flushed thread.
+        if (store_req_valid && store_req_accept &&
+            !(flush && (store_tid == flush_tid) &&
+              (!flush_order_valid || (store_order_id > flush_order_id)))) begin
             if (store_tid == 1'b0) begin
                 sb_valid_next[0][sb_tail_next[0]]     = 1'b1;
                 sb_addr[0][sb_tail_next[0]]      <= store_addr;

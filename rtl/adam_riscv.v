@@ -1173,6 +1173,73 @@ wire [5:0]  prf_w1_addr = tag_prd_map[wb1_tag];
 wire [0:0]  prf_w1_tid  = tag_tid_map[wb1_tag];
 wire [31:0] prf_w1_data = wb1_result_data;
 
+// ════════════════════════════════════════════════════════════════════════════
+// Pipe1 Pre-RO Stage
+//   Split the long path:
+//     IQ/MEM winner select -> tag_prs fanout -> PRF read -> bypass -> ro1
+//   into two stages:
+//     1) issue/select -> p1_pre_ro (metadata + phys addrs + src tags)
+//     2) PRF read -> tagbuf bypass -> ro1
+//   This applies to all builds so the functional timing model stays uniform.
+// ════════════════════════════════════════════════════════════════════════════
+reg         p1_pre_ro_valid;
+reg  [4:0]  p1_pre_ro_tag;
+reg  [31:0] p1_pre_ro_pc;
+reg  [31:0] p1_pre_ro_imm;
+reg  [2:0]  p1_pre_ro_func3;
+reg         p1_pre_ro_func7;
+reg  [4:0]  p1_pre_ro_rd;
+reg  [4:0]  p1_pre_ro_rs1, p1_pre_ro_rs2;
+reg         p1_pre_ro_rs1_used, p1_pre_ro_rs2_used;
+reg  [4:0]  p1_pre_ro_src1_tag, p1_pre_ro_src2_tag;
+reg  [2:0]  p1_pre_ro_alu_op;
+reg  [1:0]  p1_pre_ro_alu_src1, p1_pre_ro_alu_src2;
+reg         p1_pre_ro_br;
+reg         p1_pre_ro_mem_read, p1_pre_ro_mem_write, p1_pre_ro_mem2reg;
+reg         p1_pre_ro_regs_write, p1_pre_ro_br_addr_mode;
+reg  [2:0]  p1_pre_ro_fu;
+reg  [0:0]  p1_pre_ro_tid;
+reg  [`METADATA_ORDER_ID_W-1:0] p1_pre_ro_order_id;
+reg  [`METADATA_EPOCH_W-1:0]    p1_pre_ro_epoch;
+reg  [5:0]  p1_pre_ro_prs1, p1_pre_ro_prs2;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        p1_pre_ro_valid <= 1'b0;
+    end else begin
+        p1_pre_ro_valid <= iss1_valid;
+        if (iss1_valid) begin
+            p1_pre_ro_tag          <= iss1_tag;
+            p1_pre_ro_pc           <= iss1_pc;
+            p1_pre_ro_imm          <= iss1_imm;
+            p1_pre_ro_func3        <= iss1_func3;
+            p1_pre_ro_func7        <= iss1_func7;
+            p1_pre_ro_rd           <= iss1_rd;
+            p1_pre_ro_rs1          <= iss1_rs1;
+            p1_pre_ro_rs2          <= iss1_rs2;
+            p1_pre_ro_rs1_used     <= iss1_rs1_used;
+            p1_pre_ro_rs2_used     <= iss1_rs2_used;
+            p1_pre_ro_src1_tag     <= iss1_src1_tag;
+            p1_pre_ro_src2_tag     <= iss1_src2_tag;
+            p1_pre_ro_alu_op       <= iss1_alu_op;
+            p1_pre_ro_alu_src1     <= iss1_alu_src1;
+            p1_pre_ro_alu_src2     <= iss1_alu_src2;
+            p1_pre_ro_br           <= iss1_br;
+            p1_pre_ro_mem_read     <= iss1_mem_read;
+            p1_pre_ro_mem_write    <= iss1_mem_write;
+            p1_pre_ro_mem2reg      <= iss1_mem2reg;
+            p1_pre_ro_regs_write   <= iss1_regs_write;
+            p1_pre_ro_br_addr_mode <= iss1_br_addr_mode;
+            p1_pre_ro_fu           <= iss1_fu;
+            p1_pre_ro_tid          <= iss1_tid;
+            p1_pre_ro_order_id     <= iss1_order_id;
+            p1_pre_ro_epoch        <= iss1_epoch;
+            p1_pre_ro_prs1         <= tag_prs1_map[iss1_tag];
+            p1_pre_ro_prs2         <= tag_prs2_map[iss1_tag];
+        end
+    end
+end
+
 phys_regfile #(
     .NUM_PHYS_REG (48),
     .PHYS_REG_W   (6)
@@ -1182,9 +1249,9 @@ phys_regfile #(
     // Read ports (using phys reg addresses from tag→prs sideband maps)
     .r0_tid  (iss0_tid),  .r0_addr (tag_prs1_map[iss0_tag]), .r0_data (prf_r0_data),
     .r1_tid  (iss0_tid),  .r1_addr (tag_prs2_map[iss0_tag]), .r1_data (prf_r1_data),
-    .r2_tid  (iss1_tid),  .r2_addr (tag_prs1_map[iss1_tag]), .r2_data (prf_r2_data),
-    .r3_tid  (iss1_tid),  .r3_addr (tag_prs2_map[iss1_tag]), .r3_data (prf_r3_data),
-    // Write ports (at WB time — speculative writes)
+    .r2_tid  (p1_pre_ro_tid),  .r2_addr (p1_pre_ro_prs1), .r2_data (prf_r2_data),
+    .r3_tid  (p1_pre_ro_tid),  .r3_addr (p1_pre_ro_prs2), .r3_data (prf_r3_data),
+    // Write ports (at WB time – speculative writes)
     .w0_en   (prf_w0_en),  .w0_tid (prf_w0_tid), .w0_addr (prf_w0_addr), .w0_data (prf_w0_data),
     .w1_en   (prf_w1_en),  .w1_tid (prf_w1_tid), .w1_addr (prf_w1_addr), .w1_data (prf_w1_data)
 );
@@ -1361,11 +1428,11 @@ wire        p1_tagbuf_a_valid, p1_tagbuf_b_valid;
 wire [31:0] p1_tagbuf_a_data,  p1_tagbuf_b_data;
 
 bypass_network u_bypass1(
-    .ro_rs1_addr     (iss1_rs1       ),
-    .ro_rs2_addr     (iss1_rs2       ),
+    .ro_rs1_addr     (p1_pre_ro_rs1  ),
+    .ro_rs2_addr     (p1_pre_ro_rs2  ),
     .ro_rs1_regdata  (prf_r2_data    ),
     .ro_rs2_regdata  (prf_r3_data    ),
-    .ro_tid          (iss1_tid       ),
+    .ro_tid          (p1_pre_ro_tid  ),
     .tagbuf_rs1_valid(p1_tagbuf_a_valid),
     .tagbuf_rs1_data (p1_tagbuf_a_data ),
     .tagbuf_rs2_valid(p1_tagbuf_b_valid),
@@ -1531,32 +1598,92 @@ wire        p1_mul_regs_write;
 wire [2:0]  p1_mul_fu;
 wire [0:0]  p1_mul_tid;
 
+// ════════════════════════════════════════════════════════════════════════════
+// Pipeline Register: PRF + Bypass → Exec Pipe1  (ro1 stage)
+//   The issue side has already been captured by p1_pre_ro. This stage now only
+//   closes PRF read + tagbuf bypass into exec_pipe1.
+// ════════════════════════════════════════════════════════════════════════════
+reg         ro1_valid;
+reg  [4:0]  ro1_tag;
+reg  [31:0] ro1_pc;
+reg  [31:0] ro1_imm;
+reg  [2:0]  ro1_func3;
+reg         ro1_func7;
+reg  [4:0]  ro1_rd;
+reg  [2:0]  ro1_alu_op;
+reg  [1:0]  ro1_alu_src1, ro1_alu_src2;
+reg         ro1_br;
+reg         ro1_mem_read, ro1_mem_write, ro1_mem2reg;
+reg         ro1_regs_write, ro1_br_addr_mode;
+reg  [2:0]  ro1_fu;
+reg  [0:0]  ro1_tid;
+reg  [`METADATA_ORDER_ID_W-1:0] ro1_order_id;
+reg  [`METADATA_EPOCH_W-1:0]    ro1_epoch;
+reg  [31:0] ro1_op_a, ro1_op_b;
 
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        ro1_valid <= 1'b0;
+    end else begin
+        ro1_valid <= p1_pre_ro_valid;
+        if (p1_pre_ro_valid) begin
+            ro1_tag        <= p1_pre_ro_tag;
+            ro1_pc         <= p1_pre_ro_pc;
+            ro1_imm        <= p1_pre_ro_imm;
+            ro1_func3      <= p1_pre_ro_func3;
+            ro1_func7      <= p1_pre_ro_func7;
+            ro1_rd         <= p1_pre_ro_rd;
+            ro1_alu_op     <= p1_pre_ro_alu_op;
+            ro1_alu_src1   <= p1_pre_ro_alu_src1;
+            ro1_alu_src2   <= p1_pre_ro_alu_src2;
+            ro1_br         <= p1_pre_ro_br;
+            ro1_mem_read   <= p1_pre_ro_mem_read;
+            ro1_mem_write  <= p1_pre_ro_mem_write;
+            ro1_mem2reg    <= p1_pre_ro_mem2reg;
+            ro1_regs_write <= p1_pre_ro_regs_write;
+            ro1_br_addr_mode <= p1_pre_ro_br_addr_mode;
+            ro1_fu         <= p1_pre_ro_fu;
+            ro1_tid        <= p1_pre_ro_tid;
+            ro1_order_id   <= p1_pre_ro_order_id;
+            ro1_epoch      <= p1_pre_ro_epoch;
+            ro1_op_a       <= byp1_op_a;
+            ro1_op_b       <= byp1_op_b;
+        end
+    end
+end
+
+// Pipeline register ro1: no epoch squash needed here.
+// Stale instructions pass through to exec_pipe1 → produce wb1 that the ROB
+// harmlessly ignores (flushed entries). The store buffer handles wrong-path
+// stores via its own epoch-based flush. Squashing here is unsafe because the
+// IQ marks entries as 'issued' at issue time, and epoch-squash in ro1 can
+// kill correct-path instructions whose epoch was updated between dispatch and
+// the ro1 stage, leaving fu_busy stuck forever.
 
 exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .clk           (clk              ),
     .rstn          (rstn             ),
-    .in_valid      (iss1_valid       ),
-    .in_tag        (iss1_tag         ),
-    .in_pc         (iss1_pc          ),
-    .in_op_a       (byp1_op_a        ),
-    .in_op_b       (byp1_op_b        ),
-    .in_imm        (iss1_imm         ),
-    .in_func3      (iss1_func3       ),
-    .in_func7      (iss1_func7       ),
-    .in_alu_op     (iss1_alu_op      ),
-    .in_alu_src1   (iss1_alu_src1    ),
-    .in_alu_src2   (iss1_alu_src2    ),
-    .in_br         (iss1_br          ),
-    .in_mem_read   (iss1_mem_read    ),
-    .in_mem_write  (iss1_mem_write   ),
-    .in_mem2reg    (iss1_mem2reg     ),
-    .in_rd         (iss1_rd          ),
-    .in_regs_write (iss1_regs_write  ),
-    .in_fu         (iss1_fu          ),
-    .in_tid        (iss1_tid         ),
-    .in_order_id   (iss1_order_id    ),
-    .in_epoch      (iss1_epoch       ),
+    .in_valid      (ro1_valid        ),
+    .in_tag        (ro1_tag          ),
+    .in_pc         (ro1_pc           ),
+    .in_op_a       (ro1_op_a         ),
+    .in_op_b       (ro1_op_b         ),
+    .in_imm        (ro1_imm          ),
+    .in_func3      (ro1_func3        ),
+    .in_func7      (ro1_func7        ),
+    .in_alu_op     (ro1_alu_op       ),
+    .in_alu_src1   (ro1_alu_src1     ),
+    .in_alu_src2   (ro1_alu_src2     ),
+    .in_br         (ro1_br           ),
+    .in_mem_read   (ro1_mem_read     ),
+    .in_mem_write  (ro1_mem_write    ),
+    .in_mem2reg    (ro1_mem2reg      ),
+    .in_rd         (ro1_rd           ),
+    .in_regs_write (ro1_regs_write   ),
+    .in_fu         (ro1_fu           ),
+    .in_tid        (ro1_tid          ),
+    .in_order_id   (ro1_order_id     ),
+    .in_epoch      (ro1_epoch        ),
     .alu_out_valid      (p1_alu_valid     ),
     .alu_out_tag        (p1_alu_tag       ),
     .alu_out_result     (p1_alu_result    ),
@@ -1874,10 +2001,10 @@ assign p0_tagbuf_a_valid = (iss0_src1_tag != 5'd0) && result_valid[iss0_src1_tag
 assign p0_tagbuf_a_data  = result_buffer[iss0_src1_tag];
 assign p0_tagbuf_b_valid = (iss0_src2_tag != 5'd0) && result_valid[iss0_src2_tag];
 assign p0_tagbuf_b_data  = result_buffer[iss0_src2_tag];
-assign p1_tagbuf_a_valid = (iss1_src1_tag != 5'd0) && result_valid[iss1_src1_tag];
-assign p1_tagbuf_a_data  = result_buffer[iss1_src1_tag];
-assign p1_tagbuf_b_valid = (iss1_src2_tag != 5'd0) && result_valid[iss1_src2_tag];
-assign p1_tagbuf_b_data  = result_buffer[iss1_src2_tag];
+assign p1_tagbuf_a_valid = (p1_pre_ro_src1_tag != 5'd0) && result_valid[p1_pre_ro_src1_tag];
+assign p1_tagbuf_a_data  = result_buffer[p1_pre_ro_src1_tag];
+assign p1_tagbuf_b_valid = (p1_pre_ro_src2_tag != 5'd0) && result_valid[p1_pre_ro_src2_tag];
+assign p1_tagbuf_b_data  = result_buffer[p1_pre_ro_src2_tag];
 
 // ════════════════════════════════════════════════════════════════════════════
 // Register File Write: Drive from ROB commit (not WB)

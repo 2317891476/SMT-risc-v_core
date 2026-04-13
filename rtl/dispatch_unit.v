@@ -553,6 +553,10 @@ wire [0:0]  mem_iss_tid;
 wire        mem_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] mem_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    mem_iss_epoch;
+wire                            mem_oldest_store_valid_t0;
+wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t0;
+wire                            mem_oldest_store_valid_t1;
+wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t1;
 
 // MUL IQ issue wires
 wire        mul_iss_valid;
@@ -695,9 +699,17 @@ issue_queue #(
     .commit1_tag     (commit1_tag),
     .commit1_tid     (commit1_tid),
     .commit1_order_id(commit1_order_id),
+    .older_store_valid_t0   (mem_oldest_store_valid_t0),
+    .older_store_order_id_t0(mem_oldest_store_order_id_t0),
+    .older_store_valid_t1   (mem_oldest_store_valid_t1),
+    .older_store_order_id_t1(mem_oldest_store_order_id_t1),
     // Issue inhibit
     .issue_inhibit_t0(issue_inhibit_t0),
-    .issue_inhibit_t1(issue_inhibit_t1)
+    .issue_inhibit_t1(issue_inhibit_t1),
+    .oldest_store_valid_t0(),
+    .oldest_store_order_id_t0(),
+    .oldest_store_valid_t1(),
+    .oldest_store_order_id_t1()
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -819,8 +831,16 @@ issue_queue #(
     .commit1_tag     (commit1_tag),
     .commit1_tid     (commit1_tid),
     .commit1_order_id(commit1_order_id),
+    .older_store_valid_t0   (1'b0),
+    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .older_store_valid_t1   (1'b0),
+    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .issue_inhibit_t0(mem_fu_busy),
-    .issue_inhibit_t1(mem_fu_busy)
+    .issue_inhibit_t1(mem_fu_busy),
+    .oldest_store_valid_t0   (mem_oldest_store_valid_t0),
+    .oldest_store_order_id_t0(mem_oldest_store_order_id_t0),
+    .oldest_store_valid_t1   (mem_oldest_store_valid_t1),
+    .oldest_store_order_id_t1(mem_oldest_store_order_id_t1)
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -941,35 +961,65 @@ issue_queue #(
     .commit1_tag     (commit1_tag),
     .commit1_tid     (commit1_tid),
     .commit1_order_id(commit1_order_id),
+    .older_store_valid_t0   (1'b0),
+    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .older_store_valid_t1   (1'b0),
+    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .issue_inhibit_t0(mul_fu_busy),
-    .issue_inhibit_t1(mul_fu_busy)
+    .issue_inhibit_t1(mul_fu_busy),
+    .oldest_store_valid_t0(),
+    .oldest_store_order_id_t0(),
+    .oldest_store_valid_t1(),
+    .oldest_store_order_id_t1()
 );
 
 // ═════════════════════════════════════════════════════════════════
 // 11. FU Busy Tracking (prevents over-issue to shared pipe1 resources)
 //     MEM/MUL share pipe1. Only one mem op at a time (LSU single-port).
 //     Busy set at issue, cleared at WB completion of that FU type.
+//
+//     Partial-flush awareness: the LSU can kill a pending load during a
+//     branch redirect (flush_order_valid=1) if the load is younger than
+//     the flush point. When that happens no WB1 arrives, so we must
+//     also clear mem_fu_busy here using the same younger-than test.
 // ═════════════════════════════════════════════════════════════════
 reg mem_fu_busy, mul_fu_busy;
+reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
+reg [0:0]                      mem_fu_tid;
+
+wire mem_fu_flush_kill = mem_fu_busy &&
+                         (mem_fu_tid == flush_tid) &&
+                         (!flush_order_valid ||
+                          (mem_fu_order_id > flush_order_id));
+
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        mem_fu_busy <= 1'b0;
-        mul_fu_busy <= 1'b0;
+        mem_fu_busy     <= 1'b0;
+        mul_fu_busy     <= 1'b0;
+        mem_fu_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
+        mem_fu_tid      <= 1'b0;
     end else begin
         if (flush) begin
             // Clear fu_busy on GLOBAL flush (trap/interrupt entry,
             // flush_order_valid=0): the LSU kills all pending ops for the
             // flushed thread, so no WB will arrive to clear fu_busy.
-            // Partial flushes (branch redirect, flush_order_valid=1) leave
-            // correct-path ops in flight, whose WB clears fu_busy normally.
             if (!flush_order_valid) begin
                 mem_fu_busy <= 1'b0;
                 mul_fu_busy <= 1'b0;
+            end else if (mem_fu_flush_kill) begin
+                // Partial flush (branch redirect): clear mem_fu_busy if the
+                // in-flight mem op belongs to the flushed thread AND is younger
+                // than the flush point. The LSU will discard this request
+                // without producing wb1.
+                mem_fu_busy <= 1'b0;
             end
         end
         // MEM busy: set when MEM IQ wins pipe1 arbiter, clear when WB1 returns LOAD/STORE
-        if (p1_winner_valid && p1_winner == 2'b10)
-            mem_fu_busy <= 1'b1;
+        if (p1_winner_valid && p1_winner == 2'b10) begin
+            mem_fu_busy     <= 1'b1;
+            mem_fu_order_id <= mem_iss_order_id;
+            mem_fu_tid      <= mem_iss_tid;
+        end
         if (wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE))
             mem_fu_busy <= 1'b0;
         // MUL busy: set when MUL IQ wins pipe1 arbiter, clear when WB1 returns MUL
@@ -979,6 +1029,7 @@ always @(posedge clk or negedge rstn) begin
             mul_fu_busy <= 1'b0;
     end
 end
+
 
 // ═════════════════════════════════════════════════════════════════
 // 12. Pipe1 Arbiter

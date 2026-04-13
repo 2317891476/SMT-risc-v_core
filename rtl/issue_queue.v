@@ -141,10 +141,18 @@ module issue_queue #(
     input  wire [RS_TAG_W-1:0] commit1_tag,
     input  wire [0:0]  commit1_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
+    input  wire                             older_store_valid_t0,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  older_store_order_id_t0,
+    input  wire                             older_store_valid_t1,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  older_store_order_id_t1,
 
     // ─── External issue inhibit (e.g. branch_in_flight) ─────────
     input  wire        issue_inhibit_t0,
-    input  wire        issue_inhibit_t1
+    input  wire        issue_inhibit_t1,
+    output wire                            oldest_store_valid_t0,
+    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t0,
+    output wire                            oldest_store_valid_t1,
+    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t1
 );
 
     // ═══ Entry Storage ═══
@@ -220,71 +228,163 @@ module issue_queue #(
     // With load-store ordering: a load cannot issue while an older
     // store from the same thread is still pending (valid & not issued).
 
-    // --- Pre-compute oldest pending store sequence per thread (O(N)) ---
-    // A "pending store" in the IQ is valid, un-issued, and is a store.
-    // Loads are blocked if their seq > oldest pending store seq in same thread.
-    reg [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t0, oldest_store_seq_t1;
-    reg                            any_store_t0,         any_store_t1;
-    integer ps;
+    // --- Pre-compute oldest pending store sequence per thread ---
+    // Tree-based min reduction: O(log2 N) depth instead of O(N) cascading.
 
-    always @(*) begin
-        oldest_store_seq_t0 = {`METADATA_ORDER_ID_W{1'b1}};
-        oldest_store_seq_t1 = {`METADATA_ORDER_ID_W{1'b1}};
-        any_store_t0        = 1'b0;
-        any_store_t1        = 1'b0;
-        if (CHECK_LOAD_STORE_ORDER) begin
-            for (ps = 0; ps < IQ_DEPTH; ps = ps + 1) begin
-                if (e_valid[ps] && e_mem_write[ps]) begin
-                    if (e_tid[ps] == 1'b0) begin
-                        any_store_t0 = 1'b1;
-                        if (e_seq[ps] < oldest_store_seq_t0)
-                            oldest_store_seq_t0 = e_seq[ps];
-                    end else begin
-                        any_store_t1 = 1'b1;
-                        if (e_seq[ps] < oldest_store_seq_t1)
-                            oldest_store_seq_t1 = e_seq[ps];
-                    end
-                end
+    // Shared tree parameters (used by both store min-tree and issue selection tree)
+    localparam TREE_N = 1 << $clog2(IQ_DEPTH);
+    localparam TREE_LEVELS = $clog2(TREE_N);
+
+    // Store candidate word: {valid(1), seq(ORDER_ID_W)}
+    localparam STORE_CAND_W = 1 + `METADATA_ORDER_ID_W;
+
+    // pick_min_store: return the valid candidate with smaller seq
+    function [STORE_CAND_W-1:0] pick_min_store;
+        input [STORE_CAND_W-1:0] a;
+        input [STORE_CAND_W-1:0] b;
+        reg a_v, b_v;
+        reg [`METADATA_ORDER_ID_W-1:0] a_seq, b_seq;
+        begin
+            a_v   = a[STORE_CAND_W-1];
+            b_v   = b[STORE_CAND_W-1];
+            a_seq = a[`METADATA_ORDER_ID_W-1:0];
+            b_seq = b[`METADATA_ORDER_ID_W-1:0];
+            if (!a_v && !b_v)        pick_min_store = a;
+            else if (!a_v)           pick_min_store = b;
+            else if (!b_v)           pick_min_store = a;
+            else if (a_seq <= b_seq) pick_min_store = a;
+            else                     pick_min_store = b;
+        end
+    endfunction
+
+    // Per-entry store candidate packing (parallel)
+    wire [STORE_CAND_W-1:0] store_cand_t0 [0:TREE_N-1];
+    wire [STORE_CAND_W-1:0] store_cand_t1 [0:TREE_N-1];
+
+    genvar si_store;
+    generate
+        for (si_store = 0; si_store < TREE_N; si_store = si_store + 1) begin : gen_store_cand
+            if (si_store < IQ_DEPTH) begin : real_store
+                wire is_pending_store = e_valid[si_store] && e_mem_write[si_store];
+                assign store_cand_t0[si_store] = (CHECK_LOAD_STORE_ORDER && is_pending_store && e_tid[si_store] == 1'b0)
+                    ? {1'b1, e_seq[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
+                assign store_cand_t1[si_store] = (CHECK_LOAD_STORE_ORDER && is_pending_store && e_tid[si_store] == 1'b1)
+                    ? {1'b1, e_seq[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
+            end else begin : pad_store
+                assign store_cand_t0[si_store] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
+                assign store_cand_t1[si_store] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
             end
         end
-    end
+    endgenerate
 
-    reg                            sel_found;
-    reg [IQ_IDX_W-1:0]            sel_idx;
-    reg [`METADATA_ORDER_ID_W-1:0] sel_seq;
-    integer si;
-    reg has_older_store;
+    // Tree-based min reduction for thread 0
+    wire [STORE_CAND_W-1:0] store_tree_t0 [0:2*TREE_N-2];
+    genvar st0;
+    generate
+        for (st0 = 0; st0 < TREE_N; st0 = st0 + 1) begin : gen_store_leaf_t0
+            assign store_tree_t0[TREE_N - 1 + st0] = store_cand_t0[st0];
+        end
+        for (st0 = TREE_N - 2; st0 >= 0; st0 = st0 - 1) begin : gen_store_node_t0
+            assign store_tree_t0[st0] = pick_min_store(store_tree_t0[2*st0 + 1], store_tree_t0[2*st0 + 2]);
+        end
+    endgenerate
 
-    always @(*) begin
-        sel_found = 1'b0;
-        sel_idx   = {IQ_IDX_W{1'b0}};
-        sel_seq   = {`METADATA_ORDER_ID_W{1'b1}};  // max
+    // Tree-based min reduction for thread 1
+    wire [STORE_CAND_W-1:0] store_tree_t1 [0:2*TREE_N-2];
+    genvar st1;
+    generate
+        for (st1 = 0; st1 < TREE_N; st1 = st1 + 1) begin : gen_store_leaf_t1
+            assign store_tree_t1[TREE_N - 1 + st1] = store_cand_t1[st1];
+        end
+        for (st1 = TREE_N - 2; st1 >= 0; st1 = st1 - 1) begin : gen_store_node_t1
+            assign store_tree_t1[st1] = pick_min_store(store_tree_t1[2*st1 + 1], store_tree_t1[2*st1 + 2]);
+        end
+    endgenerate
 
-        for (si = 0; si < IQ_DEPTH; si = si + 1) begin
-            if (e_valid[si] && !e_issued[si] && e_ready[si] && !e_just_woke[si]) begin
-                // Check external inhibit per thread
-                if ((e_tid[si] == 1'b0 && issue_inhibit_t0) ||
-                    (e_tid[si] == 1'b1 && issue_inhibit_t1))
-                    ; // skip
-                else begin
-                    // Load-store ordering (MEM IQ only): O(1) per entry check
-                    has_older_store = 1'b0;
-                    if (CHECK_LOAD_STORE_ORDER && e_mem_read[si] && !e_mem_write[si]) begin
-                        if (e_tid[si] == 1'b0)
-                            has_older_store = any_store_t0 && (oldest_store_seq_t0 < e_seq[si]);
-                        else
-                            has_older_store = any_store_t1 && (oldest_store_seq_t1 < e_seq[si]);
-                    end
+    // Extract results
+    wire                            any_store_t0         = store_tree_t0[0][STORE_CAND_W-1];
+    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t0  = store_tree_t0[0][`METADATA_ORDER_ID_W-1:0];
+    wire                            any_store_t1         = store_tree_t1[0][STORE_CAND_W-1];
+    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t1  = store_tree_t1[0][`METADATA_ORDER_ID_W-1:0];
+    assign oldest_store_valid_t0    = any_store_t0;
+    assign oldest_store_order_id_t0 = oldest_store_seq_t0;
+    assign oldest_store_valid_t1    = any_store_t1;
+    assign oldest_store_order_id_t1 = oldest_store_seq_t1;
 
-                    if (!has_older_store && (!sel_found || (e_seq[si] < sel_seq))) begin
-                        sel_found = 1'b1;
-                        sel_idx   = si[IQ_IDX_W-1:0];
-                        sel_seq   = e_seq[si];
-                    end
-                end
+    // --- Binary Tournament Tree: O(log2 N) selection ---
+    // Candidate word: {valid(1), seq(ORDER_ID_W), idx(IQ_IDX_W)}
+    localparam CAND_W = 1 + `METADATA_ORDER_ID_W + IQ_IDX_W;
+
+    // pick_older: return the older (lower seq) valid candidate
+    function [CAND_W-1:0] pick_older;
+        input [CAND_W-1:0] a;
+        input [CAND_W-1:0] b;
+        reg a_v, b_v;
+        reg [`METADATA_ORDER_ID_W-1:0] a_seq, b_seq;
+        begin
+            a_v   = a[CAND_W-1];
+            b_v   = b[CAND_W-1];
+            a_seq = a[CAND_W-2 -: `METADATA_ORDER_ID_W];
+            b_seq = b[CAND_W-2 -: `METADATA_ORDER_ID_W];
+            if (!a_v && !b_v)     pick_older = a;       // both invalid
+            else if (!a_v)        pick_older = b;
+            else if (!b_v)        pick_older = a;
+            else if (a_seq <= b_seq) pick_older = a;    // a is older or equal
+            else                  pick_older = b;
+        end
+    endfunction
+
+    // Step 1: Per-entry parallel eligibility + candidate packing
+    wire [CAND_W-1:0] cand [0:TREE_N-1];
+
+    genvar ci;
+    generate
+        for (ci = 0; ci < TREE_N; ci = ci + 1) begin : gen_cand
+            if (ci < IQ_DEPTH) begin : real_entry
+                wire inhibited = (e_tid[ci] == 1'b0 && issue_inhibit_t0) ||
+                                 (e_tid[ci] == 1'b1 && issue_inhibit_t1);
+                wire is_load_no_store = CHECK_LOAD_STORE_ORDER &&
+                                        e_mem_read[ci] && !e_mem_write[ci];
+                wire older_store_blocks =
+                    is_load_no_store && (
+                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_seq_t0 < e_seq[ci])) :
+                                              (any_store_t1 && (oldest_store_seq_t1 < e_seq[ci]))
+                    );
+                wire older_store_blocks_mret =
+                    e_is_mret[ci] && (
+                        (e_tid[ci] == 1'b0) ? (older_store_valid_t0 && (older_store_order_id_t0 < e_order_id[ci])) :
+                                              (older_store_valid_t1 && (older_store_order_id_t1 < e_order_id[ci]))
+                    );
+                wire eligible = e_valid[ci] && !e_issued[ci] && e_ready[ci]
+                                && !e_just_woke[ci] && !inhibited
+                                && !older_store_blocks
+                                && !older_store_blocks_mret;
+                assign cand[ci] = {eligible, e_seq[ci], ci[IQ_IDX_W-1:0]};
+            end else begin : pad_entry
+                assign cand[ci] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}, {IQ_IDX_W{1'b0}}};
             end
         end
-    end
+    endgenerate
+
+    // Step 2: Binary tournament tree reduction (log2 levels)
+    wire [CAND_W-1:0] tree [0:2*TREE_N-2];  // flat array: leaves=[TREE_N-1 .. 2*TREE_N-2], root=[0]
+
+    genvar ti;
+    generate
+        // Leaves: copy candidates
+        for (ti = 0; ti < TREE_N; ti = ti + 1) begin : gen_leaf
+            assign tree[TREE_N - 1 + ti] = cand[ti];
+        end
+        // Internal nodes: pick_older of children
+        for (ti = TREE_N - 2; ti >= 0; ti = ti - 1) begin : gen_node
+            assign tree[ti] = pick_older(tree[2*ti + 1], tree[2*ti + 2]);
+        end
+    endgenerate
+
+    // Step 3: Extract winner
+    wire                            sel_found = tree[0][CAND_W-1];
+    wire [IQ_IDX_W-1:0]            sel_idx   = tree[0][IQ_IDX_W-1:0];
+    wire [`METADATA_ORDER_ID_W-1:0] sel_seq   = tree[0][CAND_W-2 -: `METADATA_ORDER_ID_W];
 
     // ═══ Issue Output Drive ═══
     always @(*) begin

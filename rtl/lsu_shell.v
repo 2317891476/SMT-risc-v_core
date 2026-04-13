@@ -291,10 +291,14 @@ reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
 wire              flush_hits_pending =
                     pending_valid && (pending_tid == flush_tid);
+// Only kill when there IS a pending speculative request to kill.
+// The old `!pending_valid || ...` made the flush branch vacuously
+// true when idle, which silently dropped new requests arriving in
+// the same cycle as a flush (the if/else skipped the state machine).
 wire              flush_kills_pending =
-                    !pending_valid ||
-                    (flush_hits_pending &&
-                     (!flush_order_valid || (pending_order_id > flush_order_id)));
+                    pending_valid &&
+                    flush_hits_pending &&
+                    (!flush_order_valid || (pending_order_id > flush_order_id));
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
                                 ((lsu_state == LSU_IDLE) && !(req_valid && req_accept)) :
