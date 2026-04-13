@@ -62,7 +62,8 @@ wire [0:0]  tid_out;
 reg         fetch_req_active;
 reg [31:0]  fetch_pc_pending;
 reg [0:0]   fetch_tid_pending;
-reg         fetch_pred_pending;
+reg [31:0]  fetch_pred_target_pending;
+reg         fetch_pred_used_pending;
 
 // Stall PC when: pipeline stall, fetch buffer full, or a previous fetch
 // request is still waiting for its response.
@@ -92,6 +93,10 @@ pc_mt #(
 // Epoch is incremented on flush per thread to track stale responses
 reg [3:0] epoch_t0, epoch_t1;
 wire [3:0] current_epoch = (fetch_tid == 1'b0) ? epoch_t0 : epoch_t1;
+wire       bpu_pred_taken;
+wire [31:0] bpu_pred_target;
+wire        use_pred_redirect = fetch_req_launch && bpu_pred_taken;
+wire [31:0] fetch_addr_selected = use_pred_redirect ? bpu_pred_target : pc_out;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -119,7 +124,7 @@ inst_memory #(
     .clk            (clk               ),
     .rstn           (rstn              ),
     .req_valid      (fetch_req_launch   ),
-    .inst_addr      (pc_out            ),
+    .inst_addr      (fetch_addr_selected),
     .req_tid        (tid_out           ),
     .inst_o         (inst_from_mem     ),
     .resp_tid       (resp_tid_from_mem ),
@@ -141,7 +146,6 @@ inst_memory #(
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────
-wire bpu_pred_taken;
 
 bpu_bimodal #(
     .PHT_ENTRIES (256)
@@ -152,7 +156,7 @@ bpu_bimodal #(
     .pred_pc       (pc_out            ),
     .pred_tid      (tid_out           ),
     .pred_taken    (bpu_pred_taken    ),
-    .pred_target   (/* unused for now, target comes from EX */),
+    .pred_target   (bpu_pred_target   ),
     // Update port
     .update_valid  (bpu_update_valid  ),
     .update_pc     (bpu_update_pc     ),
@@ -167,21 +171,25 @@ bpu_bimodal #(
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        fetch_req_active   <= 1'b0;
-        fetch_pc_pending   <= 32'd0;
-        fetch_tid_pending  <= 1'b0;
-        fetch_pred_pending <= 1'b0;
+        fetch_req_active          <= 1'b0;
+        fetch_pc_pending          <= 32'd0;
+        fetch_tid_pending         <= 1'b0;
+        fetch_pred_target_pending <= 32'd0;
+        fetch_pred_used_pending   <= 1'b0;
     end
     else begin
         if (|if_flush) begin
-            fetch_req_active <= 1'b0;
+            fetch_req_active          <= 1'b0;
+            fetch_pred_target_pending <= 32'd0;
+            fetch_pred_used_pending   <= 1'b0;
         end
         else begin
             if (fetch_req_launch) begin
-                fetch_req_active   <= 1'b1;
-                fetch_pc_pending   <= pc_out;
-                fetch_tid_pending  <= tid_out;
-                fetch_pred_pending <= bpu_pred_taken;
+                fetch_req_active          <= 1'b1;
+                fetch_pc_pending          <= fetch_addr_selected;
+                fetch_tid_pending         <= tid_out;
+                fetch_pred_target_pending <= bpu_pred_target;
+                fetch_pred_used_pending   <= bpu_pred_taken;
             end
 
             if (fetch_req_active && resp_valid_from_mem) begin
@@ -190,7 +198,7 @@ always @(posedge clk or negedge rstn) begin
         end
     end
 end
-assign ext_mem_bypass_addr = fetch_req_active ? fetch_pc_pending : pc_out;
+assign ext_mem_bypass_addr = fetch_req_active ? fetch_pc_pending : fetch_addr_selected;
 
 // ─── Outputs ────────────────────────────────────────────────────────────────
 // CRITICAL FIX: Synchronous RAM has 1-cycle latency
@@ -212,6 +220,6 @@ assign if_pc         = fetch_pc_pending;
 assign if_tid        = fetch_tid_pending;
 assign if_valid      = final_valid;
 assign if_inst       = inst_from_mem;
-assign if_pred_taken = fetch_pred_pending;
+assign if_pred_taken = fetch_pred_used_pending;
 
 endmodule
