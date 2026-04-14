@@ -34,6 +34,8 @@ module store_buffer #(
     input  wire [0:0]               flush_tid,
     input  wire [EPOCH_W-1:0]       flush_new_epoch_t0,  // Expected epoch after flush
     input  wire [EPOCH_W-1:0]       flush_new_epoch_t1,
+    input  wire [EPOCH_W-1:0]       current_epoch_t0,
+    input  wire [EPOCH_W-1:0]       current_epoch_t1,
     input  wire                     flush_order_valid,   // 1 for branch redirect, 0 for trap/global flush
     input  wire [ORDER_ID_W-1:0]    flush_order_id,
 
@@ -350,6 +352,7 @@ assign load_hazard = hazard_r;
 
 integer t, j, k;
 reg [EPOCH_W-1:0] flush_expected_epoch;
+reg [EPOCH_W-1:0] alloc_expected_epoch;
 
 // Next-state registers for single-cycle update
 reg [SB_IDX_W-1:0]  sb_head_next  [0:NUM_THREAD-1];
@@ -400,7 +403,6 @@ always @(posedge clk or negedge rstn) begin
             // writes can still drain before/after MRET.
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 if (sb_valid_next[flush_tid][j] && 
-                    (sb_epoch[flush_tid][j] != flush_expected_epoch) &&
                     (flush_order_valid ? (sb_order_id[flush_tid][j] > flush_order_id)
                                       : !sb_committed_next[flush_tid][j])) begin
                     sb_valid_next[flush_tid][j] = 1'b0;
@@ -426,7 +428,9 @@ always @(posedge clk or negedge rstn) begin
         // (older than the flush) must still be enqueued or they'll be lost.
         // During a global flush (!flush_order_valid), block all stores from
         // the flushed thread.
+        alloc_expected_epoch = store_tid ? current_epoch_t1 : current_epoch_t0;
         if (store_req_valid && store_req_accept &&
+            (store_epoch == alloc_expected_epoch) &&
             !(flush && (store_tid == flush_tid) &&
               (!flush_order_valid || (store_order_id > flush_order_id)))) begin
             if (store_tid == 1'b0) begin

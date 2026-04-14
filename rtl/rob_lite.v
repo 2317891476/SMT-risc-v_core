@@ -276,10 +276,11 @@ always @(posedge clk or negedge rstn) begin
             // (Epoch comparison will prevent retirement)
             for (j = 0; j < ROB_DEPTH; j = j + 1) begin
                 if (rob_valid[flush_tid][j] &&
-                    (rob_epoch[flush_tid][j] != flush_new_epoch) &&
                     (!flush_order_valid ||
                      (rob_order_id[flush_tid][j] > flush_order_id) ||
-                     (!rob_complete[flush_tid][j] && (rob_order_id[flush_tid][j] == flush_order_id)))) begin
+                     (!rob_is_mret[flush_tid][j] &&
+                      !rob_complete[flush_tid][j] &&
+                      (rob_order_id[flush_tid][j] == flush_order_id)))) begin
                     rob_flushed[flush_tid][j] <= 1'b1;
                     `ifndef SYNTHESIS
                     $display("[ROB FLUSH] tid=%0d entry_order=%0d flush_order_valid=%0b flush_order=%0d @%0t",

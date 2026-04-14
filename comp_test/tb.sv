@@ -561,13 +561,18 @@ always @(posedge clk) begin
     if (rst) begin
         heartbeat_counter <= heartbeat_counter + 32'd1;
         if (heartbeat_counter % 1000 == 0) begin
-            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b rst=%b @%0t",
+            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b stall=%b rob_stall=%b sb_stall=%b br_pending=%b rob_count=%0d rst=%b @%0t",
                      heartbeat_counter,
                      u_adam_riscv.dec0_pc,
                      u_adam_riscv.if_valid,
                      u_adam_riscv.if_inst,
                      u_adam_riscv.dec0_valid,
                      u_adam_riscv.fb_pop0_valid,
+                     u_adam_riscv.stall,
+                     u_adam_riscv.rob_disp_stall,
+                     u_adam_riscv.sb_disp_stall,
+                     u_adam_riscv.sb_branch_pending_any,
+                     u_adam_riscv.u_rob.rob_count[0],
                      rst,
                      $time);
         end

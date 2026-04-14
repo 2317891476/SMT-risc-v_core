@@ -300,15 +300,20 @@ wire [7:0] flush_new_epoch_t1 = epoch_t1 + 8'd1;
 // Order ID counters: increment on dispatch accept per thread, 16-bit wide
 // These will be updated in the always block after scoreboard signals are defined
 reg [15:0] order_id_t0, order_id_t1;
+reg        mret_pending_t0, mret_pending_t1;
+reg [15:0] mret_pending_order_t0, mret_pending_order_t1;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         epoch_t0   <= 8'd0;
         epoch_t1   <= 8'd0;
     end else begin
-        // Increment epoch on flush
-        if (pipe0_br_ctrl) begin
-            if (pipe0_br_tid == 1'b0)
+        // Increment epoch on any architecturally-visible redirect/flush.
+        // Branches already did this historically; trap enter / MRET must do
+        // the same so younger wrong-path work cannot survive with the old
+        // epoch after the redirect boundary.
+        if (trap_enter || trap_return || pipe0_br_ctrl) begin
+            if ((trap_enter || trap_return) ? 1'b0 : pipe0_br_tid)
                 epoch_t0 <= epoch_t0 + 8'd1;
             else
                 epoch_t1 <= epoch_t1 + 8'd1;
@@ -355,7 +360,11 @@ wire        rob_recover_regs_write;
 wire [0:0]  rob_recover_tid;
 wire [3:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
 wire [4:0]  sb_disp0_tag, sb_disp1_tag;
+wire        iss0_is_csr;
+wire        iss0_is_mret;
+wire [11:0] iss0_csr_addr;
 wire        iss0_is_rocc;
+wire [6:0]  iss0_rocc_funct7;
 reg         retire_seen_r;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -377,6 +386,7 @@ wire        trap_redirect_valid = trap_enter || trap_return;
 wire [31:0] trap_redirect_pc    = trap_enter ? trap_target : 
                                    trap_return ? mepc_out : 32'd0;
 wire [0:0]  trap_redirect_tid   = 1'b0;  // M-mode only, single context
+wire [0:0]  flush_tid_mux       = trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid;
 
 // flush_order_valid: order-based flush for branches and MRET (not trap_enter)
 wire flush_is_order_based = (!trap_redirect_valid && pipe0_br_ctrl) || (trap_return && !trap_enter);
@@ -564,8 +574,18 @@ wire d1_needs_alloc = disp1_valid_pre_rob && dec1_regs_write && (dec1_rd != 5'd0
 assign fl_disp_stall = (d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
                        (d0_needs_alloc || d1_needs_alloc) ? !fl_can_alloc_1 :
                        1'b0;
-wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall;
-wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall && !fl_disp_stall;
+// Never dispatch in the same cycle as a redirect/flush. The IQ flush logic
+// runs before dispatch allocation, so allowing same-cycle dispatch can leak
+// wrong-path entries into the IQs after branch/trap redirects.
+wire dec0_blocked_by_pending_mret =
+    (dec0_tid ? mret_pending_t1 : mret_pending_t0) && !dec0_is_mret;
+wire dec1_blocked_by_pending_mret =
+    ((dec1_tid ? mret_pending_t1 : mret_pending_t0) && !dec1_is_mret) ||
+    (disp0_valid_pre_rob && dec0_is_mret && (dec0_tid == dec1_tid));
+wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
+                         !combined_flush_any && !dec0_blocked_by_pending_mret;
+wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
+                         !combined_flush_any && !dec1_blocked_by_pending_mret;
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
 // disp0 gets current order_id for its thread
@@ -633,22 +653,42 @@ wire        iss0_br_addr_mode, iss0_regs_write;
 wire [2:0]  iss0_fu;
 wire [0:0]  iss0_tid;
 
-// Issue port 1 wires
-wire        iss1_valid;
-wire [4:0]  iss1_tag;
-wire [31:0] iss1_pc, iss1_imm;
-wire [2:0]  iss1_func3;
-wire        iss1_func7;
-wire [4:0]  iss1_rd, iss1_rs1, iss1_rs2;
-wire        iss1_rs1_used, iss1_rs2_used;
-wire [4:0]  iss1_src1_tag, iss1_src2_tag;
-wire        iss1_br, iss1_mem_read, iss1_mem2reg;
-wire [2:0]  iss1_alu_op;
-wire        iss1_mem_write;
-wire [1:0]  iss1_alu_src1, iss1_alu_src2;
-wire        iss1_br_addr_mode, iss1_regs_write;
-wire [2:0]  iss1_fu;
-wire [0:0]  iss1_tid;
+wire        p1_winner_valid;
+wire [1:0]  p1_winner;
+wire        p1_mem_cand_valid;
+wire [4:0]  p1_mem_cand_tag;
+wire [31:0] p1_mem_cand_pc, p1_mem_cand_imm;
+wire [2:0]  p1_mem_cand_func3;
+wire        p1_mem_cand_func7;
+wire [4:0]  p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2;
+wire        p1_mem_cand_rs1_used, p1_mem_cand_rs2_used;
+wire [4:0]  p1_mem_cand_src1_tag, p1_mem_cand_src2_tag;
+wire        p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg;
+wire [2:0]  p1_mem_cand_alu_op;
+wire        p1_mem_cand_mem_write;
+wire [1:0]  p1_mem_cand_alu_src1, p1_mem_cand_alu_src2;
+wire        p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write;
+wire [2:0]  p1_mem_cand_fu;
+wire [0:0]  p1_mem_cand_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_mem_cand_order_id;
+wire [`METADATA_EPOCH_W-1:0]    p1_mem_cand_epoch;
+wire        p1_mul_cand_valid;
+wire [4:0]  p1_mul_cand_tag;
+wire [31:0] p1_mul_cand_pc, p1_mul_cand_imm;
+wire [2:0]  p1_mul_cand_func3;
+wire        p1_mul_cand_func7;
+wire [4:0]  p1_mul_cand_rd, p1_mul_cand_rs1, p1_mul_cand_rs2;
+wire        p1_mul_cand_rs1_used, p1_mul_cand_rs2_used;
+wire [4:0]  p1_mul_cand_src1_tag, p1_mul_cand_src2_tag;
+wire        p1_mul_cand_br, p1_mul_cand_mem_read, p1_mul_cand_mem2reg;
+wire [2:0]  p1_mul_cand_alu_op;
+wire        p1_mul_cand_mem_write;
+wire [1:0]  p1_mul_cand_alu_src1, p1_mul_cand_alu_src2;
+wire        p1_mul_cand_br_addr_mode, p1_mul_cand_regs_write;
+wire [2:0]  p1_mul_cand_fu;
+wire [0:0]  p1_mul_cand_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id;
+wire [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch;
 wire        sb_branch_pending_any;
 wire        sb_debug_br_found_t0;
 wire        sb_debug_branch_in_flight_t0;
@@ -676,8 +716,6 @@ wire [31:0] sb_debug_rs_seq_lo_flat;
 // Issue metadata wires
 wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id;
 wire [`METADATA_EPOCH_W-1:0]    iss0_epoch;
-wire [`METADATA_ORDER_ID_W-1:0] iss1_order_id;
-wire [`METADATA_EPOCH_W-1:0]    iss1_epoch;
 
 // Writeback port wires (from pipes)
 wire        wb0_valid, wb1_valid;
@@ -789,31 +827,63 @@ dispatch_unit #(
     .iss0_order_id     (iss0_order_id     ),
     .iss0_epoch        (iss0_epoch        ),
 
-    // Issue port 1
-    .iss1_valid        (iss1_valid        ),
-    .iss1_tag          (iss1_tag          ),
-    .iss1_pc           (iss1_pc           ),
-    .iss1_imm          (iss1_imm          ),
-    .iss1_func3        (iss1_func3        ),
-    .iss1_func7        (iss1_func7        ),
-    .iss1_rd           (iss1_rd           ),
-    .iss1_rs1          (iss1_rs1          ),
-    .iss1_rs2          (iss1_rs2          ),
-    .iss1_rs1_used     (iss1_rs1_used     ),
-    .iss1_rs2_used     (iss1_rs2_used     ),
-    .iss1_src1_tag     (iss1_src1_tag     ),
-    .iss1_src2_tag     (iss1_src2_tag     ),
-    .iss1_br           (iss1_br           ),
-    .iss1_mem_read     (iss1_mem_read     ),
-    .iss1_mem2reg      (iss1_mem2reg      ),
-    .iss1_alu_op       (iss1_alu_op       ),
-    .iss1_mem_write    (iss1_mem_write    ),
-    .iss1_alu_src1     (iss1_alu_src1     ),
-    .iss1_alu_src2     (iss1_alu_src2     ),
-    .iss1_br_addr_mode (iss1_br_addr_mode ),
-    .iss1_regs_write   (iss1_regs_write   ),
-    .iss1_fu           (iss1_fu           ),
-    .iss1_tid          (iss1_tid          ),
+    // Pipe1 candidate slots
+    .p1_winner_valid   (p1_winner_valid   ),
+    .p1_winner         (p1_winner         ),
+    .p1_mem_cand_valid (p1_mem_cand_valid ),
+    .p1_mem_cand_tag   (p1_mem_cand_tag   ),
+    .p1_mem_cand_pc    (p1_mem_cand_pc    ),
+    .p1_mem_cand_imm   (p1_mem_cand_imm   ),
+    .p1_mem_cand_func3 (p1_mem_cand_func3 ),
+    .p1_mem_cand_func7 (p1_mem_cand_func7 ),
+    .p1_mem_cand_rd    (p1_mem_cand_rd    ),
+    .p1_mem_cand_rs1   (p1_mem_cand_rs1   ),
+    .p1_mem_cand_rs2   (p1_mem_cand_rs2   ),
+    .p1_mem_cand_rs1_used(p1_mem_cand_rs1_used),
+    .p1_mem_cand_rs2_used(p1_mem_cand_rs2_used),
+    .p1_mem_cand_src1_tag(p1_mem_cand_src1_tag),
+    .p1_mem_cand_src2_tag(p1_mem_cand_src2_tag),
+    .p1_mem_cand_br    (p1_mem_cand_br    ),
+    .p1_mem_cand_mem_read(p1_mem_cand_mem_read),
+    .p1_mem_cand_mem2reg(p1_mem_cand_mem2reg),
+    .p1_mem_cand_alu_op(p1_mem_cand_alu_op),
+    .p1_mem_cand_mem_write(p1_mem_cand_mem_write),
+    .p1_mem_cand_alu_src1(p1_mem_cand_alu_src1),
+    .p1_mem_cand_alu_src2(p1_mem_cand_alu_src2),
+    .p1_mem_cand_br_addr_mode(p1_mem_cand_br_addr_mode),
+    .p1_mem_cand_regs_write(p1_mem_cand_regs_write),
+    .p1_mem_cand_fu    (p1_mem_cand_fu    ),
+    .p1_mem_cand_tid   (p1_mem_cand_tid   ),
+    .p1_mem_cand_is_mret(),
+    .p1_mem_cand_order_id(p1_mem_cand_order_id),
+    .p1_mem_cand_epoch (p1_mem_cand_epoch ),
+    .p1_mul_cand_valid (p1_mul_cand_valid ),
+    .p1_mul_cand_tag   (p1_mul_cand_tag   ),
+    .p1_mul_cand_pc    (p1_mul_cand_pc    ),
+    .p1_mul_cand_imm   (p1_mul_cand_imm   ),
+    .p1_mul_cand_func3 (p1_mul_cand_func3 ),
+    .p1_mul_cand_func7 (p1_mul_cand_func7 ),
+    .p1_mul_cand_rd    (p1_mul_cand_rd    ),
+    .p1_mul_cand_rs1   (p1_mul_cand_rs1   ),
+    .p1_mul_cand_rs2   (p1_mul_cand_rs2   ),
+    .p1_mul_cand_rs1_used(p1_mul_cand_rs1_used),
+    .p1_mul_cand_rs2_used(p1_mul_cand_rs2_used),
+    .p1_mul_cand_src1_tag(p1_mul_cand_src1_tag),
+    .p1_mul_cand_src2_tag(p1_mul_cand_src2_tag),
+    .p1_mul_cand_br    (p1_mul_cand_br    ),
+    .p1_mul_cand_mem_read(p1_mul_cand_mem_read),
+    .p1_mul_cand_mem2reg(p1_mul_cand_mem2reg),
+    .p1_mul_cand_alu_op(p1_mul_cand_alu_op),
+    .p1_mul_cand_mem_write(p1_mul_cand_mem_write),
+    .p1_mul_cand_alu_src1(p1_mul_cand_alu_src1),
+    .p1_mul_cand_alu_src2(p1_mul_cand_alu_src2),
+    .p1_mul_cand_br_addr_mode(p1_mul_cand_br_addr_mode),
+    .p1_mul_cand_regs_write(p1_mul_cand_regs_write),
+    .p1_mul_cand_fu    (p1_mul_cand_fu    ),
+    .p1_mul_cand_tid   (p1_mul_cand_tid   ),
+    .p1_mul_cand_is_mret(),
+    .p1_mul_cand_order_id(p1_mul_cand_order_id),
+    .p1_mul_cand_epoch (p1_mul_cand_epoch ),
     .branch_pending_any(sb_branch_pending_any),
     .debug_br_found_t0 (sb_debug_br_found_t0),
     .debug_branch_in_flight_t0(sb_debug_branch_in_flight_t0),
@@ -837,8 +907,6 @@ dispatch_unit #(
     .debug_rs_qj_flat(sb_debug_rs_qj_flat),
     .debug_rs_qk_flat(sb_debug_rs_qk_flat),
     .debug_rs_seq_lo_flat(sb_debug_rs_seq_lo_flat),
-    .iss1_order_id     (iss1_order_id     ),
-    .iss1_epoch        (iss1_epoch        ),
 
     // Writeback ports
     .wb0_valid       (wb0_valid       ),
@@ -869,6 +937,11 @@ dispatch_unit #(
     .rocc_ready      (rocc_cmd_ready),
     .iss0_is_rocc    (iss0_is_rocc)
 );
+
+wire       p1_issue_is_mem     = (p1_winner == 2'b10);
+wire [0:0] p1_issue_arch_tid   = p1_issue_is_mem ? p1_mem_cand_tid : p1_mul_cand_tid;
+wire [4:0] p1_issue_arch_rs1   = p1_issue_is_mem ? p1_mem_cand_rs1 : p1_mul_cand_rs1;
+wire [4:0] p1_issue_arch_rs2   = p1_issue_is_mem ? p1_mem_cand_rs2 : p1_mul_cand_rs2;
 
 // ════════════════════════════════════════════════════════════════════════════
 // ROB Lite (Reorder Buffer for in-order commit)
@@ -1144,9 +1217,9 @@ wire [31:0] ro1_data1, ro1_data2;
 regs_mt #(.N_T(2)) u_regs_mt_p1(
     .clk            (clk             ),
     .rstn           (rstn            ),
-    .r_thread_id    (iss1_tid        ),
-    .r_regs_addr1   (iss1_rs1        ),
-    .r_regs_addr2   (iss1_rs2        ),
+    .r_thread_id    (p1_issue_arch_tid),
+    .r_regs_addr1   (p1_issue_arch_rs1),
+    .r_regs_addr2   (p1_issue_arch_rs2),
     .w_thread_id_0  (w_regs_tid_0    ),
     .w_regs_addr_0  (w_regs_addr_0   ),
     .w_regs_data_0  (w_regs_data_0   ),
@@ -1182,6 +1255,31 @@ wire [31:0] prf_w1_data = wb1_result_data;
 //     2) PRF read -> tagbuf bypass -> ro1
 //   This applies to all builds so the functional timing model stays uniform.
 // ════════════════════════════════════════════════════════════════════════════
+reg         p0_pre_ro_valid;
+reg  [4:0]  p0_pre_ro_tag;
+reg  [31:0] p0_pre_ro_pc;
+reg  [31:0] p0_pre_ro_imm;
+reg  [2:0]  p0_pre_ro_func3;
+reg         p0_pre_ro_func7;
+reg  [4:0]  p0_pre_ro_rd;
+reg  [4:0]  p0_pre_ro_rs1, p0_pre_ro_rs2;
+reg         p0_pre_ro_rs1_used, p0_pre_ro_rs2_used;
+reg  [4:0]  p0_pre_ro_src1_tag, p0_pre_ro_src2_tag;
+reg  [2:0]  p0_pre_ro_alu_op;
+reg  [1:0]  p0_pre_ro_alu_src1, p0_pre_ro_alu_src2;
+reg         p0_pre_ro_br;
+reg         p0_pre_ro_mem_read, p0_pre_ro_mem_write, p0_pre_ro_mem2reg;
+reg         p0_pre_ro_regs_write, p0_pre_ro_br_addr_mode;
+reg  [2:0]  p0_pre_ro_fu;
+reg  [0:0]  p0_pre_ro_tid;
+reg  [`METADATA_ORDER_ID_W-1:0] p0_pre_ro_order_id;
+reg  [`METADATA_EPOCH_W-1:0]    p0_pre_ro_epoch;
+reg  [5:0]  p0_pre_ro_prs1, p0_pre_ro_prs2;
+reg         p0_pre_ro_is_csr, p0_pre_ro_is_mret;
+reg  [11:0] p0_pre_ro_csr_addr;
+reg         p0_pre_ro_is_rocc;
+reg  [6:0]  p0_pre_ro_rocc_funct7;
+
 reg         p1_pre_ro_valid;
 reg  [4:0]  p1_pre_ro_tag;
 reg  [31:0] p1_pre_ro_pc;
@@ -1205,40 +1303,108 @@ reg  [5:0]  p1_pre_ro_prs1, p1_pre_ro_prs2;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
+        p0_pre_ro_valid <= 1'b0;
         p1_pre_ro_valid <= 1'b0;
     end else begin
-        p1_pre_ro_valid <= iss1_valid;
-        if (iss1_valid) begin
-            p1_pre_ro_tag          <= iss1_tag;
-            p1_pre_ro_pc           <= iss1_pc;
-            p1_pre_ro_imm          <= iss1_imm;
-            p1_pre_ro_func3        <= iss1_func3;
-            p1_pre_ro_func7        <= iss1_func7;
-            p1_pre_ro_rd           <= iss1_rd;
-            p1_pre_ro_rs1          <= iss1_rs1;
-            p1_pre_ro_rs2          <= iss1_rs2;
-            p1_pre_ro_rs1_used     <= iss1_rs1_used;
-            p1_pre_ro_rs2_used     <= iss1_rs2_used;
-            p1_pre_ro_src1_tag     <= iss1_src1_tag;
-            p1_pre_ro_src2_tag     <= iss1_src2_tag;
-            p1_pre_ro_alu_op       <= iss1_alu_op;
-            p1_pre_ro_alu_src1     <= iss1_alu_src1;
-            p1_pre_ro_alu_src2     <= iss1_alu_src2;
-            p1_pre_ro_br           <= iss1_br;
-            p1_pre_ro_mem_read     <= iss1_mem_read;
-            p1_pre_ro_mem_write    <= iss1_mem_write;
-            p1_pre_ro_mem2reg      <= iss1_mem2reg;
-            p1_pre_ro_regs_write   <= iss1_regs_write;
-            p1_pre_ro_br_addr_mode <= iss1_br_addr_mode;
-            p1_pre_ro_fu           <= iss1_fu;
-            p1_pre_ro_tid          <= iss1_tid;
-            p1_pre_ro_order_id     <= iss1_order_id;
-            p1_pre_ro_epoch        <= iss1_epoch;
-            p1_pre_ro_prs1         <= tag_prs1_map[iss1_tag];
-            p1_pre_ro_prs2         <= tag_prs2_map[iss1_tag];
+        p0_pre_ro_valid <= iss0_valid;
+        if (iss0_valid) begin
+            p0_pre_ro_tag          <= iss0_tag;
+            p0_pre_ro_pc           <= iss0_pc;
+            p0_pre_ro_imm          <= iss0_imm;
+            p0_pre_ro_func3        <= iss0_func3;
+            p0_pre_ro_func7        <= iss0_func7;
+            p0_pre_ro_rd           <= iss0_rd;
+            p0_pre_ro_rs1          <= iss0_rs1;
+            p0_pre_ro_rs2          <= iss0_rs2;
+            p0_pre_ro_rs1_used     <= iss0_rs1_used;
+            p0_pre_ro_rs2_used     <= iss0_rs2_used;
+            p0_pre_ro_src1_tag     <= iss0_src1_tag;
+            p0_pre_ro_src2_tag     <= iss0_src2_tag;
+            p0_pre_ro_alu_op       <= iss0_alu_op;
+            p0_pre_ro_alu_src1     <= iss0_alu_src1;
+            p0_pre_ro_alu_src2     <= iss0_alu_src2;
+            p0_pre_ro_br           <= iss0_br;
+            p0_pre_ro_mem_read     <= iss0_mem_read;
+            p0_pre_ro_mem_write    <= iss0_mem_write;
+            p0_pre_ro_mem2reg      <= iss0_mem2reg;
+            p0_pre_ro_regs_write   <= iss0_regs_write;
+            p0_pre_ro_br_addr_mode <= iss0_br_addr_mode;
+            p0_pre_ro_fu           <= iss0_fu;
+            p0_pre_ro_tid          <= iss0_tid;
+            p0_pre_ro_order_id     <= iss0_order_id;
+            p0_pre_ro_epoch        <= iss0_epoch;
+            p0_pre_ro_prs1         <= tag_prs1_map[iss0_tag];
+            p0_pre_ro_prs2         <= tag_prs2_map[iss0_tag];
+            p0_pre_ro_is_csr       <= iss0_is_csr;
+            p0_pre_ro_is_mret      <= iss0_is_mret;
+            p0_pre_ro_csr_addr     <= iss0_csr_addr;
+            p0_pre_ro_is_rocc      <= iss0_is_rocc;
+            p0_pre_ro_rocc_funct7  <= iss0_rocc_funct7;
+        end
+
+        p1_pre_ro_valid <= p1_winner_valid;
+        if (p1_winner_valid) begin
+            if (p1_issue_is_mem) begin
+                p1_pre_ro_tag          <= p1_mem_cand_tag;
+                p1_pre_ro_pc           <= p1_mem_cand_pc;
+                p1_pre_ro_imm          <= p1_mem_cand_imm;
+                p1_pre_ro_func3        <= p1_mem_cand_func3;
+                p1_pre_ro_func7        <= p1_mem_cand_func7;
+                p1_pre_ro_rd           <= p1_mem_cand_rd;
+                p1_pre_ro_rs1          <= p1_mem_cand_rs1;
+                p1_pre_ro_rs2          <= p1_mem_cand_rs2;
+                p1_pre_ro_rs1_used     <= p1_mem_cand_rs1_used;
+                p1_pre_ro_rs2_used     <= p1_mem_cand_rs2_used;
+                p1_pre_ro_src1_tag     <= p1_mem_cand_src1_tag;
+                p1_pre_ro_src2_tag     <= p1_mem_cand_src2_tag;
+                p1_pre_ro_alu_op       <= p1_mem_cand_alu_op;
+                p1_pre_ro_alu_src1     <= p1_mem_cand_alu_src1;
+                p1_pre_ro_alu_src2     <= p1_mem_cand_alu_src2;
+                p1_pre_ro_br           <= p1_mem_cand_br;
+                p1_pre_ro_mem_read     <= p1_mem_cand_mem_read;
+                p1_pre_ro_mem_write    <= p1_mem_cand_mem_write;
+                p1_pre_ro_mem2reg      <= p1_mem_cand_mem2reg;
+                p1_pre_ro_regs_write   <= p1_mem_cand_regs_write;
+                p1_pre_ro_br_addr_mode <= p1_mem_cand_br_addr_mode;
+                p1_pre_ro_fu           <= p1_mem_cand_fu;
+                p1_pre_ro_tid          <= p1_mem_cand_tid;
+                p1_pre_ro_order_id     <= p1_mem_cand_order_id;
+                p1_pre_ro_epoch        <= p1_mem_cand_epoch;
+                p1_pre_ro_prs1         <= tag_prs1_map[p1_mem_cand_tag];
+                p1_pre_ro_prs2         <= tag_prs2_map[p1_mem_cand_tag];
+            end else begin
+                p1_pre_ro_tag          <= p1_mul_cand_tag;
+                p1_pre_ro_pc           <= p1_mul_cand_pc;
+                p1_pre_ro_imm          <= p1_mul_cand_imm;
+                p1_pre_ro_func3        <= p1_mul_cand_func3;
+                p1_pre_ro_func7        <= p1_mul_cand_func7;
+                p1_pre_ro_rd           <= p1_mul_cand_rd;
+                p1_pre_ro_rs1          <= p1_mul_cand_rs1;
+                p1_pre_ro_rs2          <= p1_mul_cand_rs2;
+                p1_pre_ro_rs1_used     <= p1_mul_cand_rs1_used;
+                p1_pre_ro_rs2_used     <= p1_mul_cand_rs2_used;
+                p1_pre_ro_src1_tag     <= p1_mul_cand_src1_tag;
+                p1_pre_ro_src2_tag     <= p1_mul_cand_src2_tag;
+                p1_pre_ro_alu_op       <= p1_mul_cand_alu_op;
+                p1_pre_ro_alu_src1     <= p1_mul_cand_alu_src1;
+                p1_pre_ro_alu_src2     <= p1_mul_cand_alu_src2;
+                p1_pre_ro_br           <= p1_mul_cand_br;
+                p1_pre_ro_mem_read     <= p1_mul_cand_mem_read;
+                p1_pre_ro_mem_write    <= p1_mul_cand_mem_write;
+                p1_pre_ro_mem2reg      <= p1_mul_cand_mem2reg;
+                p1_pre_ro_regs_write   <= p1_mul_cand_regs_write;
+                p1_pre_ro_br_addr_mode <= p1_mul_cand_br_addr_mode;
+                p1_pre_ro_fu           <= p1_mul_cand_fu;
+                p1_pre_ro_tid          <= p1_mul_cand_tid;
+                p1_pre_ro_order_id     <= p1_mul_cand_order_id;
+                p1_pre_ro_epoch        <= p1_mul_cand_epoch;
+                p1_pre_ro_prs1         <= tag_prs1_map[p1_mul_cand_tag];
+                p1_pre_ro_prs2         <= tag_prs2_map[p1_mul_cand_tag];
+            end
         end
     end
 end
+
 
 phys_regfile #(
     .NUM_PHYS_REG (48),
@@ -1247,8 +1413,8 @@ phys_regfile #(
     .clk    (clk),
     .rstn   (rstn),
     // Read ports (using phys reg addresses from tag→prs sideband maps)
-    .r0_tid  (iss0_tid),  .r0_addr (tag_prs1_map[iss0_tag]), .r0_data (prf_r0_data),
-    .r1_tid  (iss0_tid),  .r1_addr (tag_prs2_map[iss0_tag]), .r1_data (prf_r1_data),
+    .r0_tid  (p0_pre_ro_tid),  .r0_addr (p0_pre_ro_prs1), .r0_data (prf_r0_data),
+    .r1_tid  (p0_pre_ro_tid),  .r1_addr (p0_pre_ro_prs2), .r1_data (prf_r1_data),
     .r2_tid  (p1_pre_ro_tid),  .r2_addr (p1_pre_ro_prs1), .r2_data (prf_r2_data),
     .r3_tid  (p1_pre_ro_tid),  .r3_addr (p1_pre_ro_prs2), .r3_data (prf_r3_data),
     // Write ports (at WB time – speculative writes)
@@ -1261,18 +1427,75 @@ phys_regfile #(
 wire disp0_accepted = disp0_valid_gated && !sb_disp_stall;
 wire disp1_accepted = disp1_valid_gated && !sb_disp_stall && !sb_disp1_blocked;
 
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        mret_pending_t0       <= 1'b0;
+        mret_pending_t1       <= 1'b0;
+        mret_pending_order_t0 <= 16'd0;
+        mret_pending_order_t1 <= 16'd0;
+    end else begin
+        if (combined_flush_any) begin
+            if (!flush_is_order_based) begin
+                if (flush_tid_mux == 1'b0)
+                    mret_pending_t0 <= 1'b0;
+                else
+                    mret_pending_t1 <= 1'b0;
+            end else begin
+                if (mret_pending_t0 && flush_tid_mux == 1'b0 &&
+                    mret_pending_order_t0 > flush_order_id_mux)
+                    mret_pending_t0 <= 1'b0;
+                if (mret_pending_t1 && flush_tid_mux == 1'b1 &&
+                    mret_pending_order_t1 > flush_order_id_mux)
+                    mret_pending_t1 <= 1'b0;
+            end
+        end
+
+        if (pipe0_mret_valid) begin
+            if (p0_pre_ro_tid == 1'b0)
+                mret_pending_t0 <= 1'b0;
+            else
+                mret_pending_t1 <= 1'b0;
+        end
+
+        if (disp0_accepted && dec0_is_mret) begin
+            if (dec0_tid == 1'b0) begin
+                mret_pending_t0       <= 1'b1;
+                mret_pending_order_t0 <= disp0_order_id;
+            end else begin
+                mret_pending_t1       <= 1'b1;
+                mret_pending_order_t1 <= disp0_order_id;
+            end
+        end
+        if (disp1_accepted && dec1_is_mret) begin
+            if (dec1_tid == 1'b0) begin
+                mret_pending_t0       <= 1'b1;
+                mret_pending_order_t0 <= disp1_order_id;
+            end else begin
+                mret_pending_t1       <= 1'b1;
+                mret_pending_order_t1 <= disp1_order_id;
+            end
+        end
+    end
+end
+
 // Best-effort trap resume PC for interrupt entry.
 // Prefer the oldest visible in-flight PC, and avoid overwriting it with
 // speculative control-flow fall-through PCs from decode/fetch.
 reg [31:0] trap_pc_r;
-wire trap_pc_speculative = sb_branch_pending_any || pipe0_br_ctrl || pipe0_br_complete;
+wire trap_pc_speculative = sb_branch_pending_any ||
+                           pipe0_br_ctrl ||
+                           pipe0_br_complete ||
+                           mret_pending_t0 ||
+                           mret_pending_t1 ||
+                           (p0_pre_ro_valid && p0_pre_ro_is_mret) ||
+                           pipe0_mret_valid;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         trap_pc_r <= 32'd0;
-    end else if (iss0_valid && !iss0_br && !trap_pc_speculative) begin
-        trap_pc_r <= iss0_pc;
+    end else if (p0_pre_ro_valid && !p0_pre_ro_br && !trap_pc_speculative) begin
+        trap_pc_r <= p0_pre_ro_pc;
     end else if (dec0_valid && !dec0_br && !trap_pc_speculative) begin
         trap_pc_r <= dec0_pc;
     end else if (fb_pop0_valid && trap_pc_fetch_safe) begin
@@ -1316,12 +1539,12 @@ end
 // decoder metadata around the tag RAM when the issue tag matches a new dispatch.
 wire iss0_tag_hits_disp0 = disp0_accepted && (iss0_tag == sb_disp0_tag) && (iss0_tid == dec0_tid);
 wire iss0_tag_hits_disp1 = disp1_accepted && (iss0_tag == sb_disp1_tag) && (iss0_tid == dec1_tid);
-wire        iss0_is_csr  = iss0_tag_hits_disp0 ? dec0_is_csr  :
-                           iss0_tag_hits_disp1 ? dec1_is_csr  : rs_is_csr[iss0_tag];
-wire        iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
-                           iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
-wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
-                            iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
+assign iss0_is_csr  = iss0_tag_hits_disp0 ? dec0_is_csr  :
+                      iss0_tag_hits_disp1 ? dec1_is_csr  : rs_is_csr[iss0_tag];
+assign iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
+                      iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
+assign iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
+                       iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
 
 // Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
 // FPGA_MODE: RoCC not synthesized, hardwire to 0 to cut cross-module feedback path
@@ -1331,8 +1554,8 @@ assign iss0_is_rocc          = 1'b0;
 assign iss0_is_rocc          = iss0_tag_hits_disp0 ? dec0_is_rocc :
                                iss0_tag_hits_disp1 ? dec1_is_rocc : rs_is_rocc[iss0_tag];
 `endif
-wire [6:0]  iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
-                               iss0_tag_hits_disp1 ? dec1_rocc_funct7 : rs_rocc_funct7[iss0_tag];
+assign iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
+                          iss0_tag_hits_disp1 ? dec1_rocc_funct7 : rs_rocc_funct7[iss0_tag];
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -1391,11 +1614,11 @@ wire        p0_tagbuf_a_valid, p0_tagbuf_b_valid;
 wire [31:0] p0_tagbuf_a_data,  p0_tagbuf_b_data;
 
 bypass_network u_bypass0(
-    .ro_rs1_addr     (iss0_rs1       ),
-    .ro_rs2_addr     (iss0_rs2       ),
+    .ro_rs1_addr     (p0_pre_ro_rs1  ),
+    .ro_rs2_addr     (p0_pre_ro_rs2  ),
     .ro_rs1_regdata  (prf_r0_data    ),
     .ro_rs2_regdata  (prf_r1_data    ),
-    .ro_tid          (iss0_tid       ),
+    .ro_tid          (p0_pre_ro_tid  ),
     .tagbuf_rs1_valid(p0_tagbuf_a_valid),
     .tagbuf_rs1_data (p0_tagbuf_a_data ),
     .tagbuf_rs2_valid(p0_tagbuf_b_valid),
@@ -1464,14 +1687,14 @@ bypass_network u_bypass1(
 
     // RoCC Command Interface: When iss0_is_rocc, bypass exec_pipe0 and send to RoCC
     // Backpressure: only assert valid if RoCC is ready, and only mark RS issued when accepted
-    assign rocc_cmd_valid    = iss0_valid && iss0_is_rocc && rocc_cmd_ready;
-    assign rocc_cmd_funct7   = iss0_rocc_funct7;
-    assign rocc_cmd_funct3   = iss0_func3;
-    assign rocc_cmd_rd       = iss0_rd;
+    assign rocc_cmd_valid    = p0_pre_ro_valid && p0_pre_ro_is_rocc && rocc_cmd_ready;
+    assign rocc_cmd_funct7   = p0_pre_ro_rocc_funct7;
+    assign rocc_cmd_funct3   = p0_pre_ro_func3;
+    assign rocc_cmd_rd       = p0_pre_ro_rd;
     assign rocc_cmd_rs1_data = byp0_op_a;  // RS1 data from bypass network
     assign rocc_cmd_rs2_data = byp0_op_b;  // RS2 data from bypass network
-    assign rocc_cmd_tag      = iss0_tag;
-    assign rocc_cmd_tid      = iss0_tid;
+    assign rocc_cmd_tag      = p0_pre_ro_tag;
+    assign rocc_cmd_tid      = p0_pre_ro_tid;
 
     // RoCC is always ready to accept response
     assign rocc_resp_ready   = 1'b1;
@@ -1505,8 +1728,8 @@ always @(posedge clk or negedge rstn) begin
 
         // Mark in-flight when RoCC command is accepted
         if (rocc_cmd_valid && rocc_cmd_ready) begin
-            rocc_cmd_epoch[rocc_cmd_tag] <= iss0_epoch;
-            rocc_cmd_tid_per_tag[rocc_cmd_tag] <= iss0_tid;
+            rocc_cmd_epoch[rocc_cmd_tag] <= p0_pre_ro_epoch;
+            rocc_cmd_tid_per_tag[rocc_cmd_tag] <= p0_pre_ro_tid;
             rocc_cmd_in_flight[rocc_cmd_tag] <= 1'b1;
         end
 
@@ -1526,34 +1749,34 @@ wire rocc_resp_epoch_match = (rocc_cmd_epoch[rocc_resp_tag] == current_epoch_for
 wire rocc_resp_not_flushed = rocc_resp_epoch_match && rocc_cmd_in_flight[rocc_resp_tag];
 
 // ─── Execution Pipe 0 (INT + Branch) ───────────────────────────────────────
-// When iss0_is_rocc, don't send to exec_pipe0 (RoCC bypasses it)
-wire iss0_to_pipe0_valid = iss0_valid && !iss0_is_rocc;
+// When p0_pre_ro_is_rocc, don't send to exec_pipe0 (RoCC bypasses it)
+wire p0_pre_ro_to_pipe0_valid = p0_pre_ro_valid && !p0_pre_ro_is_rocc;
 
 exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .clk              (clk              ),
     .rstn             (rstn             ),
-    .in_valid         (iss0_to_pipe0_valid),
-    .in_tag           (iss0_tag         ),
-    .in_pc            (iss0_pc          ),
+    .in_valid         (p0_pre_ro_to_pipe0_valid),
+    .in_tag           (p0_pre_ro_tag    ),
+    .in_pc            (p0_pre_ro_pc     ),
     .in_op_a          (byp0_op_a        ),
     .in_op_b          (byp0_op_b        ),
-    .in_rs1_idx       (iss0_rs1         ),
-    .in_imm           (iss0_imm         ),
-    .in_order_id      (iss0_order_id    ),
-    .in_func3         (iss0_func3       ),
-    .in_func7         (iss0_func7       ),
-    .in_alu_op        (iss0_alu_op      ),
-    .in_alu_src1      (iss0_alu_src1    ),
-    .in_alu_src2      (iss0_alu_src2    ),
-    .in_br_addr_mode  (iss0_br_addr_mode),
-    .in_br            (iss0_br          ),
-    .in_rd            (iss0_rd          ),
-    .in_regs_write    (iss0_regs_write  ),
-    .in_fu            (iss0_fu          ),
-    .in_tid           (iss0_tid         ),
-    .in_is_csr        (iss0_is_csr      ),
-    .in_is_mret       (iss0_is_mret     ),
-    .in_csr_addr      (iss0_csr_addr    ),
+    .in_rs1_idx       (p0_pre_ro_rs1    ),
+    .in_imm           (p0_pre_ro_imm    ),
+    .in_order_id      (p0_pre_ro_order_id),
+    .in_func3         (p0_pre_ro_func3  ),
+    .in_func7         (p0_pre_ro_func7  ),
+    .in_alu_op        (p0_pre_ro_alu_op ),
+    .in_alu_src1      (p0_pre_ro_alu_src1),
+    .in_alu_src2      (p0_pre_ro_alu_src2),
+    .in_br_addr_mode  (p0_pre_ro_br_addr_mode),
+    .in_br            (p0_pre_ro_br     ),
+    .in_rd            (p0_pre_ro_rd     ),
+    .in_regs_write    (p0_pre_ro_regs_write),
+    .in_fu            (p0_pre_ro_fu     ),
+    .in_tid           (p0_pre_ro_tid    ),
+    .in_is_csr        (p0_pre_ro_is_csr ),
+    .in_is_mret       (p0_pre_ro_is_mret),
+    .in_csr_addr      (p0_pre_ro_csr_addr),
     .csr_rdata        (csr_rdata        ),
     .out_valid        (p0_ex_valid      ),
     .out_tag          (p0_ex_tag        ),
@@ -1765,6 +1988,8 @@ lsu_shell #(
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
+    .current_epoch_t0   (epoch_t0             ),
+    .current_epoch_t1   (epoch_t1             ),
     .flush_order_valid  (flush_is_order_based),
     .flush_order_id     (flush_order_id_mux),
 
@@ -1962,11 +2187,11 @@ always @(posedge clk or negedge rstn) begin
         debug_branch_issue_count_r <= 8'd0;
         debug_branch_complete_count_r <= 8'd0;
     end else begin
-        if (iss0_valid)
-            debug_last_iss0_pc_lo_r <= iss0_pc[7:0];
-        if (iss1_valid)
-            debug_last_iss1_pc_lo_r <= iss1_pc[7:0];
-        if (iss0_valid && iss0_br)
+        if (p0_pre_ro_valid)
+            debug_last_iss0_pc_lo_r <= p0_pre_ro_pc[7:0];
+        if (p1_winner_valid)
+            debug_last_iss1_pc_lo_r <= p1_issue_is_mem ? p1_mem_cand_pc[7:0] : p1_mul_cand_pc[7:0];
+        if (p0_pre_ro_valid && p0_pre_ro_br)
             debug_branch_issue_count_r <= debug_branch_issue_count_r + 8'd1;
         if (pipe0_br_complete)
             debug_branch_complete_count_r <= debug_branch_complete_count_r + 8'd1;
@@ -1997,10 +2222,10 @@ always @(posedge clk or negedge rstn) begin
     end
 end
 
-assign p0_tagbuf_a_valid = (iss0_src1_tag != 5'd0) && result_valid[iss0_src1_tag];
-assign p0_tagbuf_a_data  = result_buffer[iss0_src1_tag];
-assign p0_tagbuf_b_valid = (iss0_src2_tag != 5'd0) && result_valid[iss0_src2_tag];
-assign p0_tagbuf_b_data  = result_buffer[iss0_src2_tag];
+assign p0_tagbuf_a_valid = (p0_pre_ro_src1_tag != 5'd0) && result_valid[p0_pre_ro_src1_tag];
+assign p0_tagbuf_a_data  = result_buffer[p0_pre_ro_src1_tag];
+assign p0_tagbuf_b_valid = (p0_pre_ro_src2_tag != 5'd0) && result_valid[p0_pre_ro_src2_tag];
+assign p0_tagbuf_b_data  = result_buffer[p0_pre_ro_src2_tag];
 assign p1_tagbuf_a_valid = (p1_pre_ro_src1_tag != 5'd0) && result_valid[p1_pre_ro_src1_tag];
 assign p1_tagbuf_a_data  = result_buffer[p1_pre_ro_src1_tag];
 assign p1_tagbuf_b_valid = (p1_pre_ro_src2_tag != 5'd0) && result_valid[p1_pre_ro_src2_tag];
@@ -2031,7 +2256,7 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .clk             (clk               ),
     .rstn            (rstn              ),
     .csr_valid       (pipe0_csr_valid   ),
-    .csr_addr        (iss0_csr_addr     ),
+    .csr_addr        (p0_pre_ro_csr_addr),
     .csr_op          (pipe0_csr_op      ),
     .csr_wdata       (pipe0_csr_wdata   ),
     .csr_rdata       (csr_rdata         ),

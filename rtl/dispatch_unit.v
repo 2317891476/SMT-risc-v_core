@@ -122,30 +122,62 @@ module dispatch_unit #(
     output wire [`METADATA_EPOCH_W-1:0]    iss0_epoch,
 
     // ─── Issue Port 1 (Pipe1: MEM/MUL) ─────────────────────────
-    output wire        iss1_valid,
-    output wire [RS_TAG_W-1:0] iss1_tag,
-    output wire [31:0] iss1_pc,
-    output wire [31:0] iss1_imm,
-    output wire [2:0]  iss1_func3,
-    output wire        iss1_func7,
-    output wire [4:0]  iss1_rd,
-    output wire [4:0]  iss1_rs1,
-    output wire [4:0]  iss1_rs2,
-    output wire        iss1_rs1_used,
-    output wire        iss1_rs2_used,
-    output wire [RS_TAG_W-1:0] iss1_src1_tag,
-    output wire [RS_TAG_W-1:0] iss1_src2_tag,
-    output wire        iss1_br,
-    output wire        iss1_mem_read,
-    output wire        iss1_mem2reg,
-    output wire [2:0]  iss1_alu_op,
-    output wire        iss1_mem_write,
-    output wire [1:0]  iss1_alu_src1,
-    output wire [1:0]  iss1_alu_src2,
-    output wire        iss1_br_addr_mode,
-    output wire        iss1_regs_write,
-    output wire [2:0]  iss1_fu,
-    output wire [0:0]  iss1_tid,
+    output wire        p1_winner_valid,
+    output wire [1:0]  p1_winner,
+    output reg         p1_mem_cand_valid,
+    output reg  [RS_TAG_W-1:0] p1_mem_cand_tag,
+    output reg  [31:0] p1_mem_cand_pc,
+    output reg  [31:0] p1_mem_cand_imm,
+    output reg  [2:0]  p1_mem_cand_func3,
+    output reg         p1_mem_cand_func7,
+    output reg  [4:0]  p1_mem_cand_rd,
+    output reg  [4:0]  p1_mem_cand_rs1,
+    output reg  [4:0]  p1_mem_cand_rs2,
+    output reg         p1_mem_cand_rs1_used,
+    output reg         p1_mem_cand_rs2_used,
+    output reg  [RS_TAG_W-1:0] p1_mem_cand_src1_tag,
+    output reg  [RS_TAG_W-1:0] p1_mem_cand_src2_tag,
+    output reg         p1_mem_cand_br,
+    output reg         p1_mem_cand_mem_read,
+    output reg         p1_mem_cand_mem2reg,
+    output reg  [2:0]  p1_mem_cand_alu_op,
+    output reg         p1_mem_cand_mem_write,
+    output reg  [1:0]  p1_mem_cand_alu_src1,
+    output reg  [1:0]  p1_mem_cand_alu_src2,
+    output reg         p1_mem_cand_br_addr_mode,
+    output reg         p1_mem_cand_regs_write,
+    output reg  [2:0]  p1_mem_cand_fu,
+    output reg  [0:0]  p1_mem_cand_tid,
+    output reg         p1_mem_cand_is_mret,
+    output reg  [`METADATA_ORDER_ID_W-1:0] p1_mem_cand_order_id,
+    output reg  [`METADATA_EPOCH_W-1:0]    p1_mem_cand_epoch,
+    output reg         p1_mul_cand_valid,
+    output reg  [RS_TAG_W-1:0] p1_mul_cand_tag,
+    output reg  [31:0] p1_mul_cand_pc,
+    output reg  [31:0] p1_mul_cand_imm,
+    output reg  [2:0]  p1_mul_cand_func3,
+    output reg         p1_mul_cand_func7,
+    output reg  [4:0]  p1_mul_cand_rd,
+    output reg  [4:0]  p1_mul_cand_rs1,
+    output reg  [4:0]  p1_mul_cand_rs2,
+    output reg         p1_mul_cand_rs1_used,
+    output reg         p1_mul_cand_rs2_used,
+    output reg  [RS_TAG_W-1:0] p1_mul_cand_src1_tag,
+    output reg  [RS_TAG_W-1:0] p1_mul_cand_src2_tag,
+    output reg         p1_mul_cand_br,
+    output reg         p1_mul_cand_mem_read,
+    output reg         p1_mul_cand_mem2reg,
+    output reg  [2:0]  p1_mul_cand_alu_op,
+    output reg         p1_mul_cand_mem_write,
+    output reg  [1:0]  p1_mul_cand_alu_src1,
+    output reg  [1:0]  p1_mul_cand_alu_src2,
+    output reg         p1_mul_cand_br_addr_mode,
+    output reg         p1_mul_cand_regs_write,
+    output reg  [2:0]  p1_mul_cand_fu,
+    output reg  [0:0]  p1_mul_cand_tid,
+    output reg         p1_mul_cand_is_mret,
+    output reg  [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id,
+    output reg  [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch,
     output wire        branch_pending_any,
     output wire        debug_br_found_t0,
     output wire        debug_branch_in_flight_t0,
@@ -169,8 +201,6 @@ module dispatch_unit #(
     output wire [15:0] debug_rs_qj_flat,
     output wire [15:0] debug_rs_qk_flat,
     output wire [31:0] debug_rs_seq_lo_flat,
-    output wire [`METADATA_ORDER_ID_W-1:0] iss1_order_id,
-    output wire [`METADATA_EPOCH_W-1:0]    iss1_epoch,
 
     // ─── Writeback Ports ────────────────────────────────────────
     input  wire        wb0_valid,
@@ -203,6 +233,12 @@ module dispatch_unit #(
     input  wire        rocc_ready,
     output wire        iss0_is_rocc
 );
+
+localparam P1_CAND_BUNDLE_W = (RS_TAG_W * 3) + 32 + 32 + 3 + 1 +
+                              5 + 5 + 5 + 1 + 1 +
+                              1 + 1 + 1 + 3 + 1 + 2 + 2 + 1 + 1 +
+                              3 + 1 + 1 +
+                              `METADATA_ORDER_ID_W + `METADATA_EPOCH_W;
 
 // ═════════════════════════════════════════════════════════════════
 // Tag Pool (tags 1 .. RS_DEPTH)
@@ -835,8 +871,8 @@ issue_queue #(
     .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
     .older_store_valid_t1   (1'b0),
     .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_inhibit_t0(mem_fu_busy),
-    .issue_inhibit_t1(mem_fu_busy),
+    .issue_inhibit_t0(mem_issue_inhibit),
+    .issue_inhibit_t1(mem_issue_inhibit),
     .oldest_store_valid_t0   (mem_oldest_store_valid_t0),
     .oldest_store_order_id_t0(mem_oldest_store_order_id_t0),
     .oldest_store_valid_t1   (mem_oldest_store_valid_t1),
@@ -965,8 +1001,8 @@ issue_queue #(
     .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
     .older_store_valid_t1   (1'b0),
     .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_inhibit_t0(mul_fu_busy),
-    .issue_inhibit_t1(mul_fu_busy),
+    .issue_inhibit_t0(mul_issue_inhibit),
+    .issue_inhibit_t1(mul_issue_inhibit),
     .oldest_store_valid_t0(),
     .oldest_store_order_id_t0(),
     .oldest_store_valid_t1(),
@@ -986,18 +1022,101 @@ issue_queue #(
 reg mem_fu_busy, mul_fu_busy;
 reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
 reg [0:0]                      mem_fu_tid;
+wire mem_issue_inhibit = mem_fu_busy ||
+                         (p1_mem_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b10));
+wire mul_issue_inhibit = mul_fu_busy ||
+                         (p1_mul_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b11));
 
 wire mem_fu_flush_kill = mem_fu_busy &&
                          (mem_fu_tid == flush_tid) &&
                          (!flush_order_valid ||
                           (mem_fu_order_id > flush_order_id));
+wire p1_mem_cand_flush_kill = flush &&
+                              p1_mem_cand_valid &&
+                              (p1_mem_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_mem_cand_order_id > flush_order_id));
+wire p1_mul_cand_flush_kill = flush &&
+                              p1_mul_cand_valid &&
+                              (p1_mul_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_mul_cand_order_id > flush_order_id));
+wire mem_raw_issue_flush_kill = flush &&
+                                mem_iss_valid &&
+                                (mem_iss_tid == flush_tid) &&
+                                (!flush_order_valid ||
+                                 (mem_iss_order_id > flush_order_id));
+wire mul_raw_issue_flush_kill = flush &&
+                                mul_iss_valid &&
+                                (mul_iss_tid == flush_tid) &&
+                                (!flush_order_valid ||
+                                 (mul_iss_order_id > flush_order_id));
+wire p1_mem_cand_arb_valid = p1_mem_cand_valid &&
+                             !p1_mem_cand_flush_kill &&
+                             !mem_fu_busy;
+wire p1_mul_cand_arb_valid = p1_mul_cand_valid &&
+                             !p1_mul_cand_flush_kill &&
+                             !mul_fu_busy;
+wire mem_cand_consume = p1_winner_valid && (p1_winner == 2'b10);
+wire mem_cand_raw_valid = mem_iss_valid && !mem_raw_issue_flush_kill;
+wire mem_cand_clear = p1_mem_cand_flush_kill ||
+                      (mem_cand_consume && !mem_cand_raw_valid);
+wire mem_cand_write_en = !p1_mem_cand_flush_kill &&
+                         mem_cand_raw_valid &&
+                         (!p1_mem_cand_valid || mem_cand_consume);
+wire [P1_CAND_BUNDLE_W-1:0] mem_cand_next_bundle = {
+    mem_iss_tag, mem_iss_pc, mem_iss_imm, mem_iss_func3, mem_iss_func7,
+    mem_iss_rd, mem_iss_rs1, mem_iss_rs2, mem_iss_rs1_used, mem_iss_rs2_used,
+    mem_iss_src1_tag, mem_iss_src2_tag, mem_iss_br, mem_iss_mem_read, mem_iss_mem2reg,
+    mem_iss_alu_op, mem_iss_mem_write, mem_iss_alu_src1, mem_iss_alu_src2,
+    mem_iss_br_addr_mode, mem_iss_regs_write, mem_iss_fu, mem_iss_tid,
+    mem_iss_is_mret, mem_iss_order_id, mem_iss_epoch
+};
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        mem_fu_busy     <= 1'b0;
-        mul_fu_busy     <= 1'b0;
-        mem_fu_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
-        mem_fu_tid      <= 1'b0;
+        mem_fu_busy              <= 1'b0;
+        mul_fu_busy              <= 1'b0;
+        mem_fu_order_id          <= {`METADATA_ORDER_ID_W{1'b0}};
+        mem_fu_tid               <= 1'b0;
+        p1_mem_cand_valid        <= 1'b0;
+        {
+            p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_imm, p1_mem_cand_func3, p1_mem_cand_func7,
+            p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2, p1_mem_cand_rs1_used, p1_mem_cand_rs2_used,
+            p1_mem_cand_src1_tag, p1_mem_cand_src2_tag, p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg,
+            p1_mem_cand_alu_op, p1_mem_cand_mem_write, p1_mem_cand_alu_src1, p1_mem_cand_alu_src2,
+            p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write, p1_mem_cand_fu, p1_mem_cand_tid,
+            p1_mem_cand_is_mret, p1_mem_cand_order_id, p1_mem_cand_epoch
+        } <= {P1_CAND_BUNDLE_W{1'b0}};
+        p1_mul_cand_valid        <= 1'b0;
+        p1_mul_cand_tag          <= {RS_TAG_W{1'b0}};
+        p1_mul_cand_pc           <= 32'd0;
+        p1_mul_cand_imm          <= 32'd0;
+        p1_mul_cand_func3        <= 3'd0;
+        p1_mul_cand_func7        <= 1'b0;
+        p1_mul_cand_rd           <= 5'd0;
+        p1_mul_cand_rs1          <= 5'd0;
+        p1_mul_cand_rs2          <= 5'd0;
+        p1_mul_cand_rs1_used     <= 1'b0;
+        p1_mul_cand_rs2_used     <= 1'b0;
+        p1_mul_cand_src1_tag     <= {RS_TAG_W{1'b0}};
+        p1_mul_cand_src2_tag     <= {RS_TAG_W{1'b0}};
+        p1_mul_cand_br           <= 1'b0;
+        p1_mul_cand_mem_read     <= 1'b0;
+        p1_mul_cand_mem2reg      <= 1'b0;
+        p1_mul_cand_alu_op       <= 3'd0;
+        p1_mul_cand_mem_write    <= 1'b0;
+        p1_mul_cand_alu_src1     <= 2'd0;
+        p1_mul_cand_alu_src2     <= 2'd0;
+        p1_mul_cand_br_addr_mode <= 1'b0;
+        p1_mul_cand_regs_write   <= 1'b0;
+        p1_mul_cand_fu           <= 3'd0;
+        p1_mul_cand_tid          <= 1'b0;
+        p1_mul_cand_is_mret      <= 1'b0;
+        p1_mul_cand_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
+        p1_mul_cand_epoch        <= {`METADATA_EPOCH_W{1'b0}};
     end else begin
         if (flush) begin
             // Clear fu_busy on GLOBAL flush (trap/interrupt entry,
@@ -1014,19 +1133,100 @@ always @(posedge clk or negedge rstn) begin
                 mem_fu_busy <= 1'b0;
             end
         end
-        // MEM busy: set when MEM IQ wins pipe1 arbiter, clear when WB1 returns LOAD/STORE
-        if (p1_winner_valid && p1_winner == 2'b10) begin
-            mem_fu_busy     <= 1'b1;
-            mem_fu_order_id <= mem_iss_order_id;
-            mem_fu_tid      <= mem_iss_tid;
+
+        if (mem_cand_clear) begin
+            p1_mem_cand_valid <= 1'b0;
+        end else if (mem_cand_write_en) begin
+            p1_mem_cand_valid <= 1'b1;
+            {
+                p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_imm, p1_mem_cand_func3, p1_mem_cand_func7,
+                p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2, p1_mem_cand_rs1_used, p1_mem_cand_rs2_used,
+                p1_mem_cand_src1_tag, p1_mem_cand_src2_tag, p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg,
+                p1_mem_cand_alu_op, p1_mem_cand_mem_write, p1_mem_cand_alu_src1, p1_mem_cand_alu_src2,
+                p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write, p1_mem_cand_fu, p1_mem_cand_tid,
+                p1_mem_cand_is_mret, p1_mem_cand_order_id, p1_mem_cand_epoch
+            } <= mem_cand_next_bundle;
         end
-        if (wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE))
+
+        if (p1_mul_cand_flush_kill) begin
+            p1_mul_cand_valid <= 1'b0;
+        end else if (p1_winner_valid && p1_winner == 2'b11) begin
+            if (mul_iss_valid && !mul_raw_issue_flush_kill) begin
+                p1_mul_cand_valid        <= 1'b1;
+                p1_mul_cand_tag          <= mul_iss_tag;
+                p1_mul_cand_pc           <= mul_iss_pc;
+                p1_mul_cand_imm          <= mul_iss_imm;
+                p1_mul_cand_func3        <= mul_iss_func3;
+                p1_mul_cand_func7        <= mul_iss_func7;
+                p1_mul_cand_rd           <= mul_iss_rd;
+                p1_mul_cand_rs1          <= mul_iss_rs1;
+                p1_mul_cand_rs2          <= mul_iss_rs2;
+                p1_mul_cand_rs1_used     <= mul_iss_rs1_used;
+                p1_mul_cand_rs2_used     <= mul_iss_rs2_used;
+                p1_mul_cand_src1_tag     <= mul_iss_src1_tag;
+                p1_mul_cand_src2_tag     <= mul_iss_src2_tag;
+                p1_mul_cand_br           <= mul_iss_br;
+                p1_mul_cand_mem_read     <= mul_iss_mem_read;
+                p1_mul_cand_mem2reg      <= mul_iss_mem2reg;
+                p1_mul_cand_alu_op       <= mul_iss_alu_op;
+                p1_mul_cand_mem_write    <= mul_iss_mem_write;
+                p1_mul_cand_alu_src1     <= mul_iss_alu_src1;
+                p1_mul_cand_alu_src2     <= mul_iss_alu_src2;
+                p1_mul_cand_br_addr_mode <= mul_iss_br_addr_mode;
+                p1_mul_cand_regs_write   <= mul_iss_regs_write;
+                p1_mul_cand_fu           <= mul_iss_fu;
+                p1_mul_cand_tid          <= mul_iss_tid;
+                p1_mul_cand_is_mret      <= mul_iss_is_mret;
+                p1_mul_cand_order_id     <= mul_iss_order_id;
+                p1_mul_cand_epoch        <= mul_iss_epoch;
+            end else begin
+                p1_mul_cand_valid <= 1'b0;
+            end
+        end else if (!p1_mul_cand_valid && mul_iss_valid && !mul_raw_issue_flush_kill) begin
+            p1_mul_cand_valid        <= 1'b1;
+            p1_mul_cand_tag          <= mul_iss_tag;
+            p1_mul_cand_pc           <= mul_iss_pc;
+            p1_mul_cand_imm          <= mul_iss_imm;
+            p1_mul_cand_func3        <= mul_iss_func3;
+            p1_mul_cand_func7        <= mul_iss_func7;
+            p1_mul_cand_rd           <= mul_iss_rd;
+            p1_mul_cand_rs1          <= mul_iss_rs1;
+            p1_mul_cand_rs2          <= mul_iss_rs2;
+            p1_mul_cand_rs1_used     <= mul_iss_rs1_used;
+            p1_mul_cand_rs2_used     <= mul_iss_rs2_used;
+            p1_mul_cand_src1_tag     <= mul_iss_src1_tag;
+            p1_mul_cand_src2_tag     <= mul_iss_src2_tag;
+            p1_mul_cand_br           <= mul_iss_br;
+            p1_mul_cand_mem_read     <= mul_iss_mem_read;
+            p1_mul_cand_mem2reg      <= mul_iss_mem2reg;
+            p1_mul_cand_alu_op       <= mul_iss_alu_op;
+            p1_mul_cand_mem_write    <= mul_iss_mem_write;
+            p1_mul_cand_alu_src1     <= mul_iss_alu_src1;
+            p1_mul_cand_alu_src2     <= mul_iss_alu_src2;
+            p1_mul_cand_br_addr_mode <= mul_iss_br_addr_mode;
+            p1_mul_cand_regs_write   <= mul_iss_regs_write;
+            p1_mul_cand_fu           <= mul_iss_fu;
+            p1_mul_cand_tid          <= mul_iss_tid;
+            p1_mul_cand_is_mret      <= mul_iss_is_mret;
+            p1_mul_cand_order_id     <= mul_iss_order_id;
+            p1_mul_cand_epoch        <= mul_iss_epoch;
+        end
+
+        if (p1_winner_valid && p1_winner == 2'b10) begin
+            // A freshly issued pipe1 MEM op must keep the FU busy even if the
+            // previous MEM op also completes on WB1 in the same cycle.
+            mem_fu_busy     <= 1'b1;
+            mem_fu_order_id <= p1_mem_cand_order_id;
+            mem_fu_tid      <= p1_mem_cand_tid;
+        end else if (wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE)) begin
             mem_fu_busy <= 1'b0;
-        // MUL busy: set when MUL IQ wins pipe1 arbiter, clear when WB1 returns MUL
-        if (p1_winner_valid && p1_winner == 2'b11)
+        end
+        if (p1_winner_valid && p1_winner == 2'b11) begin
+            // Same priority rule for MUL: new issue beats same-cycle clear.
             mul_fu_busy <= 1'b1;
-        if (wb1_valid && wb1_fu == `FU_MUL)
+        end else if (wb1_valid && wb1_fu == `FU_MUL) begin
             mul_fu_busy <= 1'b0;
+        end
     end
 end
 
@@ -1034,21 +1234,11 @@ end
 // ═════════════════════════════════════════════════════════════════
 // 12. Pipe1 Arbiter
 // ═════════════════════════════════════════════════════════════════
-wire [1:0]  p1_winner;
-wire        p1_winner_valid;
-
-iq_pipe1_arbiter #(
-    .RS_TAG_W(RS_TAG_W)
-) u_p1_arb (
-    .int_valid    (1'b0),        // INT issues to pipe0 only in this config
-    .int_order_id ({`METADATA_ORDER_ID_W{1'b1}}),
-    .int_tag      ({RS_TAG_W{1'b0}}),
-    .mem_valid    (mem_iss_valid),
-    .mem_order_id (mem_iss_order_id),
-    .mem_tag      (mem_iss_tag),
-    .mul_valid    (mul_iss_valid),
-    .mul_order_id (mul_iss_order_id),
-    .mul_tag      (mul_iss_tag),
+iq_pipe1_arbiter u_p1_arb (
+    .mem_valid    (p1_mem_cand_arb_valid),
+    .mem_order_id (p1_mem_cand_order_id),
+    .mul_valid    (p1_mul_cand_arb_valid),
+    .mul_order_id (p1_mul_cand_order_id),
     .winner       (p1_winner),
     .winner_valid (p1_winner_valid)
 );
@@ -1085,33 +1275,6 @@ assign iss0_tid       = int_iss_tid;
 assign iss0_order_id  = int_iss_order_id;
 assign iss0_epoch     = int_iss_epoch;
 
-// Pipe1 = MEM/MUL arbiter winner
-assign iss1_valid     = p1_winner_valid;
-assign iss1_tag       = (p1_winner == 2'b10) ? mem_iss_tag       : mul_iss_tag;
-assign iss1_pc        = (p1_winner == 2'b10) ? mem_iss_pc        : mul_iss_pc;
-assign iss1_imm       = (p1_winner == 2'b10) ? mem_iss_imm       : mul_iss_imm;
-assign iss1_func3     = (p1_winner == 2'b10) ? mem_iss_func3     : mul_iss_func3;
-assign iss1_func7     = (p1_winner == 2'b10) ? mem_iss_func7     : mul_iss_func7;
-assign iss1_rd        = (p1_winner == 2'b10) ? mem_iss_rd        : mul_iss_rd;
-assign iss1_rs1       = (p1_winner == 2'b10) ? mem_iss_rs1       : mul_iss_rs1;
-assign iss1_rs2       = (p1_winner == 2'b10) ? mem_iss_rs2       : mul_iss_rs2;
-assign iss1_rs1_used  = (p1_winner == 2'b10) ? mem_iss_rs1_used  : mul_iss_rs1_used;
-assign iss1_rs2_used  = (p1_winner == 2'b10) ? mem_iss_rs2_used  : mul_iss_rs2_used;
-assign iss1_src1_tag  = (p1_winner == 2'b10) ? mem_iss_src1_tag  : mul_iss_src1_tag;
-assign iss1_src2_tag  = (p1_winner == 2'b10) ? mem_iss_src2_tag  : mul_iss_src2_tag;
-assign iss1_br        = (p1_winner == 2'b10) ? mem_iss_br        : mul_iss_br;
-assign iss1_mem_read  = (p1_winner == 2'b10) ? mem_iss_mem_read  : mul_iss_mem_read;
-assign iss1_mem2reg   = (p1_winner == 2'b10) ? mem_iss_mem2reg   : mul_iss_mem2reg;
-assign iss1_alu_op    = (p1_winner == 2'b10) ? mem_iss_alu_op    : mul_iss_alu_op;
-assign iss1_mem_write = (p1_winner == 2'b10) ? mem_iss_mem_write : mul_iss_mem_write;
-assign iss1_alu_src1  = (p1_winner == 2'b10) ? mem_iss_alu_src1  : mul_iss_alu_src1;
-assign iss1_alu_src2  = (p1_winner == 2'b10) ? mem_iss_alu_src2  : mul_iss_alu_src2;
-assign iss1_br_addr_mode = (p1_winner == 2'b10) ? mem_iss_br_addr_mode : mul_iss_br_addr_mode;
-assign iss1_regs_write= (p1_winner == 2'b10) ? mem_iss_regs_write: mul_iss_regs_write;
-assign iss1_fu        = (p1_winner == 2'b10) ? mem_iss_fu        : mul_iss_fu;
-assign iss1_tid       = (p1_winner == 2'b10) ? mem_iss_tid       : mul_iss_tid;
-assign iss1_order_id  = (p1_winner == 2'b10) ? mem_iss_order_id  : mul_iss_order_id;
-assign iss1_epoch     = (p1_winner == 2'b10) ? mem_iss_epoch     : mul_iss_epoch;
 
 // ═════════════════════════════════════════════════════════════════
 // 13. Sequential: Tag alloc/free, reg_result update

@@ -42,6 +42,8 @@ module lsu_shell #(
     input  wire [0:0]         flush_tid,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t0,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t1,
+    input  wire [EPOCH_W-1:0] current_epoch_t0,
+    input  wire [EPOCH_W-1:0] current_epoch_t1,
     input  wire               flush_order_valid,
     input  wire [ORDER_ID_W-1:0] flush_order_id,
 
@@ -207,6 +209,8 @@ store_buffer #(
     .flush_tid              (flush_tid),
     .flush_new_epoch_t0     (flush_new_epoch_t0),
     .flush_new_epoch_t1     (flush_new_epoch_t1),
+    .current_epoch_t0       (current_epoch_t0),
+    .current_epoch_t1       (current_epoch_t1),
     .flush_order_valid      (flush_order_valid),
     .flush_order_id         (flush_order_id),
 

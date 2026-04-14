@@ -243,16 +243,16 @@ module issue_queue #(
         input [STORE_CAND_W-1:0] a;
         input [STORE_CAND_W-1:0] b;
         reg a_v, b_v;
-        reg [`METADATA_ORDER_ID_W-1:0] a_seq, b_seq;
+        reg [`METADATA_ORDER_ID_W-1:0] a_ord, b_ord;
         begin
             a_v   = a[STORE_CAND_W-1];
             b_v   = b[STORE_CAND_W-1];
-            a_seq = a[`METADATA_ORDER_ID_W-1:0];
-            b_seq = b[`METADATA_ORDER_ID_W-1:0];
+            a_ord = a[`METADATA_ORDER_ID_W-1:0];
+            b_ord = b[`METADATA_ORDER_ID_W-1:0];
             if (!a_v && !b_v)        pick_min_store = a;
             else if (!a_v)           pick_min_store = b;
             else if (!b_v)           pick_min_store = a;
-            else if (a_seq <= b_seq) pick_min_store = a;
+            else if (a_ord <= b_ord) pick_min_store = a;
             else                     pick_min_store = b;
         end
     endfunction
@@ -267,9 +267,9 @@ module issue_queue #(
             if (si_store < IQ_DEPTH) begin : real_store
                 wire is_pending_store = e_valid[si_store] && e_mem_write[si_store];
                 assign store_cand_t0[si_store] = (CHECK_LOAD_STORE_ORDER && is_pending_store && e_tid[si_store] == 1'b0)
-                    ? {1'b1, e_seq[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
+                    ? {1'b1, e_order_id[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
                 assign store_cand_t1[si_store] = (CHECK_LOAD_STORE_ORDER && is_pending_store && e_tid[si_store] == 1'b1)
-                    ? {1'b1, e_seq[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
+                    ? {1'b1, e_order_id[si_store]} : {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
             end else begin : pad_store
                 assign store_cand_t0[si_store] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
                 assign store_cand_t1[si_store] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}};
@@ -303,17 +303,27 @@ module issue_queue #(
 
     // Extract results
     wire                            any_store_t0         = store_tree_t0[0][STORE_CAND_W-1];
-    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t0  = store_tree_t0[0][`METADATA_ORDER_ID_W-1:0];
+    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_ord_t0  = store_tree_t0[0][`METADATA_ORDER_ID_W-1:0];
     wire                            any_store_t1         = store_tree_t1[0][STORE_CAND_W-1];
-    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_seq_t1  = store_tree_t1[0][`METADATA_ORDER_ID_W-1:0];
-    assign oldest_store_valid_t0    = any_store_t0;
-    assign oldest_store_order_id_t0 = oldest_store_seq_t0;
-    assign oldest_store_valid_t1    = any_store_t1;
-    assign oldest_store_order_id_t1 = oldest_store_seq_t1;
+    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_ord_t1  = store_tree_t1[0][`METADATA_ORDER_ID_W-1:0];
+    reg                             oldest_store_valid_t0_r;
+    reg  [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t0_r;
+    reg                             oldest_store_valid_t1_r;
+    reg  [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t1_r;
+
+    assign oldest_store_valid_t0    = oldest_store_valid_t0_r;
+    assign oldest_store_order_id_t0 = oldest_store_order_id_t0_r;
+    assign oldest_store_valid_t1    = oldest_store_valid_t1_r;
+    assign oldest_store_order_id_t1 = oldest_store_order_id_t1_r;
 
     // --- Binary Tournament Tree: O(log2 N) selection ---
     // Candidate word: {valid(1), seq(ORDER_ID_W), idx(IQ_IDX_W)}
     localparam CAND_W = 1 + `METADATA_ORDER_ID_W + IQ_IDX_W;
+    localparam ISSUE_BUNDLE_W = (RS_TAG_W * 3) + 32 + 32 + 3 + 1 +
+                                5 + 5 + 5 + 1 + 1 +
+                                1 + 1 + 1 + 3 + 1 + 2 + 2 + 1 + 1 +
+                                3 + 1 + 1 +
+                                `METADATA_ORDER_ID_W + `METADATA_EPOCH_W;
 
     // pick_older: return the older (lower seq) valid candidate
     function [CAND_W-1:0] pick_older;
@@ -336,6 +346,7 @@ module issue_queue #(
 
     // Step 1: Per-entry parallel eligibility + candidate packing
     wire [CAND_W-1:0] cand [0:TREE_N-1];
+    reg  [ISSUE_BUNDLE_W-1:0] sel_bundle;
 
     genvar ci;
     generate
@@ -347,8 +358,8 @@ module issue_queue #(
                                         e_mem_read[ci] && !e_mem_write[ci];
                 wire older_store_blocks =
                     is_load_no_store && (
-                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_seq_t0 < e_seq[ci])) :
-                                              (any_store_t1 && (oldest_store_seq_t1 < e_seq[ci]))
+                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_ord_t0 < e_order_id[ci])) :
+                                              (any_store_t1 && (oldest_store_ord_t1 < e_order_id[ci]))
                     );
                 wire older_store_blocks_mret =
                     e_is_mret[ci] && (
@@ -384,54 +395,50 @@ module issue_queue #(
     // Step 3: Extract winner
     wire                            sel_found = tree[0][CAND_W-1];
     wire [IQ_IDX_W-1:0]            sel_idx   = tree[0][IQ_IDX_W-1:0];
-    wire [`METADATA_ORDER_ID_W-1:0] sel_seq   = tree[0][CAND_W-2 -: `METADATA_ORDER_ID_W];
+    // winner-level bundle is formed locally to keep the issue boundary simple
 
     // ═══ Issue Output Drive ═══
     always @(*) begin
         iss_valid = sel_found;
+        sel_bundle = {ISSUE_BUNDLE_W{1'b0}};
         if (sel_found) begin
-            iss_tag          = e_tag[sel_idx];
-            iss_pc           = e_pc[sel_idx];
-            iss_imm          = e_imm[sel_idx];
-            iss_func3        = e_func3[sel_idx];
-            iss_func7        = e_func7[sel_idx];
-            iss_rd           = e_rd[sel_idx];
-            iss_rs1          = e_rs1[sel_idx];
-            iss_rs2          = e_rs2[sel_idx];
-            iss_rs1_used     = e_rs1_used[sel_idx];
-            iss_rs2_used     = e_rs2_used[sel_idx];
-            iss_src1_tag     = e_src1_tag[sel_idx];
-            iss_src2_tag     = e_src2_tag[sel_idx];
-            iss_br           = e_br[sel_idx];
-            iss_mem_read     = e_mem_read[sel_idx];
-            iss_mem2reg      = e_mem2reg[sel_idx];
-            iss_alu_op       = e_alu_op[sel_idx];
-            iss_mem_write    = e_mem_write[sel_idx];
-            iss_alu_src1     = e_alu_src1[sel_idx];
-            iss_alu_src2     = e_alu_src2[sel_idx];
-            iss_br_addr_mode = e_br_addr_mode[sel_idx];
-            iss_regs_write   = e_regs_write[sel_idx];
-            iss_fu           = e_fu[sel_idx];
-            iss_tid          = e_tid[sel_idx];
-            iss_is_mret      = e_is_mret[sel_idx];
-            iss_order_id     = e_order_id[sel_idx];
-            iss_epoch        = e_epoch[sel_idx];
+            sel_bundle = {
+                e_tag[sel_idx], e_pc[sel_idx], e_imm[sel_idx], e_func3[sel_idx], e_func7[sel_idx],
+                e_rd[sel_idx], e_rs1[sel_idx], e_rs2[sel_idx], e_rs1_used[sel_idx], e_rs2_used[sel_idx],
+                e_src1_tag[sel_idx], e_src2_tag[sel_idx], e_br[sel_idx], e_mem_read[sel_idx], e_mem2reg[sel_idx],
+                e_alu_op[sel_idx], e_mem_write[sel_idx], e_alu_src1[sel_idx], e_alu_src2[sel_idx],
+                e_br_addr_mode[sel_idx], e_regs_write[sel_idx], e_fu[sel_idx], e_tid[sel_idx],
+                e_is_mret[sel_idx], e_order_id[sel_idx], e_epoch[sel_idx]
+            };
         end
-        else begin
-            iss_tag = {RS_TAG_W{1'b0}};
-            iss_pc  = 32'd0; iss_imm = 32'd0;
-            iss_func3 = 3'd0; iss_func7 = 1'b0;
-            iss_rd = 5'd0; iss_rs1 = 5'd0; iss_rs2 = 5'd0;
-            iss_rs1_used = 1'b0; iss_rs2_used = 1'b0;
-            iss_src1_tag = {RS_TAG_W{1'b0}}; iss_src2_tag = {RS_TAG_W{1'b0}};
-            iss_br = 1'b0; iss_mem_read = 1'b0; iss_mem2reg = 1'b0;
-            iss_alu_op = 3'd0; iss_mem_write = 1'b0;
-            iss_alu_src1 = 2'd0; iss_alu_src2 = 2'd0;
-            iss_br_addr_mode = 1'b0; iss_regs_write = 1'b0;
-            iss_fu = 3'd0; iss_tid = 1'b0; iss_is_mret = 1'b0;
-            iss_order_id = {`METADATA_ORDER_ID_W{1'b0}};
-            iss_epoch = {`METADATA_EPOCH_W{1'b0}};
-        end
+        {
+            iss_tag,
+            iss_pc,
+            iss_imm,
+            iss_func3,
+            iss_func7,
+            iss_rd,
+            iss_rs1,
+            iss_rs2,
+            iss_rs1_used,
+            iss_rs2_used,
+            iss_src1_tag,
+            iss_src2_tag,
+            iss_br,
+            iss_mem_read,
+            iss_mem2reg,
+            iss_alu_op,
+            iss_mem_write,
+            iss_alu_src1,
+            iss_alu_src2,
+            iss_br_addr_mode,
+            iss_regs_write,
+            iss_fu,
+            iss_tid,
+            iss_is_mret,
+            iss_order_id,
+            iss_epoch
+        } = sel_found ? sel_bundle : {ISSUE_BUNDLE_W{1'b0}};
     end
 
     // ═══ Sequential Logic ═══
@@ -451,18 +458,24 @@ module issue_queue #(
                 e_just_woke[i] <= 1'b0;
                 e_wake_hold[i] <= 2'd0;
             end
+            oldest_store_valid_t0_r    <= 1'b0;
+            oldest_store_order_id_t0_r <= {`METADATA_ORDER_ID_W{1'b0}};
+            oldest_store_valid_t1_r    <= 1'b0;
+            oldest_store_order_id_t1_r <= {`METADATA_ORDER_ID_W{1'b0}};
             alloc_seq <= {`METADATA_ORDER_ID_W{1'b0}};
         end
         else begin
+            oldest_store_valid_t0_r    <= any_store_t0;
+            oldest_store_order_id_t0_r <= oldest_store_ord_t0;
+            oldest_store_valid_t1_r    <= any_store_t1;
+            oldest_store_order_id_t1_r <= oldest_store_ord_t1;
             // ── Epoch-based flush ──
             if (flush) begin
                 for (i = 0; i < IQ_DEPTH; i = i + 1) begin
                     if (e_valid[i] && (e_tid[i] == flush_tid)) begin
-                        if (e_epoch[i] != flush_new_epoch) begin
+                        if (!flush_order_valid) begin
                             e_valid[i] <= 1'b0;
-                        end
-                        else if (flush_order_valid &&
-                                 e_order_id[i] >= flush_order_id) begin
+                        end else if (e_order_id[i] > flush_order_id) begin
                             e_valid[i] <= 1'b0;
                         end
                     end
