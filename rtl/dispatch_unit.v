@@ -1063,10 +1063,11 @@ wire mem_cand_consume = p1_winner_valid && (p1_winner == 2'b10);
 wire mem_cand_raw_valid = mem_iss_valid && !mem_raw_issue_flush_kill;
 wire mem_cand_clear = p1_mem_cand_flush_kill ||
                       (mem_cand_consume && !mem_cand_raw_valid);
-wire mem_cand_write_en = !p1_mem_cand_flush_kill &&
-                         mem_cand_raw_valid &&
-                         (!p1_mem_cand_valid || mem_cand_consume);
-wire [P1_CAND_BUNDLE_W-1:0] mem_cand_next_bundle = {
+wire mem_cand_set = !p1_mem_cand_flush_kill &&
+                    mem_cand_raw_valid &&
+                    (!p1_mem_cand_valid || mem_cand_consume);
+wire mem_cand_take_raw = mem_cand_set;
+wire [P1_CAND_BUNDLE_W-1:0] mem_cand_raw_bundle = {
     mem_iss_tag, mem_iss_pc, mem_iss_imm, mem_iss_func3, mem_iss_func7,
     mem_iss_rd, mem_iss_rs1, mem_iss_rs2, mem_iss_rs1_used, mem_iss_rs2_used,
     mem_iss_src1_tag, mem_iss_src2_tag, mem_iss_br, mem_iss_mem_read, mem_iss_mem2reg,
@@ -1074,6 +1075,16 @@ wire [P1_CAND_BUNDLE_W-1:0] mem_cand_next_bundle = {
     mem_iss_br_addr_mode, mem_iss_regs_write, mem_iss_fu, mem_iss_tid,
     mem_iss_is_mret, mem_iss_order_id, mem_iss_epoch
 };
+wire [P1_CAND_BUNDLE_W-1:0] mem_cand_curr_bundle = {
+    p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_imm, p1_mem_cand_func3, p1_mem_cand_func7,
+    p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2, p1_mem_cand_rs1_used, p1_mem_cand_rs2_used,
+    p1_mem_cand_src1_tag, p1_mem_cand_src2_tag, p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg,
+    p1_mem_cand_alu_op, p1_mem_cand_mem_write, p1_mem_cand_alu_src1, p1_mem_cand_alu_src2,
+    p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write, p1_mem_cand_fu, p1_mem_cand_tid,
+    p1_mem_cand_is_mret, p1_mem_cand_order_id, p1_mem_cand_epoch
+};
+wire [P1_CAND_BUNDLE_W-1:0] mem_cand_data_d = mem_cand_take_raw ? mem_cand_raw_bundle
+                                                                 : mem_cand_curr_bundle;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -1136,17 +1147,17 @@ always @(posedge clk or negedge rstn) begin
 
         if (mem_cand_clear) begin
             p1_mem_cand_valid <= 1'b0;
-        end else if (mem_cand_write_en) begin
+        end else if (mem_cand_set) begin
             p1_mem_cand_valid <= 1'b1;
-            {
-                p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_imm, p1_mem_cand_func3, p1_mem_cand_func7,
-                p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2, p1_mem_cand_rs1_used, p1_mem_cand_rs2_used,
-                p1_mem_cand_src1_tag, p1_mem_cand_src2_tag, p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg,
-                p1_mem_cand_alu_op, p1_mem_cand_mem_write, p1_mem_cand_alu_src1, p1_mem_cand_alu_src2,
-                p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write, p1_mem_cand_fu, p1_mem_cand_tid,
-                p1_mem_cand_is_mret, p1_mem_cand_order_id, p1_mem_cand_epoch
-            } <= mem_cand_next_bundle;
         end
+        {
+            p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_imm, p1_mem_cand_func3, p1_mem_cand_func7,
+            p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2, p1_mem_cand_rs1_used, p1_mem_cand_rs2_used,
+            p1_mem_cand_src1_tag, p1_mem_cand_src2_tag, p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg,
+            p1_mem_cand_alu_op, p1_mem_cand_mem_write, p1_mem_cand_alu_src1, p1_mem_cand_alu_src2,
+            p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write, p1_mem_cand_fu, p1_mem_cand_tid,
+            p1_mem_cand_is_mret, p1_mem_cand_order_id, p1_mem_cand_epoch
+        } <= mem_cand_data_d;
 
         if (p1_mul_cand_flush_kill) begin
             p1_mul_cand_valid <= 1'b0;
