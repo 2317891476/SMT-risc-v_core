@@ -61,6 +61,7 @@ module exec_pipe0 #(
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
     output wire [31:0]        br_addr,       // branch target address
+    output wire [31:0]        br_pc,         // branch instruction PC
     output wire [0:0]         br_tid,        // which thread branched
     output wire [15:0]        br_order_id,   // branch order id when redirecting
     output wire               br_complete    // branch execution complete (taken or not)
@@ -110,6 +111,7 @@ reg [2:0]         out_fu_r;
 reg [0:0]         out_tid_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
+reg [31:0]        br_pc_r;
 reg [0:0]         br_tid_r;
 reg [15:0]        br_order_id_r;
 reg               br_complete_r;   // branch execution complete
@@ -135,6 +137,7 @@ always @(posedge clk or negedge rstn) begin
         out_tid_r           <= 1'b0;
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
+        br_pc_r             <= 32'd0;
         br_tid_r            <= 1'b0;
         br_order_id_r       <= 16'd0;
         br_complete_r       <= 1'b0;
@@ -175,6 +178,7 @@ always @(posedge clk or negedge rstn) begin
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
         br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+        br_pc_r       <= stored_pc;
         br_tid_r      <= out_tid_r;  // use output register's tid
         br_order_id_r <= stored_order_id;
         br_complete_r <= stored_valid && stored_br;
@@ -197,6 +201,7 @@ assign mret_valid = in_valid && in_is_mret;
 
 assign br_ctrl     = br_ctrl_r;
 assign br_addr     = br_addr_r;
+assign br_pc       = br_pc_r;
 assign br_tid      = br_tid_r;
 assign br_order_id = br_order_id_r;
 assign br_complete = br_complete_r;

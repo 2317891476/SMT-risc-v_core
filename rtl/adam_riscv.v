@@ -173,6 +173,7 @@ wire       flush_any;
 // Branch from Pipe0
 wire       pipe0_br_ctrl;
 wire [31:0] pipe0_br_addr;
+wire [31:0] pipe0_br_pc;
 wire [0:0] pipe0_br_tid;
 wire [15:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
@@ -359,7 +360,7 @@ stage_if u_stage_if(
                         {pipe0_br_ctrl && (pipe0_br_tid==1'b1),
                          pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
     .bpu_update_valid (pipe0_br_ctrl    ),
-    .bpu_update_pc    (pipe0_br_addr    ),  // simplified
+    .bpu_update_pc    (pipe0_br_pc      ),
     .bpu_update_tid   (pipe0_br_tid     ),
     .bpu_update_taken (pipe0_br_ctrl    ),
     .bpu_update_target(pipe0_br_addr    ),
@@ -1254,6 +1255,7 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .mret_valid       (pipe0_mret_valid ),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
+    .br_pc            (pipe0_br_pc      ),
     .br_tid           (pipe0_br_tid     ),
     .br_order_id      (pipe0_br_order_id),
     .br_complete      (pipe0_br_complete)
