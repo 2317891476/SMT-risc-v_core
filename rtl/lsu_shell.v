@@ -321,7 +321,7 @@ always @(posedge clk or negedge rstn) begin
             // On flush, abort speculative load requests, but never discard a
             // committed store-buffer drain that has already been handed off.
             // Branch redirects only kill younger requests from the flushed thread.
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[LSU FLUSH] pending_valid=%0b pending_tid=%0d pending_order=%0d flush_tid=%0d flush_order_valid=%0b flush_order=%0d @%0t",
                      pending_valid, pending_tid, pending_order_id,
                      flush_tid, flush_order_valid, flush_order_id, $time);
@@ -348,7 +348,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_IDLE: begin
                 // Ready to accept new request
                 if (req_valid && req_accept) begin
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU ACCEPT] kind=%s tid=%0d order=%0d tag=%0d func3=%0d addr=%h wdata=%h rd=%0d",
                              req_wen ? "STORE" : "LOAD ", req_tid, req_order_id, req_tag,
                              req_func3, req_addr, req_wdata, req_rd);
@@ -421,7 +421,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_WAIT_RESP: begin
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU RESP] drain=%0d addr=%h raw=%h shaped=%h",
                              m1_txn_is_drain, pending_addr, m1_resp_data, mem_data_shaped);
                     `endif

@@ -261,7 +261,7 @@ assign recover_tid         = recover_tid_r;
 // Sequential Logic
 // ═════════════════════════════════════════════════════════════════════════════
 
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
 always @(posedge clk) begin
     if (disp0_valid && disp0_tid == 0)
         $display("[MON DISP0] rd=%0d tag=%0d pc=%h @%0t", disp0_rd, disp0_tag, disp0_pc, $time);
@@ -383,7 +383,7 @@ always @(posedge clk or negedge rstn) begin
                 // New flush arrived this cycle — entries just marked
                 // flushed via NB assign below.  Hold position so the
                 // walk re-checks this entry next cycle.
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB FLUSH-EXTEND] walk held at ptr=%0d, new flush_order_valid=%0b @%0t",
                          recover_ptr_r, flush_order_valid, $time);
                 `endif
@@ -410,7 +410,7 @@ always @(posedge clk or negedge rstn) begin
                       !rob_complete[flush_tid][j] &&
                       (rob_order_id[flush_tid][j] == flush_order_id)))) begin
                     rob_flushed[flush_tid][j] <= 1'b1;
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[ROB FLUSH] tid=%0d entry_order=%0d flush_order_valid=%0b flush_order=%0d @%0t",
                              flush_tid, rob_order_id[flush_tid][j], flush_order_valid, flush_order_id, $time);
                     `endif
@@ -471,7 +471,7 @@ always @(posedge clk or negedge rstn) begin
         if (!recovering_r && rob_count[0] != {(ROB_IDX_W+1){1'b0}}
             && !(s1_advance_t0 && rob_count[0] == {{ROB_IDX_W{1'b0}}, 1'b1})) begin
             s0_head_idx[0] <= eff_head_t0;
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[ROB S0] t0 eff_head=%0d valid=%0b complete=%0b flushed=%0b count=%0d s1adv=%0b @%0t",
                      eff_head_t0, rob_valid[0][eff_head_t0], rob_complete[0][eff_head_t0],
                      rob_flushed[0][eff_head_t0], rob_count[0], s1_advance_t0, $time);
@@ -530,7 +530,7 @@ always @(posedge clk or negedge rstn) begin
 
             // ── S1 Apply ──
             if (s0_commit_valid[0]) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB S1] t0 COMMIT head_idx=%0d rd=%0d tag=%0d flushed=%0b data=%h @%0t",
                          s0_head_idx[0], s0_rd[0], s0_tag[0],
                          rob_flushed[0][s0_head_idx[0]], s0_data[0], $time);
@@ -553,7 +553,7 @@ always @(posedge clk or negedge rstn) begin
                 next_head = s0_head_idx[0] + 1;
                 next_count = next_count - 1;
             end else if (s0_commit_skip[0]) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB S1] t0 SKIP head_idx=%0d valid=%0b flushed=%0b @%0t",
                          s0_head_idx[0], rob_valid[0][s0_head_idx[0]],
                          rob_flushed[0][s0_head_idx[0]], $time);
@@ -567,7 +567,7 @@ always @(posedge clk or negedge rstn) begin
 
             // ── Dispatch Allocation ──
             if (disp0_valid && !rob0_full && (disp0_tid == 1'b0)) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB DISP0] t0 tail=%0d tag=%0d rd=%0d pc=%h @%0t",
                          next_tail, disp0_tag, disp0_rd, disp0_pc, $time);
                 `endif

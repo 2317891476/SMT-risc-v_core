@@ -158,7 +158,7 @@ always @(posedge clk or negedge rstn) begin
         stored_valid        <= in_valid;
         stored_br_mark      <= br_mark;
 
-        `ifndef SYNTHESIS
+        `ifdef VERBOSE_SIM_LOGS
         if (in_valid) begin
             $display("EXEC0: PC=%h, in_br=%b, br_mark=%b", in_pc, in_br, br_mark);
         end

@@ -2373,6 +2373,8 @@ wire [7:0]  mem_subsys_tube_status;
 wire        mem_subsys_ext_timer_irq;     // CLINT timer interrupt (MTIP)
 wire        mem_subsys_ext_external_irq;  // PLIC external interrupt (MEIP)
 wire        mem_subsys_uart_tx;           // UART TX from mem_subsys MMIO
+wire        mem_subsys_debug_uart_tx_byte_valid;
+wire [7:0]  mem_subsys_debug_uart_tx_byte;
 wire        ext_timer_irq;
 wire        ext_external_irq;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
@@ -2434,7 +2436,9 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
 
         // UART physical interface
         .uart_rx           (uart_rx),
-        .uart_tx           (mem_subsys_uart_tx)
+        .uart_tx           (mem_subsys_uart_tx),
+        .debug_uart_tx_byte_valid(mem_subsys_debug_uart_tx_byte_valid),
+        .debug_uart_tx_byte(mem_subsys_debug_uart_tx_byte)
 
 `ifdef ENABLE_DDR3
         ,
@@ -2465,6 +2469,8 @@ end else begin : gen_mem_subsys_tieoff
     assign mem_subsys_ext_timer_irq  = 1'b0;
     assign mem_subsys_ext_external_irq = 1'b0;
     assign mem_subsys_uart_tx        = 1'b1;
+    assign mem_subsys_debug_uart_tx_byte_valid = 1'b0;
+    assign mem_subsys_debug_uart_tx_byte = 8'd0;
 end
 endgenerate
 
@@ -2480,8 +2486,8 @@ assign debug_uart_busy = use_mem_subsys ? 1'b0 : legacy_debug_uart_busy;
 assign debug_uart_pending_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_pending_valid;
 assign debug_uart_status_load_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_status_load_count;
 assign debug_uart_tx_store_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_store_count;
-assign debug_uart_tx_byte_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_tx_byte_valid;
-assign debug_uart_tx_byte = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_byte;
+assign debug_uart_tx_byte_valid = use_mem_subsys ? mem_subsys_debug_uart_tx_byte_valid : legacy_debug_uart_tx_byte_valid;
+assign debug_uart_tx_byte = use_mem_subsys ? mem_subsys_debug_uart_tx_byte : legacy_debug_uart_tx_byte;
 
 wire _unused_uart_rx = use_mem_subsys ? uart_rx : 1'b0;
 assign debug_last_iss0_pc_lo = debug_last_iss0_pc_lo_r;

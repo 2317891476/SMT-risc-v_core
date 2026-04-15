@@ -18,13 +18,13 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | **分支预测** | 256-entry 双模态 (Bimodal) 2-bit 饱和计数器 + BTB |
 | **SMT** | 2 线程同步多线程，Round-Robin 取指调度，独立 PC 和寄存器堆 |
 | **虚拟内存** | Sv32 MMU：I-TLB(16) + D-TLB(32) + 7 状态硬件页表漫游器 (PTW) |
-| **缓存** | L1 ICache: 2KB 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 走 Passthrough 直连片上 RAM |
+| **缓存** | L1 ICache: 2KB 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
 | **总线** | AXI4 突发传输接口 (缓存行填充/写回) + DDR3 AXI4 256-bit CDC 桥接 |
 | **AI 加速** | RoCC 协处理器：8×8 INT8 GEMM 引擎 + 128-bit SIMD 向量单元 + KV-Cache 压缩 |
 | **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp)，异常入口/MRET |
 | **中断** | CLINT (定时器中断) + PLIC (外部中断)，支持 mcause=0x80000007/0B |
 
-> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=0` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。当前有效 bitstream `BuildID=0x69DE53F4` 已通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读和 10 秒 UART 板测验证。
+> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。当前有效 bitstream `BuildID=0x69DF37C7` 已通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测验证。
 
 ---
 
@@ -377,7 +377,7 @@ python verification/run_riscv_tests.py --suite riscv-tests
 
 ### 使用 FPGA 同配置运行仿真（`--fpga-config`）
 
-默认仿真使用 `RS_DEPTH=16`（RTL 默认值）。`--fpga-config` 当前也使用 `RS_DEPTH=16`，与 FPGA 板级 bitstream 配置一致。经本轮 `u_iq_mem -> p1_mem_cand -> p1_pre_ro` 局部边界重排和 store-queue 维护简化后，RS_DEPTH=16 @ 25MHz 主线签核继续保持通过（post-impl aggressive `WNS=+0.522ns`, `WHS=+0.078ns`），bitstream 已生成并通过板测验证。
+默认仿真使用 `RS_DEPTH=16`（RTL 默认值）。`--fpga-config` 当前也使用 `RS_DEPTH=16`，并显式启用 `ENABLE_MEM_SUBSYS=1`，与 FPGA 板级 bitstream 的主内存路径一致。当前 AX7203 主线为 `mem_subsys + DDR3 + L2_PASSTHROUGH`，RS_DEPTH=16 @ 25MHz 已完成 post-impl aggressive 签核（`WNS=+0.426ns`, `WHS=+0.036ns`），bitstream 已生成并通过 JTAG 与 UART/DDR3 板测验证。
 
 ```powershell
 # 基础 26 测试 — FPGA 同配置 (RS_DEPTH=16)
@@ -658,15 +658,15 @@ rob_recover_en, rob_recover_prd_new
 | ~~P1~~     | ~~L1 ICache~~                                            | ✅ 已完成 (非阻塞 ICache 集成到 inst_memory)                  |
 | ~~P2~~     | ~~L2 Cache~~                                             | ✅ 已完成 (8KB 4路统一缓存 + 轮询仲裁器)                      |
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
-| ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=0`，AX7203 板测通过，激进实现 `WNS=+0.522ns / WHS=+0.078ns`)   |
-| ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；10 秒有效字符统计 `86832`，字符比例检查通过)       |
+| ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=1 / ENABLE_DDR3=1 / L2_PASSTHROUGH=1`，AX7203 板测通过，激进实现 `WNS=+0.426ns / WHS=+0.036ns`)   |
+| ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；当前主线抓包有效字符统计 `571862`，字符比例检查通过，并捕获 `CAL=1` / `DDR3 PASS`)       |
 | **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🔄 Dhrystone 已完成板级镜像构建和数据内存初始化基础设施（`$readmemh` + `data_word.hex`），板测可启动但计算结果异常（见 §13.10）。CoreMark 待测。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
 | **P4**     | **轻量前端优化（只做资源友好升级）**                     | 在不明显增加 BRAM/LUT 的前提下，将现有 Bimodal 升级为轻量 Gshare / 小型 Tournament 版本；严禁引入 TAGE/Perceptron 这类高成本预测器。目标是用极小代价提升 CoreMark 与分支密集程序的实际 IPC。 |
 | **P4**     | **Load/Store 路径微优化**                                | 聚焦影响跑分最明显的路径：Store-Load 转发时序、Cache refill 停顿、提交边界气泡、MMIO 访问旁路。只做“小改动高收益”的微优化，不引入更大 ROB / 更深 LSQ。 |
-| ~~P4~~     | ~~**DDR3 支持（mem_subsys→DDR3 直连）**~~                  | ✅ 已完成。MIG 7-Series v4.2 已集成，`ddr3_mem_port.v` CDC 桥接模块实现 32b↔256b AXI lane steering + toggle-flag 异步 CDC。板测验证：`CAL=1, W=DEADBEEF R=DEADBEEF, DDR3 PASS`（含 walking-ones 测试）。修复 3 个 CDC Bug（#10 请求丢失、#11 wstrb 重叠、#12 响应数据时序——根因）。 |
+| ~~P4~~     | ~~**DDR3 支持（mem_subsys→DDR3 直连）**~~                  | ✅ 已完成并已进入当前 25MHz 主线。MIG 7-Series v4.2 已集成，`ddr3_mem_port.v` CDC 桥接模块实现 32b↔256b AXI lane steering + toggle-flag 异步 CDC。当前主线 ROM 轮询 `DDR3_STATUS_ADDR`，对 `0x8000_0000` 执行 `DEADBEEF` 写回读，板级抓包捕获 `CAL=1` 与 `DDR3 PASS`。 |
 | **P4**     | **RoCC DMA 软件栈完善**                                  | 补齐 C 语言接口、内联汇编封装、scratchpad 分配器、blocking/non-blocking DMA API，形成可复用的软件层。让评委看到“不是单个硬件指令能跑，而是软件可调用、系统可集成”。 |
 | **P4**     | **应用 Demo A：端侧 AI / TinyML 加速**                   | 主打场景。使用现有 8×8 INT8 GEMM + SIMD，完成小型 MLP / 卷积核 / 关键词分类 / 矩阵推理 Demo。必须给出 `纯 CPU` vs `RoCC` 的延迟、吞吐和能效对比，是最容易形成“杀手锏”的展示方向。 |
 | **P5**     | **应用 Demo B：轻量数据流处理**                          | 结合 UART / DDR3 / PCIe / 千兆网口中的一种输入路径，完成 `数据搬运 + 规则计算 + 加速处理 + 输出` 的闭环。例如包头过滤、流式 checksum、工业传感器数据预处理等，强调处理器不仅能跑分，还能接近真实系统。 |
@@ -705,10 +705,10 @@ rob_recover_en, rob_recover_prd_new
 | **JTAG 编程** | ✅ | Vivado Tcl 脚本 + DONE/EOS 校验 |
 | **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
 | **DDR3** | ✅ | 板载 2×MT41K256M16HA-125 (1GB, 32-bit)，MIG 7-Series v4.2 已集成，CDC 桥接模块 `ddr3_mem_port.v` 已调通，板测读写验证通过 |
-| **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=0`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=1`, `RS_DEPTH=16`, `FetchBuffer=16`, `25MHz` |
-| **OoO 后端上板** | ✅ | Rename + ROB + 3×Split IQ + 48-entry PRF 乱序后端，`RS_DEPTH=16 / FetchBuffer=16 / 25MHz / SMT_MODE=1` 板测通过，当前有效 bitstream 为 `BuildID=0x69DE53F4` |
+| **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=1`, `ENABLE_DDR3=1`, `L2_PASSTHROUGH=1`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=1`, `RS_DEPTH=16`, `FetchBuffer=16`, `25MHz` |
+| **OoO 后端上板** | ✅ | Rename + ROB + 3×Split IQ + 48-entry PRF 乱序后端，`RS_DEPTH=16 / FetchBuffer=16 / 25MHz / SMT_MODE=1` 板测通过，当前有效 bitstream 为 `BuildID=0x69DF37C7` |
 | **clk_locked 复位门控** | ✅ | `post_lock_cnt` + `post_lock_ready` 机制：等待 MMCM `clk_locked` + 255 稳定时钟周期后释放核心复位 |
-| **mem_subsys 上板** | ✅ | 完整 mem_subsys (L2 Passthrough + CLINT + PLIC + UART)，历史板测 `UART DIAG PASS`（当前暂用 legacy 路径） |
+| **mem_subsys 上板** | ✅ | 当前主线默认启用 `mem_subsys + L2_PASSTHROUGH + DDR3`，覆盖 CLINT/PLIC/UART MMIO、片上 RAM 与 DDR3 地址窗口 |
 
 **引脚分配 (来自官方资源文档):**
 - 时钟: SYS_CLK_P=R4, SYS_CLK_N=T4
@@ -764,26 +764,27 @@ fpga/
 
 ### 13.3 当前主基线与快速开始 (FPGA)
 
-当前 README 的**唯一主基线**是 AX7203 上已经验证通过的竞赛 bitstream：**OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=0` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`**。  
+当前 README 的**唯一主基线**是 AX7203 上已经验证通过的竞赛 bitstream：**OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`**。  
 以下表格中的证据是本节后续资源、时序和板测结论的唯一权威来源。
 
 | 项目 | 当前已验证结果 | 证据 |
 |------|------|------|
 | 主线自动验收 | `PASS` / `FailedStage=none` | `build/fpga_mainline_validation/summary.txt` |
-| Bitstream / Build ID | `0x69DE53F4` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
-| 板级配置 | `RS=16 / FetchBuffer=16 / SMT=1 / 25MHz / legacy_mem_subsys` | 本节 §13.4 固定配置 |
+| Bitstream / Build ID | `0x69DF37C7` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| 板级配置 | `RS=16 / FetchBuffer=16 / SMT=1 / 25MHz / mem_subsys + DDR3 + L2_PASSTHROUGH` | 本节 §13.4 固定配置 |
 | JTAG 烧录 | `DONE=1`, `EOS=1`, `USERCODE/USR_ACCESS` 均匹配 | `build/fpga_mainline_validation/09_program_jtag.log` |
+| DDR3 板测 | 捕获 `CAL=1` 与 `DDR3 PASS`，顶层仿真和板级 ROM 均执行 `0x8000_0000` 的 `DEADBEEF` 写回读 | `build/fpga_mainline_validation/05_run_top_sim.log`, `build/uart_test_rs16.txt` |
 | UART 板测 | 双 SMT 线程稳定交错输出 `UART DIAG PASS` | `build/uart_test_rs16.txt` |
-| 字符统计 | `U=7236`, `A=21709`, `R=7236`, `T=7236`, `D=7236`, `I=7236`, `G=7235`, `P=7236`, `S=14472`，有效字符总数 `86832` | `build/uart_test_rs16.txt` |
-| 时序签核 | `25MHz`, `WNS=+0.522ns`, `WHS=+0.078ns` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
-| 资源占用 | `41131 LUT / 18810 FF / 4096 LUTRAM / 4 DSP` | `build/ax7203/reports/utilization_aggressive.rpt` |
+| 字符统计 | `U=47655`, `A=142966`, `R=47656`, `T=47655`, `D=47656`, `I=47653`, `G=47654`, `P=47656`, `S=95311`，有效字符总数 `571862` | `build/fpga_mainline_validation/summary.txt` |
+| 时序签核 | `25MHz`, `WNS=+0.426ns`, `WHS=+0.036ns` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
+| 资源占用 | `53708 LUT / 43482 FF / 5203 LUTRAM / 4 DSP` | `build/ax7203/reports/utilization_aggressive.rpt` |
 
-> **说明**: `UART DIAG PASS` 的字符交错是两个 SMT 线程共享 UART TX、且软件层未做串口互斥时的**预期行为**，不是乱码、死锁或崩溃。当前 25MHz SMT 主基线验证的是 **TX 稳定性与核心持续运行**；`uart_echo` / RX 回路结果仍以较早的单线程辅助板测为准。
+> **说明**: `UART DIAG PASS` 的字符交错是两个 SMT 线程共享 UART TX、且软件层未做串口互斥时的**预期行为**，不是乱码、死锁或崩溃。当前主线 UART 抓包由脚本在 JTAG 前预先打开，确保能覆盖一次性 boot banner 中的 `CAL=1` / `DDR3 PASS`，随后继续抓取稳定的双线程持续输出。
 
 **当前 25MHz SMT 主基线的推荐复现实验顺序**
 
 ```powershell
-# 推荐：一键执行当前 25MHz SMT 主线自动验收
+# 推荐：一键执行当前 25MHz SMT + DDR3 主线自动验收
 python fpga/scripts/run_fpga_mainline_validation.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10
 ```
 
@@ -791,45 +792,45 @@ python fpga/scripts/run_fpga_mainline_validation.py --port COM5 --rs-depth 16 --
 
 ```powershell
 # 1. 先跑仿真基线
+python verification/run_all_tests.py --basic
 python verification/run_all_tests.py --basic --fpga-config
 
-# 2. 设置当前 25MHz SMT 主基线参数
-$env:AX7203_ENABLE_MEM_SUBSYS = "0"
+# 2. 设置当前 25MHz SMT + DDR3 主基线参数
+$env:AX7203_ENABLE_MEM_SUBSYS = "1"
+$env:AX7203_ENABLE_DDR3 = "1"
 $env:AX7203_ENABLE_ROCC = "0"
-$env:AX7203_ENABLE_DDR3 = "0"
 $env:AX7203_SMT_MODE = "1"
 $env:AX7203_RS_DEPTH = "16"
 $env:AX7203_RS_IDX_W = "4"
 $env:AX7203_FETCH_BUFFER_DEPTH = "16"
 $env:AX7203_CORE_CLK_MHZ = "25.0"
 $env:AX7203_UART_CLK_DIV = "217"
+$env:AX7203_ROM_ASM = "rom/test_fpga_ddr3_mainline.s"
 
 # 3. 生成并烧录当前主基线 bitstream
 vivado -mode batch -source fpga/create_project_ax7203.tcl
 vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
 vivado -mode batch -source fpga/program_ax7203_jtag.tcl
-
-# 4. 连续抓取 10 秒 UART，并按字符频率确认双线程交错执行
-powershell -ExecutionPolicy Bypass -File fpga/scripts/capture_uart_once.ps1 -Port COM5 -OutFile build/uart_test_rs16.txt -Seconds 10
 ```
 
 ### 13.4 当前固定综合配置（AX7203 已验证竞赛 bitstream）
 
-当前有效 bitstream 使用 `ENABLE_MEM_SUBSYS=0` 的轻量板级数据后端，并依赖激进实现策略在 25MHz 下完成签核。OoO 后端对 MMCM 启动毛刺敏感，因此当前主基线仍保留 `post_lock_cnt` + `post_lock_ready` 复位门控，确保 `clk_locked` 后再延迟 255 个稳定周期释放核心复位。
+当前有效 bitstream 使用 `ENABLE_MEM_SUBSYS=1 + ENABLE_DDR3=1 + L2_PASSTHROUGH=1` 的主线数据后端，并依赖激进实现策略在 25MHz 下完成签核。OoO 后端对 MMCM 启动毛刺敏感，因此当前主基线仍保留 `post_lock_cnt` + `post_lock_ready` 复位门控，确保 `clk_locked` 后再延迟 255 个稳定周期释放核心复位。
 
 | 开关 | 当前值 | 说明 |
 |------|------|------|
 | `FPGA_MODE` | `1` | 启用 AX7203 顶层时钟/复位/板级接口路径 |
-| `ENABLE_MEM_SUBSYS` | `0` | 当前主基线走 `legacy_mem_subsys`，不走完整 `mem_subsys/L2` 路径 |
+| `ENABLE_MEM_SUBSYS` | `1` | 当前主基线走统一 `mem_subsys` 路径 |
+| `ENABLE_DDR3` | `1` | 当前主基线接入 MIG + `ddr3_mem_port` |
+| `L2_PASSTHROUGH` | `1` | FPGA 主线保留 L2 接口层，但 cache 数据阵列旁路为片上 RAM / DDR3 直通路径 |
 | `ENABLE_ROCC_ACCEL` | `0` | 当前 bitstream 不综合 RoCC 加速器 |
-| `ENABLE_DDR3` | `0` | 当前主基线暂不启用 DDR3（历史板测已通过） |
 | `SMT_MODE` | `1` | 当前主基线已启用双线程 SMT |
 | `AX7203_RS_DEPTH` | `16` | 当前上板 MEM IQ 深度 |
 | `AX7203_RS_IDX_W` | `4` | `log2(RS_DEPTH)` |
 | `AX7203_FETCH_BUFFER_DEPTH` | `16` | 当前上板 Fetch Buffer 深度 |
 | `AX7203_CORE_CLK_MHZ` | `25.0` | 当前主基线核心时钟 |
 | `AX7203_UART_CLK_DIV` | `217` | `25MHz / 115200 ≈ 217`，保持 `115200 8N1` |
-| `AX7203_MAX_THREADS / AX7203_SYNTH_JOBS` | `4 / 4` | 当前 25MHz 主基线构建并行度 |
+| `AX7203_MAX_THREADS / AX7203_SYNTH_JOBS` | `4 / 4` | 当前 25MHz 主线构建并行度 |
 | 实现策略 | `ExtraNetDelay_high + AggressiveExplore + Explore + post-route phys_opt` | 当前有效签核版本依赖该激进实现流 |
 
 **当前实际上板的关键微架构参数**
@@ -840,70 +841,68 @@ powershell -ExecutionPolicy Bypass -File fpga/scripts/capture_uart_once.ps1 -Por
 | 发射宽度 | `2` | `2` | 当前仍为双发射 core |
 | ROB 深度 | `16` | `16` | `adam_riscv.v` 固定值 |
 | 物理寄存器堆 | `48-entry/thread PRF (4R2W)` | `48` | `32 arch + 16 rename` |
-| IQ 配置 | `INT=8, MEM=16, MUL=4` | `INT=8, MEM=16, MUL=4` | 当前主基线已恢复 `RS_DEPTH=16` |
-| `RS_DEPTH` (MEM IQ) | `16` | `16` | 当前 25MHz 主基线关键参数 |
-| Fetch Buffer 深度 | `16` | `16` | 当前主基线关键参数 |
-| 核心时钟 | `25 MHz` | `25 MHz` | 当前 AX7203 已验证竞赛 bitstream |
+| IQ 配置 | `INT=8, MEM=16, MUL=4` | `INT=8, MEM=16, MUL=4` | 当前主线为 `RS_DEPTH=16` |
+| Fetch Buffer 深度 | `16` | `16` | 当前主线关键参数 |
+| 核心时钟 | `25 MHz` | `25 MHz` | 当前 AX7203 已验证 bitstream |
 | L1 ICache | `2KB, 1-way, 32B line` | 待冻结 | 当前 `inst_memory` 内部启用轻量 ICache |
-| L1 DCache | `关闭` | L1→DDR3 | AXI4 端口已定义，但当前主基线未接入 |
-| 数据后端 | `legacy_mem_subsys (16KB LUTRAM)` | 待冻结 | 当前主基线使用轻量板级内存路径 |
-| `mem_subsys/L2` | `关闭` | 可选 | 历史板测通过，但不属于当前主基线 |
-| DDR3 | `关闭` | 可选 | MIG + `ddr3_mem_port` 历史板测通过 |
-| RoCC Scratchpad | `关闭` | `4KB` | 当前主基线默认不综合 |
-| SMT | `开启 (2线程)` | ✅ | 当前主基线已验证双线程并发输出 |
+| L1 DCache | `关闭` | L1→DDR3 | AXI4 端口已定义，但当前主线仍由 `lsu_shell + mem_subsys` 直连 |
+| 数据后端 | `mem_subsys + L2_PASSTHROUGH + DDR3` | 待冻结 | 当前主线默认路径 |
+| DDR3 | `开启` | 可选/主线 | `DDR3_STATUS_ADDR=0x1300_0020`, DDR3 外存窗口 `0x8000_0000+` |
+| RoCC Scratchpad | `关闭` | `4KB` | 当前主线默认不综合 |
+| SMT | `开启 (2线程)` | ✅ | 当前主线已验证双线程并发输出 |
 
-**当前 `legacy_mem_subsys` / MMIO 配置**
+**当前 `mem_subsys` / MMIO / DDR3 配置**
 
-- 共享 RAM：`4096×32-bit = 16KB` LUTRAM
-- 地址窗口：`0x0000_0000 - 0x0000_3FFF`
-- 当前主基线数据路径：`lsu_shell + store_buffer + legacy_mem_subsys`
+- 片上共享 RAM：`4096×32-bit = 16KB` LUTRAM，用于低地址 ROM/RAM 合并镜像 `rom/mem_subsys_ram.hex`
+- 低地址窗口：`0x0000_0000 - 0x0000_3FFF`
+- DDR3 窗口：`0x8000_0000+`，经 `ddr3_mem_port` 桥接到 MIG AXI4 256-bit UI
 - TUBE：`0x1300_0000`
+- DDR3 status：`0x1300_0020`，bit0=`init_calib_complete`
 - UART MMIO：`TXDATA(0x1300_0010)` / `STATUS(0x1300_0014)` / `RXDATA(0x1300_0018)` / `CTRL(0x1300_001C)`
 - 板级串口参数：`115200 8N1`
 
 **当前综合进去的主要部件**
 
 - `adam_riscv` 主核：双发射前后端、`dispatch_unit`、`rob`、`rename_map_table`、`freelist`、`phys_regfile`、`issue_queue`×3、`iq_pipe1_arbiter`
-- 执行与访存路径：`exec_pipe0/1`、`mul_unit`、`lsu_shell`、`store_buffer`、`legacy_mem_subsys`
+- 执行与访存路径：`exec_pipe0/1`、`mul_unit`、`lsu_shell`、`store_buffer`、`mem_subsys`、`l2_arbiter`、`l2_cache` passthrough、`clint`、`plic`
+- DDR3 路径：`ddr3_mem_port` + MIG 7-Series IP + AXI lane steering / CDC bridge
 - 取指路径：`stage_if + BPU + inst_memory`
 - 板级逻辑：`clk_wiz_0`、`syn_rst`、`post_lock_cnt/post_lock_ready`、`uart_rx_monitor`、LED/UART glue
 
 **当前没有综合进去的部件**
 
-- `mem_subsys` / `L2_PASSTHROUGH` / `CLINT` / `PLIC` 主路径（历史板测通过，可切回）
-- `DDR3`（MIG + `ddr3_mem_port`，历史板测通过）
+- `legacy_mem_subsys` 主路径（保留历史辅助配置）
 - `l1_dcache_nb`
 - `mmu_sv32`
 - `RoCC accelerator`
 
-### 13.5 当前签核资源与时序（AX7203, 2026-04-14）
+### 13.5 当前签核资源与时序（AX7203, 2026-04-15）
 
-当前主基线的资源数字以 `build/ax7203/reports/utilization_aggressive.rpt` 为准；时序签核以 **激进实现后的** `build/ax7203/reports/timing_summary_aggressive.rpt` 为准。  
-`build/ax7203/reports/timing_summary.rpt` 是同配置的**普通实现参考报告**，用于说明为什么 25MHz 需要激进实现流，不作为当前已烧录 bitstream 的签核依据。
+当前主线的资源数字以 `build/ax7203/reports/utilization_aggressive.rpt` 为准；时序签核以 **激进实现后的** `build/ax7203/reports/timing_summary_aggressive.rpt` 为准。  
+当前有效 bitstream 对应 `mem_subsys + DDR3 + L2_PASSTHROUGH`，不是早期 `legacy_mem_subsys` 配置。
 
 **时序结果**
 
 | 报告 | 配置 | WNS | WHS | 说明 |
 |------|------|------|------|------|
-| `timing_summary_aggressive.rpt` | `OoO + SMT=1 + RS=16 + FB=16 + 25MHz` | **`+0.522ns`** | **`+0.078ns`** | ✅ 当前有效签核报告，对应当前已烧录的 25MHz SMT 主基线 |
-| `timing_summary.rpt` | 同配置普通实现 | `-2.213ns` | `+0.100ns` | 历史/参考报告，用于说明普通实现流在 25MHz 下无法通过 |
+| `timing_summary_aggressive.rpt` | `OoO + SMT=1 + RS=16 + FB=16 + mem_subsys + DDR3 + 25MHz` | **`+0.426ns`** | **`+0.036ns`** | ✅ 当前有效签核报告，对应当前已烧录的 25MHz SMT + DDR3 主线 |
 
-> **注意**: 25MHz 收敛依赖激进实现策略；README 中凡标注“当前已验证”的 25MHz 结果，一律以 `*_aggressive.rpt` 为准，而不是普通实现参考报告。
+> **注意**: 25MHz 收敛依赖激进实现策略；README 中凡标注“当前已验证”的 25MHz 结果，一律以 `*_aggressive.rpt` 为准。
 
-**本轮关键收敛变化**
+**当前最差路径**
 
-- 本轮 25MHz 主线签核对应的 RTL 变化是：`u_iq_mem` 内部改成局部 `candidate bundle` 形成、`dispatch_unit` 的 `p1_mem_cand_*` 改为 free-running 数据寄存器 + 单独 valid 控制、`issue_queue` 的 MEM store-ordering 改为每线程 store 队列摘要，以及上一轮的 `p0_pre_ro` / `p1_pre_ro` / flush 边界修复继续保留。
-- 旧的 `u_p1_arb -> PRF -> bypass -> ro1_reg` / `pipe0 br_mark` 关键链已经不再是当前最差路径。
-- 当前全局最差路径已经变为 `por_rst_n_reg/C -> u_adam_riscv/post_lock_cnt_reg[4]/CLR` 的异步 recovery 路径；当前最差同步 25MHz 主时钟路径是 `u_adam_riscv/u_exec_pipe1/mem_req_addr_r_reg[19] -> u_adam_riscv/gen_legacy_mem.u_legacy_mem_subsys/load_rdata_reg[5]`，数据路径约 `31.938ns`，其中布线约占 `80.2%`，详见 `build/ax7203/reports/timing_summary_aggressive.rpt` 与 `build/ax7203/reports/timing_detail_aggressive.rpt`。
+- 当前全局最差路径是异步 recovery：`por_rst_n_reg/C -> u_adam_riscv/post_lock_cnt_reg[4]/CLR`，slack `+0.426ns`。
+- 当前最差 setup 路径已不在 `u_p1_arb -> PRF -> bypass` 或 MEM candidate CE 链上；报告中最差 setup 示例为 UART TX 到板级 monitor 的跨时钟/调试路径，slack `+0.883ns`。
+- DDR3/MIG 相关 setup 路径也通过，报告中 MIG PHY control / ODDR 相关路径 slack 均为正值。
 
 **资源结果**
 
-| 资源 | 当前主基线 | 可用量 | 利用率 |
+| 资源 | 当前主线 | 可用量 | 利用率 |
 |------|------|------|------|
-| Slice LUTs | **41,131** | 133,800 | **30.74%** |
-| Slice Registers | **18,810** | 269,200 | **6.99%** |
-| LUT as Memory | **4,096** | 46,200 | **8.87%** |
-| RAMB18 | `0` | 730 | `0.00%` |
+| Slice LUTs | **53,708** | 133,800 | **40.14%** |
+| Slice Registers | **43,482** | 269,200 | **16.15%** |
+| LUT as Memory | **5,203** | 46,200 | **11.26%** |
+| Block RAM Tile | `0` | 365 | `0.00%` |
 | DSP48E1 | `4` | 740 | `0.54%` |
 
 ### 13.6 历史/辅助自动板测入口（归档）

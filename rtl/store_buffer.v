@@ -430,7 +430,6 @@ always @(posedge clk or negedge rstn) begin
         // the flushed thread.
         alloc_expected_epoch = store_tid ? current_epoch_t1 : current_epoch_t0;
         if (store_req_valid && store_req_accept &&
-            (store_epoch == alloc_expected_epoch) &&
             !(flush && (store_tid == flush_tid) &&
               (!flush_order_valid || (store_order_id > flush_order_id)))) begin
             if (store_tid == 1'b0) begin
@@ -454,9 +453,16 @@ always @(posedge clk or negedge rstn) begin
                 sb_tail_next[1] = sb_tail_next[1] + 1;
                 sb_count_next[1] = sb_count_next[1] + 1;
             end
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[SB ENQ] tid=%0d order=%0d addr=%h data=%h func3=%0d",
                      store_tid, store_order_id, store_addr, store_data, store_func3);
+            `endif
+        end else if (store_req_valid && store_req_accept) begin
+            `ifdef VERBOSE_SIM_LOGS
+            $display("[SB DROP] tid=%0d order=%0d addr=%h data=%h func3=%0d epoch=%0d expected=%0d flush=%0b flush_tid=%0d flush_order_valid=%0b flush_order=%0d",
+                     store_tid, store_order_id, store_addr, store_data, store_func3,
+                     store_epoch, alloc_expected_epoch,
+                     flush, flush_tid, flush_order_valid, flush_order_id);
             `endif
         end
 
@@ -469,7 +475,7 @@ always @(posedge clk or negedge rstn) begin
                 if (sb_valid_next[0][j] && !sb_committed_next[0][j] &&
                     (sb_order_id[0][j] == commit0_order_id)) begin
                     sb_committed_next[0][j] = 1'b1;
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[SB COMMIT] tid=0 order=%0d idx=%0d addr=%h",
                              commit0_order_id, j, sb_addr[0][j]);
                     `endif
@@ -483,7 +489,7 @@ always @(posedge clk or negedge rstn) begin
                 if (sb_valid_next[1][j] && !sb_committed_next[1][j] &&
                     (sb_order_id[1][j] == commit1_order_id)) begin
                     sb_committed_next[1][j] = 1'b1;
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[SB COMMIT] tid=1 order=%0d idx=%0d addr=%h",
                              commit1_order_id, j, sb_addr[1][j]);
                     `endif
@@ -494,7 +500,7 @@ always @(posedge clk or negedge rstn) begin
         // ── Store Drain ─────────────────────────────────────────
         // Remove drained stores from buffer (T0 has priority)
         if (drain_fire_t0) begin
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[SB DRAIN] tid=0 order=%0d addr=%h data=%h wen=%b",
                      sb_order_id[0][sb_head_next[0]], sb_addr[0][sb_head_next[0]],
                      sb_data[0][sb_head_next[0]], mem_write_wen);
@@ -504,7 +510,7 @@ always @(posedge clk or negedge rstn) begin
             sb_head_next[0] = sb_head_next[0] + 1;
             sb_count_next[0] = sb_count_next[0] - 1;
         end else if (drain_fire_t1) begin
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[SB DRAIN] tid=1 order=%0d addr=%h data=%h wen=%b",
                      sb_order_id[1][sb_head_next[1]], sb_addr[1][sb_head_next[1]],
                      sb_data[1][sb_head_next[1]], mem_write_wen);

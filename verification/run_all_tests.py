@@ -187,6 +187,7 @@ class TestRunner:
         ]
         if self.fpga_config:
             compile_cmd += [
+                "-DENABLE_MEM_SUBSYS=1",
                 "-DSIM_SCOREBOARD_RS_DEPTH=16",
                 "-DSIM_SCOREBOARD_RS_IDX_W=4",
             ]

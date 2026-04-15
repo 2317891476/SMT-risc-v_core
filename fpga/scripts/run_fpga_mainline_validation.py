@@ -19,11 +19,12 @@ ROM_DIR = REPO_ROOT / "rom"
 RTL_DIR = REPO_ROOT / "rtl"
 FPGA_RTL_DIR = REPO_ROOT / "fpga" / "rtl"
 LIB_RAM_BFM = REPO_ROOT / "libs" / "REG_ARRAY" / "SRAM" / "ram_bfm.v"
-MAINLINE_ROM = ROM_DIR / "test_fpga_uart_board_diag.s"
-MAINLINE_TB = COMP_TEST_DIR / "tb_ax7203_top_mainline_smoke.sv"
-MAINLINE_TB_TOP = "tb_ax7203_top_mainline_smoke"
-MAINLINE_EXPECT_TOKEN = "[AX7203_MAINLINE] PASS"
+MAINLINE_ROM = ROM_DIR / "test_fpga_ddr3_mainline.s"
+MAINLINE_TB = COMP_TEST_DIR / "tb_ax7203_top_mainline_ddr3_smoke.sv"
+MAINLINE_TB_TOP = "tb_ax7203_top_mainline_ddr3_smoke"
+MAINLINE_EXPECT_TOKEN = "[AX7203_MAINLINE_DDR3] PASS"
 MAINLINE_TOP_MODULE = "adam_riscv_ax7203_top"
+MIG_STUB = COMP_TEST_DIR / "mig_7series_0_stub.v"
 PROJECT_DIR = BUILD_DIR / "ax7203"
 TIMING_SUMMARY_AGGR = PROJECT_DIR / "reports" / "timing_summary_aggressive.rpt"
 TIMING_DETAIL_AGGR = PROJECT_DIR / "reports" / "timing_detail_aggressive.rpt"
@@ -117,6 +118,8 @@ def parse_timing_summary(path: Path) -> dict[str, str]:
 
 def analyze_uart_capture(path: Path) -> dict[str, object]:
     text = read_text(path) if path.exists() else ""
+    saw_cal = "CAL=1" in text
+    saw_ddr3_pass = "DDR3 PASS" in text
     counts = {ch: text.count(ch) for ch in "UARTDIGPS"}
     counts["A"] = text.count("A")
     counts["S"] = text.count("S")
@@ -143,6 +146,8 @@ def analyze_uart_capture(path: Path) -> dict[str, object]:
         "base_count": base,
         "ratio_ok": ratio_ok,
         "file_size": len(text),
+        "saw_cal": saw_cal,
+        "saw_ddr3_pass": saw_ddr3_pass,
     }
 
 
@@ -150,9 +155,9 @@ def build_env(rs_depth: int, fetch_buffer_depth: int, core_clk_mhz: float) -> di
     env = os.environ.copy()
     env.update(
         {
-            "AX7203_ENABLE_MEM_SUBSYS": "0",
+            "AX7203_ENABLE_MEM_SUBSYS": "1",
             "AX7203_ENABLE_ROCC": "0",
-            "AX7203_ENABLE_DDR3": "0",
+            "AX7203_ENABLE_DDR3": "1",
             "AX7203_SMT_MODE": "1",
             "AX7203_RS_DEPTH": str(rs_depth),
             "AX7203_RS_IDX_W": str(derive_idx_width(rs_depth)),
@@ -180,6 +185,7 @@ def run_top_sim(logs_dir: Path, *, rs_depth: int, fetch_buffer_depth: int, core_
             str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
             "--asm",
             str(MAINLINE_ROM),
+            "--merge-mem-subsys",
         ],
         cwd=REPO_ROOT,
         log_path=logs_dir / "03_build_rom.log",
@@ -190,9 +196,12 @@ def run_top_sim(logs_dir: Path, *, rs_depth: int, fetch_buffer_depth: int, core_
         which_required("iverilog"),
         "-g2012",
         "-DFPGA_MODE=1",
-        "-DENABLE_MEM_SUBSYS=0",
+        "-DENABLE_MEM_SUBSYS=1",
+        "-DENABLE_DDR3=1",
+        "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=1",
+        "-DTB_SHORT_TIMEOUT_NS=8000000",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
         f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
         f"-DFPGA_FETCH_BUFFER_DEPTH={fetch_buffer_depth}",
@@ -211,11 +220,12 @@ def run_top_sim(logs_dir: Path, *, rs_depth: int, fetch_buffer_depth: int, core_
         str(LIB_RAM_BFM),
         str(COMP_TEST_DIR / "clk_wiz_0_stub.v"),
         str(COMP_TEST_DIR / "ibufgds_stub.v"),
+        str(MIG_STUB),
         str(MAINLINE_TB),
     ]
     run_logged(compile_cmd, cwd=REPO_ROOT, log_path=logs_dir / "04_compile_top_sim.log", timeout=300)
     sim_log = logs_dir / "05_run_top_sim.log"
-    run_logged([which_required("vvp"), str(out_file)], cwd=ROM_DIR, log_path=sim_log, timeout=300)
+    run_logged([which_required("vvp"), str(out_file)], cwd=ROM_DIR, log_path=sim_log, timeout=900)
 
     sim_text = read_text(sim_log)
     if MAINLINE_EXPECT_TOKEN not in sim_text:
@@ -313,38 +323,65 @@ def main() -> int:
         if float(timing["wns"]) < 0.0 or float(timing["whs"]) < 0.0:
             raise RuntimeError(f"Aggressive implementation has negative slack; see {TIMING_SUMMARY_AGGR}")
 
-        current_stage = "program_jtag"
-        run_logged(
-            [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
-            cwd=REPO_ROOT,
-            env=env,
-            log_path=program_log,
-            timeout=1800,
-        )
-        build_id = parse_build_id(BUILD_ID_FILE)
-
         powershell = which_required("powershell.exe", "powershell")
-        current_stage = "uart_capture"
-        run_logged(
-            [
-                powershell,
-                "-ExecutionPolicy",
-                "Bypass",
-                "-File",
-                str(REPO_ROOT / "fpga" / "scripts" / "capture_uart_once.ps1"),
-                "-Port",
-                args.port,
-                "-OutFile",
-                str(UART_CAPTURE_FILE),
-                "-Seconds",
-                str(args.capture_seconds),
-            ],
-            cwd=REPO_ROOT,
-            log_path=capture_log,
-            timeout=args.capture_seconds + 120,
-        )
+        capture_window_seconds = max(args.capture_seconds + 60, 75)
+        capture_cmd = [
+            powershell,
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+            str(REPO_ROOT / "fpga" / "scripts" / "capture_uart_once.ps1"),
+            "-Port",
+            args.port,
+            "-OutFile",
+            str(UART_CAPTURE_FILE),
+            "-Seconds",
+            str(capture_window_seconds),
+            "-OpenDelayMs",
+            "0",
+        ]
+
+        current_stage = "uart_capture_prearm"
+        capture_log.parent.mkdir(parents=True, exist_ok=True)
+        with capture_log.open("w", encoding="utf-8", newline="\n") as cap_fh:
+            cap_fh.write(f"$ {' '.join(capture_cmd)}\n\n")
+            cap_fh.flush()
+            capture_proc = subprocess.Popen(
+                capture_cmd,
+                cwd=REPO_ROOT,
+                stdout=cap_fh,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            current_stage = "program_jtag"
+            try:
+                run_logged(
+                    [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
+                    cwd=REPO_ROOT,
+                    env=env,
+                    log_path=program_log,
+                    timeout=1800,
+                )
+            except Exception:
+                capture_proc.terminate()
+                try:
+                    capture_proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    capture_proc.kill()
+                raise
+
+            build_id = parse_build_id(BUILD_ID_FILE)
+            current_stage = "uart_capture"
+            capture_rc = capture_proc.wait(timeout=capture_window_seconds + 30)
+            if capture_rc != 0:
+                raise RuntimeError(f"UART capture failed ({capture_rc}); see {capture_log}")
 
         uart_analysis = analyze_uart_capture(UART_CAPTURE_FILE)
+        if not uart_analysis["saw_cal"]:
+            raise RuntimeError(f"UART capture is missing CAL=1; see {UART_CAPTURE_FILE}")
+        if not uart_analysis["saw_ddr3_pass"]:
+            raise RuntimeError(f"UART capture is missing DDR3 PASS; see {UART_CAPTURE_FILE}")
         if not uart_analysis["ratio_ok"]:
             raise RuntimeError(f"UART capture does not match expected dual-thread ratio; see {UART_CAPTURE_FILE}")
     except Exception as exc:  # noqa: BLE001
@@ -364,6 +401,9 @@ def main() -> int:
         f"FetchBufferDepth: {args.fetch_buffer_depth}",
         f"CoreClkMHz: {args.core_clk_mhz:.1f}",
         f"UartClkDiv: {derive_uart_clk_div(args.core_clk_mhz)}",
+        "EnableMemSubsys: 1",
+        "EnableDDR3: 1",
+        "L2Passthrough: 1",
         f"BuildID: {build_id}",
         f"BasicLog: {basic_default_log}",
         f"BasicFpgaConfigLog: {basic_fpga_log}",
@@ -383,6 +423,8 @@ def main() -> int:
         f"UartValidChars: {uart_analysis.get('valid_char_total', 0)}",
         f"UartBaseCount: {uart_analysis.get('base_count', 0)}",
         f"UartRatioOK: {uart_analysis.get('ratio_ok', False)}",
+        f"SawCAL1: {uart_analysis.get('saw_cal', False)}",
+        f"SawDDR3PASS: {uart_analysis.get('saw_ddr3_pass', False)}",
         f"CountU: {counts.get('U', 0)}",
         f"CountA: {counts.get('A', 0)}",
         f"CountR: {counts.get('R', 0)}",

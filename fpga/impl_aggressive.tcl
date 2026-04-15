@@ -10,11 +10,13 @@ set project_name "adam_riscv_ax7203"
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set impl_jobs [ax7203_env_or_default AX7203_IMPL_JOBS 4]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
+set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
 set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
-set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 20.0])}]
+set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
 
 set report_dir "$project_dir/reports"
@@ -34,6 +36,7 @@ if {$top_module eq "adam_riscv_ax7203_top"} {
 
 set base_xdc "$script_dir/constraints/ax7203_base.xdc"
 set uart_led_xdc "$script_dir/constraints/ax7203_uart_led.xdc"
+set ddr3_xdc "$script_dir/constraints/ax7203_ddr3.xdc"
 set clk_wiz_board_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_board.xdc"
 set clk_wiz_timing_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0.xdc"
 
@@ -47,6 +50,9 @@ if {[llength [get_cells -quiet u_adam_riscv/clk2cpu/inst]] > 0} {
 }
 read_xdc $base_xdc
 read_xdc $uart_led_xdc
+if {$enable_ddr3 && [file exists $ddr3_xdc]} {
+    read_xdc $ddr3_xdc
+}
 
 set build_id [format %08X [expr {[clock seconds] & 0xFFFFFFFF}]]
 set_property BITSTREAM.CONFIG.USERID "32'h$build_id" [current_design]
@@ -55,6 +61,8 @@ set_property BITSTREAM.CONFIG.USR_ACCESS "0x$build_id" [current_design]
 puts "=== Aggressive Implementation ==="
 puts "Top module: $top_module"
 puts "Implementation jobs: $impl_jobs"
+puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
+puts "ENABLE_DDR3: $enable_ddr3"
 puts "SMT_MODE: $smt_mode"
 puts "RS depth: $rs_depth"
 puts "Fetch buffer depth: $fetch_buffer_depth"
@@ -143,6 +151,8 @@ ax7203_write_evidence $evidence_file [list \
     "TopModule: $top_module" \
     "TargetPart: $target_part" \
     "ImplementationJobs: $impl_jobs" \
+    "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
+    "ENABLE_DDR3: $enable_ddr3" \
     "SMT_MODE: $smt_mode" \
     "RSDepth: $rs_depth" \
     "RSIdxW: $rs_idx_w" \

@@ -64,7 +64,9 @@ module mem_subsys (
     // UART physical interface
     // ═══════════════════════════════════════════════════════════════════════════
     input  wire        uart_rx,           // UART receive pin
-    output wire        uart_tx            // UART transmit pin
+    output wire        uart_tx,           // UART transmit pin
+    output wire        debug_uart_tx_byte_valid,
+    output wire [7:0]  debug_uart_tx_byte
 
 `ifdef ENABLE_DDR3
     ,
@@ -400,6 +402,8 @@ wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
 wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
+assign debug_uart_tx_byte_valid = uart_tx_start_r;
+assign debug_uart_tx_byte = uart_tx_data_r;
 
 uart_tx #(
     .CLK_DIV(UART_CLK_DIV)
@@ -507,7 +511,9 @@ always @(posedge clk or negedge rstn) begin
         end
         if (m1_mmio_req && m1_req_ready) begin
             mmio_resp_valid_r <= 1'b1;
-            if (addr_is_clint_m1) begin
+            if (addr_is_tube_m1 && !m1_req_write) begin
+                mmio_resp_data_r <= {24'd0, tube_status};
+            end else if (addr_is_clint_m1) begin
                 mmio_resp_data_r <= m1_req_write ? 32'd0 : clint_read_data;
             end else if (addr_is_plic_m1) begin
                 mmio_resp_data_r <= m1_req_write ? 32'd0 : plic_read_data;
