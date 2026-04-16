@@ -65,7 +65,8 @@ module adam_riscv(
     output wire [15:0] debug_rs_qk_flat,
     output wire [31:0] debug_rs_seq_lo_flat,
     output wire [7:0] debug_branch_issue_count,
-    output wire [7:0] debug_branch_complete_count
+    output wire [7:0] debug_branch_complete_count,
+    output wire [383:0] debug_ddr3_fetch_bus
 
 `ifdef ENABLE_DDR3
     ,
@@ -375,6 +376,15 @@ wire [31:0] if_inst;
 wire [31:0] if_pc;
 wire [0:0]  if_tid;
 wire        if_pred_taken;
+wire [31:0] debug_fetch_pc_pending;
+wire [31:0] debug_fetch_pc_out;
+wire [31:0] debug_fetch_if_inst;
+wire [7:0]  debug_fetch_if_flags;
+wire [7:0]  debug_ic_high_miss_count;
+wire [7:0]  debug_ic_mem_req_count;
+wire [7:0]  debug_ic_mem_resp_count;
+wire [7:0]  debug_ic_cpu_resp_count;
+wire [7:0]  debug_ic_state_flags;
 
 // Fetch buffer backpressure
 wire fb_push_ready;
@@ -433,7 +443,16 @@ stage_if u_stage_if(
     .ext_mem_resp_ready (m0_resp_ready),
     .ext_mem_bypass_addr(m0_bypass_addr),
     .ext_mem_bypass_data(m0_bypass_data),
-    .use_external_refill(use_mem_subsys)
+    .use_external_refill(use_mem_subsys),
+    .debug_fetch_pc_pending(debug_fetch_pc_pending),
+    .debug_pc_out          (debug_fetch_pc_out),
+    .debug_if_inst         (debug_fetch_if_inst),
+    .debug_if_flags        (debug_fetch_if_flags),
+    .debug_ic_high_miss_count(debug_ic_high_miss_count),
+    .debug_ic_mem_req_count  (debug_ic_mem_req_count),
+    .debug_ic_mem_resp_count (debug_ic_mem_resp_count),
+    .debug_ic_cpu_resp_count (debug_ic_cpu_resp_count),
+    .debug_ic_state_flags    (debug_ic_state_flags)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2167,6 +2186,14 @@ reg [7:0]  debug_last_iss0_pc_lo_r;
 reg [7:0]  debug_last_iss1_pc_lo_r;
 reg [7:0]  debug_branch_issue_count_r;
 reg [7:0]  debug_branch_complete_count_r;
+reg [7:0]  debug_if_valid_count_r;
+reg [7:0]  debug_fb_pop_count_r;
+reg [7:0]  debug_dec0_count_r;
+reg [7:0]  debug_disp0_count_r;
+reg [7:0]  debug_retire_count_r;
+reg [7:0]  debug_m1_req_count_r;
+reg [7:0]  debug_m1_resp_count_r;
+reg [7:0]  debug_uart_tx_start_count_r;
 
 // WB data sources for result buffer
 wire [31:0] wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
@@ -2186,7 +2213,31 @@ always @(posedge clk or negedge rstn) begin
         debug_last_iss1_pc_lo_r <= 8'd0;
         debug_branch_issue_count_r <= 8'd0;
         debug_branch_complete_count_r <= 8'd0;
+        debug_if_valid_count_r <= 8'd0;
+        debug_fb_pop_count_r <= 8'd0;
+        debug_dec0_count_r <= 8'd0;
+        debug_disp0_count_r <= 8'd0;
+        debug_retire_count_r <= 8'd0;
+        debug_m1_req_count_r <= 8'd0;
+        debug_m1_resp_count_r <= 8'd0;
+        debug_uart_tx_start_count_r <= 8'd0;
     end else begin
+        if (if_valid)
+            debug_if_valid_count_r <= debug_if_valid_count_r + 8'd1;
+        if (fb_pop0_valid && fb_consume_0)
+            debug_fb_pop_count_r <= debug_fb_pop_count_r + 8'd1;
+        if (dec0_valid)
+            debug_dec0_count_r <= debug_dec0_count_r + 8'd1;
+        if (disp0_accepted)
+            debug_disp0_count_r <= debug_disp0_count_r + 8'd1;
+        if (|rob_instr_retired)
+            debug_retire_count_r <= debug_retire_count_r + 8'd1;
+        if (m1_req_valid && m1_req_ready)
+            debug_m1_req_count_r <= debug_m1_req_count_r + 8'd1;
+        if (m1_resp_valid)
+            debug_m1_resp_count_r <= debug_m1_resp_count_r + 8'd1;
+        if (mem_subsys_debug_uart_tx_byte_valid || legacy_debug_uart_tx_byte_valid)
+            debug_uart_tx_start_count_r <= debug_uart_tx_start_count_r + 8'd1;
         if (p0_pre_ro_valid)
             debug_last_iss0_pc_lo_r <= p0_pre_ro_pc[7:0];
         if (p1_winner_valid)
@@ -2375,6 +2426,9 @@ wire        mem_subsys_ext_external_irq;  // PLIC external interrupt (MEIP)
 wire        mem_subsys_uart_tx;           // UART TX from mem_subsys MMIO
 wire        mem_subsys_debug_uart_tx_byte_valid;
 wire [7:0]  mem_subsys_debug_uart_tx_byte;
+wire [7:0]  mem_subsys_debug_uart_status_load_count;
+wire [7:0]  mem_subsys_debug_uart_tx_store_count;
+wire [127:0] mem_subsys_debug_ddr3_m0_bus;
 wire        ext_timer_irq;
 wire        ext_external_irq;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
@@ -2438,7 +2492,10 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .uart_rx           (uart_rx),
         .uart_tx           (mem_subsys_uart_tx),
         .debug_uart_tx_byte_valid(mem_subsys_debug_uart_tx_byte_valid),
-        .debug_uart_tx_byte(mem_subsys_debug_uart_tx_byte)
+        .debug_uart_tx_byte(mem_subsys_debug_uart_tx_byte),
+        .debug_uart_status_load_count(mem_subsys_debug_uart_status_load_count),
+        .debug_uart_tx_store_count(mem_subsys_debug_uart_tx_store_count),
+        .debug_ddr3_m0_bus (mem_subsys_debug_ddr3_m0_bus)
 
 `ifdef ENABLE_DDR3
         ,
@@ -2471,6 +2528,9 @@ end else begin : gen_mem_subsys_tieoff
     assign mem_subsys_uart_tx        = 1'b1;
     assign mem_subsys_debug_uart_tx_byte_valid = 1'b0;
     assign mem_subsys_debug_uart_tx_byte = 8'd0;
+    assign mem_subsys_debug_uart_status_load_count = 8'd0;
+    assign mem_subsys_debug_uart_tx_store_count = 8'd0;
+    assign mem_subsys_debug_ddr3_m0_bus = 128'd0;
 end
 endgenerate
 
@@ -2484,8 +2544,8 @@ assign debug_retire_seen = retire_seen_r;
 assign debug_uart_status_busy = use_mem_subsys ? 1'b0 : legacy_debug_uart_status_busy;
 assign debug_uart_busy = use_mem_subsys ? 1'b0 : legacy_debug_uart_busy;
 assign debug_uart_pending_valid = use_mem_subsys ? 1'b0 : legacy_debug_uart_pending_valid;
-assign debug_uart_status_load_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_status_load_count;
-assign debug_uart_tx_store_count = use_mem_subsys ? 8'd0 : legacy_debug_uart_tx_store_count;
+assign debug_uart_status_load_count = use_mem_subsys ? mem_subsys_debug_uart_status_load_count : legacy_debug_uart_status_load_count;
+assign debug_uart_tx_store_count = use_mem_subsys ? mem_subsys_debug_uart_tx_store_count : legacy_debug_uart_tx_store_count;
 assign debug_uart_tx_byte_valid = use_mem_subsys ? mem_subsys_debug_uart_tx_byte_valid : legacy_debug_uart_tx_byte_valid;
 assign debug_uart_tx_byte = use_mem_subsys ? mem_subsys_debug_uart_tx_byte : legacy_debug_uart_tx_byte;
 
@@ -2517,6 +2577,32 @@ assign debug_rs_qk_flat = sb_debug_rs_qk_flat;
 assign debug_rs_seq_lo_flat = sb_debug_rs_seq_lo_flat;
 assign debug_branch_issue_count = debug_branch_issue_count_r;
 assign debug_branch_complete_count = debug_branch_complete_count_r;
+assign debug_ddr3_fetch_bus = {
+    {mem_subsys_debug_uart_tx_byte, debug_uart_tx_start_count_r,
+     mem_subsys_debug_uart_tx_store_count, mem_subsys_debug_uart_status_load_count},
+    {16'd0, mem_subsys_debug_ddr3_m0_bus[127:112]},
+    debug_m1_resp_count_r,
+    debug_m1_req_count_r,
+    debug_retire_count_r,
+    debug_disp0_count_r,
+    debug_dec0_count_r,
+    debug_fb_pop_count_r,
+    debug_if_valid_count_r,
+    {retire_seen_r, fb_pop0_valid, dec0_valid, disp0_accepted,
+     p0_pre_ro_valid, |rob_instr_retired, sb_disp_stall, stall},
+    8'd0,
+    debug_fetch_if_inst,
+    debug_ic_state_flags,
+    mem_subsys_debug_ddr3_m0_bus[103:96],
+    debug_fetch_if_flags,
+    debug_fetch_pc_out,
+    debug_fetch_pc_pending,
+    debug_ic_cpu_resp_count,
+    debug_ic_mem_resp_count,
+    debug_ic_mem_req_count,
+    debug_ic_high_miss_count,
+    mem_subsys_debug_ddr3_m0_bus[95:0]
+};
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn)

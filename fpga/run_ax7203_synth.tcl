@@ -11,6 +11,7 @@ set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
 set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
+set ddr3_fetch_debug [ax7203_env_or_default AX7203_DDR3_FETCH_DEBUG 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -32,6 +33,8 @@ puts "Opening project: $project_file"
 puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
+puts "ENABLE_DDR3: $enable_ddr3"
+puts "DDR3_FETCH_DEBUG: $ddr3_fetch_debug"
 puts "SMT_MODE: $smt_mode"
 puts "RS depth: $rs_depth"
 puts "RS idx width: $rs_idx_w"
@@ -75,6 +78,11 @@ if {$enable_ddr3} {
 } else {
     set ddr3_def ""
 }
+if {$ddr3_fetch_debug} {
+    set ddr3_fetch_debug_def "DDR3_FETCH_DEBUG=1"
+} else {
+    set ddr3_fetch_debug_def ""
+}
 set_property top $top_module [get_filesets sources_1]
 set_property verilog_define [list \
     FPGA_MODE=1 \
@@ -87,6 +95,7 @@ set_property verilog_define [list \
     FPGA_UART_CLK_DIV=$uart_clk_div \
     {*}$l2_pt \
     {*}$ddr3_def \
+    {*}$ddr3_fetch_debug_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
@@ -153,6 +162,8 @@ ax7203_write_evidence $evidence_file [list \
     "Part: $target_part" \
     "ENABLE_ROCC_ACCEL: $enable_rocc" \
     "ENABLE_MEM_SUBSYS: $enable_mem_subsys" \
+    "ENABLE_DDR3: $enable_ddr3" \
+    "DDR3_FETCH_DEBUG: $ddr3_fetch_debug" \
     "SMT_MODE: $smt_mode" \
     "RSDepth: $rs_depth" \
     "RSIdxW: $rs_idx_w" \

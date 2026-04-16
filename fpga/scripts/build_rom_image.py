@@ -51,6 +51,12 @@ def main() -> int:
         action="store_true",
         help="Also regenerate rom/mem_subsys_ram.hex from inst.hex + data.hex",
     )
+    parser.add_argument(
+        "--define",
+        action="append",
+        default=[],
+        help="Optional preprocessor define(s) passed to gcc as -DNAME or -DNAME=VALUE.",
+    )
     args = parser.parse_args()
 
     asm_path = args.asm
@@ -73,21 +79,21 @@ def main() -> int:
         if stale.exists():
             stale.unlink()
 
-    run_checked(
-        [
-            gcc,
-            "-nostdlib",
-            "-nostartfiles",
-            "-Wl,--build-id=none",
-            "-Wl,-T,harvard_link.ld",
-            f"-march={march}",
-            "-mabi=ilp32",
-            str(asm_path),
-            "-o",
-            str(elf_path),
-        ],
-        cwd=rom_dir,
-    )
+    gcc_cmd = [
+        gcc,
+        "-nostdlib",
+        "-nostartfiles",
+        "-Wl,--build-id=none",
+        "-Wl,-T,harvard_link.ld",
+        f"-march={march}",
+        "-mabi=ilp32",
+    ]
+    if args.define:
+        gcc_cmd.extend(["-x", "assembler-with-cpp"])
+        gcc_cmd.extend(f"-D{define}" for define in args.define)
+    gcc_cmd.extend([str(asm_path), "-o", str(elf_path)])
+
+    run_checked(gcc_cmd, cwd=rom_dir)
 
     run_checked(
         [objcopy, "-j", ".text", "-O", "verilog", str(elf_path), str(inst_hex)],

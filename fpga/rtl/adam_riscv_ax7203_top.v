@@ -109,6 +109,7 @@ wire core_uart_tx;
 wire core_clk_dbg;
 wire core_ready;
 wire core_retire_seen;
+wire [383:0] core_ddr3_fetch_debug_bus;
 wire       core_uart_byte_valid_dbg;
 wire [7:0] core_uart_byte_dbg;
 wire       core_uart_frame_seen;
@@ -140,7 +141,8 @@ adam_riscv u_adam_riscv (
     .debug_core_clk(core_clk_dbg),
     .debug_retire_seen(core_retire_seen),
     .debug_uart_tx_byte_valid(core_uart_byte_valid_dbg),
-    .debug_uart_tx_byte(core_uart_byte_dbg)
+    .debug_uart_tx_byte(core_uart_byte_dbg),
+    .debug_ddr3_fetch_bus(core_ddr3_fetch_debug_bus)
 `ifdef ENABLE_DDR3
     ,
     .ddr3_req_valid  (core_ddr3_req_valid),
@@ -179,13 +181,50 @@ uart_rx_monitor #(
     .byte_data          (core_uart_byte              )
 );
 
+`ifdef ENABLE_DDR3
+wire fetch_probe_ddr3_calib = mig_init_calib_complete;
+`else
+wire fetch_probe_ddr3_calib = 1'b1;
+`endif
+
+`ifdef DDR3_FETCH_DEBUG
+wire       fetch_probe_byte_valid;
+wire [7:0] fetch_probe_byte;
+wire       fetch_probe_serial_tx;
+wire       fetch_probe_serial_active;
+`ifndef FPGA_UART_CLK_DIV
+    `define FPGA_UART_CLK_DIV 217
+`endif
+
+uart_ddr3_fetch_probe_beacon #(
+    .CLK_DIV(`FPGA_UART_CLK_DIV)
+) u_ddr3_fetch_probe_beacon (
+    .clk                  (core_clk_dbg),
+    .rst_n                (core_ready),
+    .core_ready           (core_ready),
+    .ddr3_calib_done      (fetch_probe_ddr3_calib),
+    .core_uart_byte_valid (core_uart_byte_valid_dbg),
+    .core_uart_byte       (core_uart_byte_dbg),
+    .debug_bus            (core_ddr3_fetch_debug_bus),
+    .tx                   (fetch_probe_serial_tx),
+    .active               (fetch_probe_serial_active),
+    .debug_byte_valid     (fetch_probe_byte_valid),
+    .debug_byte           (fetch_probe_byte)
+);
+`else
+wire       fetch_probe_byte_valid = 1'b0;
+wire [7:0] fetch_probe_byte = 8'd0;
+wire       fetch_probe_serial_tx = 1'b1;
+wire       fetch_probe_serial_active = 1'b0;
+`endif
+
 // =============================================================================
 // UART Routing
 // =============================================================================
 // Re-serialize the core's byte-level MMIO UART events in the 200 MHz board
 // wrapper. This keeps the CPU-visible UART semantics unchanged while avoiding
 // a fragile serial-to-serial bridge on the physical board path.
-assign uart_tx = board_uart_tx;
+assign uart_tx = fetch_probe_serial_active ? fetch_probe_serial_tx : board_uart_tx;
 
 // UART RX now feeds the core MMIO UART receiver directly.
 

@@ -11,6 +11,7 @@ set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
 set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
+set ddr3_fetch_debug [ax7203_env_or_default AX7203_DDR3_FETCH_DEBUG 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -32,6 +33,7 @@ puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "ENABLE_DDR3: $enable_ddr3"
+puts "DDR3_FETCH_DEBUG: $ddr3_fetch_debug"
 puts "SMT_MODE: $smt_mode"
 puts "RS depth: $rs_depth"
 puts "RS idx width: $rs_idx_w"
@@ -58,6 +60,7 @@ if {$enable_mem_subsys} {
 } else {
     set l2_pt ""
 }
+set ddr3_fetch_debug_def [expr {$ddr3_fetch_debug ? "DDR3_FETCH_DEBUG=1" : ""}]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -69,6 +72,7 @@ set_property verilog_define [list \
     FPGA_UART_CLK_DIV=$uart_clk_div \
     {*}$l2_pt \
     {*}[expr {$enable_ddr3 ? "ENABLE_DDR3=1" : ""}] \
+    {*}$ddr3_fetch_debug_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 

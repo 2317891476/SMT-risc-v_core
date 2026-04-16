@@ -73,7 +73,7 @@ int main (int argc, char **argv)
   board_uart_putc('D');
   board_uart_putc('H');
   board_uart_putc('\n');
-  board_printf("BENCH START DHRYSTONE\n");
+  board_printf("DHRYSTONE START\n");
   debug_printf("\n");
   debug_printf("Dhrystone Benchmark, Version %s\n", Version);
   if (Reg) {
@@ -189,12 +189,12 @@ int main (int argc, char **argv)
 
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
-  printf("BENCH DONE DHRYSTONE\n");
+  printf("DHRYSTONE DONE\n");
   for (;;) {
     board_delay_ms(250);
     printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
     printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
-    printf("BENCH DONE DHRYSTONE\n");
+    printf("DHRYSTONE DONE\n");
   }
 }
 

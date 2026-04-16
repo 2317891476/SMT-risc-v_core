@@ -272,10 +272,12 @@ void board_tube_write(uint8_t value) {
 }
 
 void board_runtime_init(void) {
-    // The AX7203 FPGA benchmark flow preinitializes the backing data RAM to
-    // zero before loading .rodata/.data, so .bss already comes up cleared.
-    // Skipping the byte-wise software clear keeps benchmark smoke tests from
-    // spending most of their simulated time in startup.
+#ifdef AX7203_CLEAR_BSS
+    unsigned char *p;
+    for (p = &__bss_start; p < &__bss_end; ++p) {
+        *p = 0;
+    }
+#endif
     board_uart_init();
     board_tube_write(0x04);
 }

@@ -53,7 +53,18 @@ module stage_if (
     output wire        ext_mem_resp_ready,
     output wire [31:0] ext_mem_bypass_addr,
     input  wire [31:0] ext_mem_bypass_data,
-    input  wire        use_external_refill
+    input  wire        use_external_refill,
+
+    // DDR3/XIP fetch debug summary
+    output wire [31:0] debug_fetch_pc_pending,
+    output wire [31:0] debug_pc_out,
+    output wire [31:0] debug_if_inst,
+    output wire [7:0]  debug_if_flags,
+    output wire [7:0]  debug_ic_high_miss_count,
+    output wire [7:0]  debug_ic_mem_req_count,
+    output wire [7:0]  debug_ic_mem_resp_count,
+    output wire [7:0]  debug_ic_cpu_resp_count,
+    output wire [7:0]  debug_ic_state_flags
 );
 
 // ─── PC management ──────────────────────────────────────────────────────────
@@ -112,6 +123,11 @@ wire [31:0] inst_from_mem;
 wire [0:0]  resp_tid_from_mem;
 wire [3:0]  resp_epoch_from_mem;
 wire        resp_valid_from_mem;
+wire [7:0]  ic_high_miss_count_dbg;
+wire [7:0]  ic_mem_req_count_dbg;
+wire [7:0]  ic_mem_resp_count_dbg;
+wire [7:0]  ic_cpu_resp_count_dbg;
+wire [7:0]  ic_state_flags_dbg;
 
 inst_memory #(
     .IROM_SPACE (4096)
@@ -126,6 +142,8 @@ inst_memory #(
     .resp_epoch     (resp_epoch_from_mem),
     .resp_valid     (resp_valid_from_mem),
     .current_epoch  (current_epoch     ),
+    .current_epoch_t0(epoch_t0          ),
+    .current_epoch_t1(epoch_t1          ),
     .flush          (|if_flush         ),
 
     // Task 5: External refill interface to mem_subsys M0
@@ -137,7 +155,12 @@ inst_memory #(
     .ext_mem_resp_last  (ext_mem_resp_last),
     .ext_mem_resp_ready (ext_mem_resp_ready),
     .ext_mem_bypass_data(ext_mem_bypass_data),
-    .use_external_refill(use_external_refill)
+    .use_external_refill(use_external_refill),
+    .debug_ic_high_miss_count(ic_high_miss_count_dbg),
+    .debug_ic_mem_req_count  (ic_mem_req_count_dbg),
+    .debug_ic_mem_resp_count (ic_mem_resp_count_dbg),
+    .debug_ic_cpu_resp_count (ic_cpu_resp_count_dbg),
+    .debug_ic_state_flags    (ic_state_flags_dbg)
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────
@@ -213,5 +236,16 @@ assign if_tid        = fetch_tid_pending;
 assign if_valid      = final_valid;
 assign if_inst       = inst_from_mem;
 assign if_pred_taken = fetch_pred_pending;
+assign debug_fetch_pc_pending = fetch_pc_pending;
+assign debug_pc_out           = pc_out;
+assign debug_if_inst          = inst_from_mem;
+assign debug_if_flags         = {fetch_req_active, fetch_req_launch, resp_valid_from_mem,
+                                 final_valid, response_stale, use_external_refill,
+                                 fetch_pc_pending[31], pc_out[31]};
+assign debug_ic_high_miss_count = ic_high_miss_count_dbg;
+assign debug_ic_mem_req_count   = ic_mem_req_count_dbg;
+assign debug_ic_mem_resp_count  = ic_mem_resp_count_dbg;
+assign debug_ic_cpu_resp_count  = ic_cpu_resp_count_dbg;
+assign debug_ic_state_flags     = ic_state_flags_dbg;
 
 endmodule

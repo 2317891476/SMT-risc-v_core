@@ -66,7 +66,10 @@ module mem_subsys (
     input  wire        uart_rx,           // UART receive pin
     output wire        uart_tx,           // UART transmit pin
     output wire        debug_uart_tx_byte_valid,
-    output wire [7:0]  debug_uart_tx_byte
+    output wire [7:0]  debug_uart_tx_byte,
+    output wire [7:0]  debug_uart_status_load_count,
+    output wire [7:0]  debug_uart_tx_store_count,
+    output wire [127:0] debug_ddr3_m0_bus
 
 `ifdef ENABLE_DDR3
     ,
@@ -146,11 +149,29 @@ wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_p
 
 // DDR3 region: address bit 31 set (0x8000_0000 - 0xFFFF_FFFF)
 `ifdef ENABLE_DDR3
+wire addr_is_ddr3_m0 = m0_req_addr[31];
+wire m0_ddr3_req     = m0_req_valid && addr_is_ddr3_m0;
 wire addr_is_ddr3_m1 = m1_req_addr[31];
 wire m1_ddr3_req     = m1_req_valid && addr_is_ddr3_m1;
+wire        m0_ddr3_req_ready;
+wire        m0_ddr3_resp_valid;
+wire [31:0] m0_ddr3_resp_data;
+wire        m0_ddr3_resp_last;
+wire        m1_ddr3_req_ready;
+wire        m1_ddr3_resp_valid;
+wire [31:0] m1_ddr3_resp_data;
 `else
+wire addr_is_ddr3_m0 = 1'b0;
 wire addr_is_ddr3_m1 = 1'b0;
+wire        m0_ddr3_req_ready = 1'b0;
+wire        m0_ddr3_resp_valid = 1'b0;
+wire [31:0] m0_ddr3_resp_data = 32'd0;
+wire        m0_ddr3_resp_last = 1'b0;
+wire        m1_ddr3_req_ready = 1'b0;
+wire        m1_ddr3_resp_valid = 1'b0;
+wire [31:0] m1_ddr3_resp_data = 32'd0;
 // synthesis translate_off
+wire m0_ddr3_req     = 1'b0;
 wire m1_ddr3_req     = 1'b0;
 // synthesis translate_on
 `endif
@@ -166,6 +187,11 @@ wire m2_cached_req      = m2_req_valid && addr_is_ram_m2;
 // M1 cached request - filter out MMIO
 wire        m1_cached_req   = m1_req_valid && !addr_is_uncached_m1 && !addr_is_ddr3_m1;
 wire        m1_cached_ready;
+wire        m0_l2_req_valid = m0_req_valid && !addr_is_ddr3_m0;
+wire        m0_l2_req_ready;
+wire        m0_l2_resp_valid;
+wire [31:0] m0_l2_resp_data;
+wire        m0_l2_resp_last;
 
 // M1 ready: MMIO is immediate (except UART TX backpressure), cached goes through arbiter
 // UART TX write stalls when pending buffer is full.
@@ -173,24 +199,29 @@ wire m1_mmio_ready = addr_is_uart_tx_m1 && m1_req_write
                    ? (uart_tx_enable_r && !uart_pending_valid_r)
                    : 1'b1;
 `ifdef ENABLE_DDR3
-assign m1_req_ready = addr_is_ddr3_m1    ? ddr3_req_ready
+assign m1_req_ready = addr_is_ddr3_m1    ? m1_ddr3_req_ready
                    : addr_is_uncached_m1 ? (m1_mmio_req && m1_mmio_ready)
                    : m1_cached_ready;
 `else
 assign m1_req_ready = addr_is_uncached_m1 ? (m1_mmio_req && m1_mmio_ready) : m1_cached_ready;
 `endif
 
+assign m0_req_ready  = addr_is_ddr3_m0 ? m0_ddr3_req_ready : m0_l2_req_ready;
+assign m0_resp_valid = m0_ddr3_resp_valid ? 1'b1 : m0_l2_resp_valid;
+assign m0_resp_data  = m0_ddr3_resp_valid ? m0_ddr3_resp_data : m0_l2_resp_data;
+assign m0_resp_last  = m0_ddr3_resp_valid ? m0_ddr3_resp_last : m0_l2_resp_last;
+
 l2_arbiter u_l2_arbiter (
     .clk            (clk),
     .rstn           (rstn),
     
     // Master 0: I-side (always cacheable)
-    .m0_req_valid   (m0_req_valid),
-    .m0_req_ready   (m0_req_ready),
+    .m0_req_valid   (m0_l2_req_valid),
+    .m0_req_ready   (m0_l2_req_ready),
     .m0_req_addr    (m0_req_addr),
-    .m0_resp_valid  (m0_resp_valid),
-    .m0_resp_data   (m0_resp_data),
-    .m0_resp_last   (m0_resp_last),
+    .m0_resp_valid  (m0_l2_resp_valid),
+    .m0_resp_data   (m0_l2_resp_data),
+    .m0_resp_last   (m0_l2_resp_last),
     
     // Master 1: D-side (cacheable only - MMIO filtered out)
     .m1_req_valid   (m1_cached_req),
@@ -246,7 +277,7 @@ wire [2:0]  ram_word_idx;
 assign ram_rdata = ram[ram_addr[13:2]];
 // I-side miss fast path: source the requested instruction word from the
 // shared mem_subsys RAM instead of a separate inst_backing_store image.
-assign m0_bypass_data = ram[m0_bypass_addr[13:2]];
+assign m0_bypass_data = m0_bypass_addr[31] ? 32'd0 : ram[m0_bypass_addr[13:2]];
 
 
 l2_cache u_l2_cache (
@@ -361,6 +392,10 @@ reg        uart_rx_valid_r;
 reg        uart_rx_overrun_r;
 reg        uart_rx_frame_err_r;
 reg [7:0]  uart_rx_data_r;
+reg [7:0]  debug_uart_status_load_count_r;
+reg [7:0]  debug_uart_tx_store_count_r;
+reg [7:0]  debug_uart_tx_write_count_r;
+reg        debug_uart_tx_write_seen_r;
 wire       uart_busy;
 wire       uart_status_busy;
 wire       uart_rx_byte_valid;
@@ -402,8 +437,20 @@ wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
 wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
+wire [7:0] debug_uart_flags = {
+    uart_tx_write,
+    uart_store_accept,
+    uart_pending_valid_r,
+    uart_busy,
+    uart_status_busy,
+    uart_tx_enable_r,
+    m1_req_valid,
+    m1_req_ready
+};
 assign debug_uart_tx_byte_valid = uart_tx_start_r;
 assign debug_uart_tx_byte = uart_tx_data_r;
+assign debug_uart_status_load_count = debug_uart_status_load_count_r;
+assign debug_uart_tx_store_count = debug_uart_tx_store_count_r;
 
 uart_tx #(
     .CLK_DIV(UART_CLK_DIV)
@@ -441,14 +488,26 @@ always @(posedge clk or negedge rstn) begin
         uart_rx_overrun_r    <= 1'b0;
         uart_rx_frame_err_r  <= 1'b0;
         uart_rx_data_r       <= 8'd0;
+        debug_uart_status_load_count_r <= 8'd0;
+        debug_uart_tx_store_count_r <= 8'd0;
+        debug_uart_tx_write_count_r <= 8'd0;
+        debug_uart_tx_write_seen_r <= 1'b0;
     end else begin
         uart_tx_start_r <= 1'b0;
+        debug_uart_tx_write_seen_r <= uart_tx_write;
 
         // TX: accept store into pending register
         if (uart_store_accept) begin
             uart_pending_byte_r  <= uart_write_byte;
             uart_pending_valid_r <= 1'b1;
+            debug_uart_tx_store_count_r <= debug_uart_tx_store_count_r + 8'd1;
         end
+
+        if (m1_mmio_req && m1_req_ready && addr_is_uart_status_m1 && !m1_req_write)
+            debug_uart_status_load_count_r <= debug_uart_status_load_count_r + 8'd1;
+
+        if (uart_tx_write && !debug_uart_tx_write_seen_r)
+            debug_uart_tx_write_count_r <= debug_uart_tx_write_count_r + 8'd1;
 
         // TX: drain pending when uart_tx is free
         if (uart_pending_valid_r && !uart_busy) begin
@@ -538,10 +597,10 @@ end
 // handshake the request first and then observe the completion in LSU_WAIT_RESP.
 `ifdef ENABLE_DDR3
 assign m1_resp_valid = mmio_resp_valid_r ? 1'b1
-                    : ddr3_resp_valid   ? 1'b1
+                    : m1_ddr3_resp_valid ? 1'b1
                     : m1_resp_valid_int;
 assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r
-                    : ddr3_resp_valid   ? ddr3_resp_data
+                    : m1_ddr3_resp_valid ? m1_ddr3_resp_data
                     : m1_resp_data_int;
 `else
 assign m1_resp_valid = mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
@@ -552,16 +611,202 @@ assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
 // DDR3 External Port Assignments
 // ═════════════════════════════════════════════════════════════════════════════
 `ifdef ENABLE_DDR3
-assign ddr3_req_valid = m1_ddr3_req;
-assign ddr3_req_addr  = {2'b0, m1_req_addr[29:0]};   // Strip bit[31:30], DDR3 uses [29:0]
-assign ddr3_req_write = m1_req_write;
-assign ddr3_req_wdata = m1_req_wdata;
-assign ddr3_req_wen   = m1_req_wen;
+localparam DDR3_ARB_IDLE      = 2'd0;
+localparam DDR3_ARB_M0_SEND   = 2'd1;
+localparam DDR3_ARB_WAIT_RESP = 2'd2;
+
+localparam DDR3_OWNER_M0 = 1'b0;
+localparam DDR3_OWNER_M1 = 1'b1;
+
+reg [1:0]  ddr3_arb_state;
+reg        ddr3_owner_r;
+reg        ddr3_last_owner_r;
+reg [2:0]  ddr3_m0_word_idx_r;
+reg [31:0] ddr3_m0_line_base_r;
+
+reg        ddr3_req_valid_r;
+reg [31:0] ddr3_req_addr_r;
+reg        ddr3_req_write_r;
+reg [31:0] ddr3_req_wdata_r;
+reg [3:0]  ddr3_req_wen_r;
+reg        m0_ddr3_req_ready_r;
+reg        m0_ddr3_resp_valid_r;
+reg [31:0] m0_ddr3_resp_data_r;
+reg        m0_ddr3_resp_last_r;
+reg        m1_ddr3_req_ready_r;
+reg        m1_ddr3_resp_valid_r;
+reg [31:0] m1_ddr3_resp_data_r;
+reg        debug_m0_req_seen_r;
+reg [7:0]  debug_m0_req_count_r;
+reg [7:0]  debug_m0_accept_count_r;
+reg [7:0]  debug_m0_resp_count_r;
+reg [7:0]  debug_m0_last_count_r;
+reg [31:0] debug_m0_last_req_addr_r;
+reg [31:0] debug_m0_last_resp_data_r;
+reg [7:0]  debug_m1_accept_count_r;
+
+wire ddr3_select_m0 = m0_ddr3_req && (!m1_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M1);
+wire ddr3_select_m1 = m1_ddr3_req && (!m0_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M0);
+wire [7:0] debug_m0_flags = {
+    ddr3_arb_state,
+    ddr3_owner_r,
+    ddr3_m0_word_idx_r,
+    ddr3_req_valid_r,
+    ddr3_req_ready
+};
+
+assign ddr3_req_valid = ddr3_req_valid_r;
+assign ddr3_req_addr  = ddr3_req_addr_r;
+assign ddr3_req_write = ddr3_req_write_r;
+assign ddr3_req_wdata = ddr3_req_wdata_r;
+assign ddr3_req_wen   = ddr3_req_wen_r;
+
+assign m0_ddr3_req_ready  = m0_ddr3_req_ready_r;
+assign m0_ddr3_resp_valid = m0_ddr3_resp_valid_r;
+assign m0_ddr3_resp_data  = m0_ddr3_resp_data_r;
+assign m0_ddr3_resp_last  = m0_ddr3_resp_last_r;
+assign m1_ddr3_req_ready  = m1_ddr3_req_ready_r;
+assign m1_ddr3_resp_valid = m1_ddr3_resp_valid_r;
+assign m1_ddr3_resp_data  = m1_ddr3_resp_data_r;
+assign debug_ddr3_m0_bus = {
+    debug_uart_flags,
+    debug_uart_tx_write_count_r,
+    debug_m1_accept_count_r,
+    debug_m0_flags,
+    debug_m0_last_resp_data_r,
+    debug_m0_last_req_addr_r,
+    debug_m0_last_count_r,
+    debug_m0_resp_count_r,
+    debug_m0_accept_count_r,
+    debug_m0_req_count_r
+};
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        ddr3_arb_state        <= DDR3_ARB_IDLE;
+        ddr3_owner_r          <= DDR3_OWNER_M0;
+        ddr3_last_owner_r     <= DDR3_OWNER_M1;
+        ddr3_m0_word_idx_r    <= 3'd0;
+        ddr3_m0_line_base_r   <= 32'd0;
+        ddr3_req_valid_r      <= 1'b0;
+        ddr3_req_addr_r       <= 32'd0;
+        ddr3_req_write_r      <= 1'b0;
+        ddr3_req_wdata_r      <= 32'd0;
+        ddr3_req_wen_r        <= 4'd0;
+        m0_ddr3_req_ready_r   <= 1'b0;
+        m0_ddr3_resp_valid_r  <= 1'b0;
+        m0_ddr3_resp_data_r   <= 32'd0;
+        m0_ddr3_resp_last_r   <= 1'b0;
+        m1_ddr3_req_ready_r   <= 1'b0;
+        m1_ddr3_resp_valid_r  <= 1'b0;
+        m1_ddr3_resp_data_r   <= 32'd0;
+        debug_m0_req_seen_r       <= 1'b0;
+        debug_m0_req_count_r      <= 8'd0;
+        debug_m0_accept_count_r   <= 8'd0;
+        debug_m0_resp_count_r     <= 8'd0;
+        debug_m0_last_count_r     <= 8'd0;
+        debug_m0_last_req_addr_r  <= 32'd0;
+        debug_m0_last_resp_data_r <= 32'd0;
+        debug_m1_accept_count_r   <= 8'd0;
+    end else begin
+        m0_ddr3_req_ready_r  <= 1'b0;
+        m0_ddr3_resp_valid_r <= 1'b0;
+        m0_ddr3_resp_last_r  <= 1'b0;
+        m1_ddr3_req_ready_r  <= 1'b0;
+        m1_ddr3_resp_valid_r <= 1'b0;
+        debug_m0_req_seen_r  <= m0_ddr3_req;
+
+        if (m0_ddr3_req && !debug_m0_req_seen_r) begin
+            debug_m0_req_count_r     <= debug_m0_req_count_r + 8'd1;
+            debug_m0_last_req_addr_r <= m0_req_addr;
+        end
+
+        case (ddr3_arb_state)
+            DDR3_ARB_IDLE: begin
+                ddr3_req_valid_r <= 1'b0;
+                if (ddr3_select_m0) begin
+                    ddr3_owner_r        <= DDR3_OWNER_M0;
+                    ddr3_m0_word_idx_r  <= 3'd0;
+                    ddr3_m0_line_base_r <= {2'b0, m0_req_addr[29:5], 5'b0};
+                    ddr3_req_addr_r     <= {2'b0, m0_req_addr[29:5], 5'b0};
+                    ddr3_req_write_r    <= 1'b0;
+                    ddr3_req_wdata_r    <= 32'd0;
+                    ddr3_req_wen_r      <= 4'd0;
+                    ddr3_arb_state      <= DDR3_ARB_M0_SEND;
+                end else if (ddr3_select_m1) begin
+                    ddr3_owner_r        <= DDR3_OWNER_M1;
+                    ddr3_req_addr_r     <= {2'b0, m1_req_addr[29:0]};
+                    ddr3_req_write_r    <= m1_req_write;
+                    ddr3_req_wdata_r    <= m1_req_wdata;
+                    ddr3_req_wen_r      <= m1_req_wen;
+                    ddr3_arb_state      <= DDR3_ARB_M0_SEND;
+                end
+            end
+
+            DDR3_ARB_M0_SEND: begin
+                if (!ddr3_req_valid_r) begin
+                    ddr3_req_valid_r <= 1'b1;
+                    if (ddr3_owner_r == DDR3_OWNER_M0) begin
+                        ddr3_req_addr_r  <= ddr3_m0_line_base_r + {27'd0, ddr3_m0_word_idx_r, 2'b00};
+                        ddr3_req_write_r <= 1'b0;
+                        ddr3_req_wdata_r <= 32'd0;
+                        ddr3_req_wen_r   <= 4'd0;
+                    end
+                end else if (ddr3_req_ready) begin
+                    ddr3_req_valid_r <= 1'b0;
+                    if (ddr3_owner_r == DDR3_OWNER_M0 && ddr3_m0_word_idx_r == 3'd0) begin
+                        m0_ddr3_req_ready_r <= 1'b1;
+                        debug_m0_accept_count_r <= debug_m0_accept_count_r + 8'd1;
+                    end else if (ddr3_owner_r == DDR3_OWNER_M1) begin
+                        m1_ddr3_req_ready_r <= 1'b1;
+                        debug_m1_accept_count_r <= debug_m1_accept_count_r + 8'd1;
+                    end
+                    ddr3_arb_state <= DDR3_ARB_WAIT_RESP;
+                end
+            end
+
+            DDR3_ARB_WAIT_RESP: begin
+                ddr3_req_valid_r <= 1'b0;
+                if (ddr3_resp_valid) begin
+                    if (ddr3_owner_r == DDR3_OWNER_M0) begin
+                        m0_ddr3_resp_valid_r <= 1'b1;
+                        m0_ddr3_resp_data_r  <= ddr3_resp_data;
+                        m0_ddr3_resp_last_r  <= (ddr3_m0_word_idx_r == 3'd7);
+                        debug_m0_resp_count_r <= debug_m0_resp_count_r + 8'd1;
+                        debug_m0_last_resp_data_r <= ddr3_resp_data;
+                        if (ddr3_m0_word_idx_r == 3'd7) begin
+                            debug_m0_last_count_r <= debug_m0_last_count_r + 8'd1;
+                            ddr3_last_owner_r <= DDR3_OWNER_M0;
+                            ddr3_arb_state    <= DDR3_ARB_IDLE;
+                        end else begin
+                            ddr3_m0_word_idx_r <= ddr3_m0_word_idx_r + 3'd1;
+                            ddr3_arb_state     <= DDR3_ARB_M0_SEND;
+                        end
+                    end else begin
+                        m1_ddr3_resp_valid_r <= 1'b1;
+                        m1_ddr3_resp_data_r  <= ddr3_resp_data;
+                        ddr3_last_owner_r    <= DDR3_OWNER_M1;
+                        ddr3_arb_state       <= DDR3_ARB_IDLE;
+                    end
+                end
+            end
+
+            default: begin
+                ddr3_arb_state   <= DDR3_ARB_IDLE;
+                ddr3_req_valid_r <= 1'b0;
+            end
+        endcase
+    end
+end
 `endif
 
 // ═════════════════════════════════════════════════════════════════════════════
 // RAM Preload Interface (for testbench)
 // Testbench can access ram[] array directly via hierarchical reference
 // ═════════════════════════════════════════════════════════════════════════════
+
+`ifndef ENABLE_DDR3
+assign debug_ddr3_m0_bus = 128'd0;
+`endif
 
 endmodule

@@ -22,6 +22,8 @@ module inst_memory #(
 
     // Epoch and flush interface from top level
     input  wire [3:0]  current_epoch,     // Current epoch for stale detection
+    input  wire [3:0]  current_epoch_t0,  // Per-thread epochs for async refill completion
+    input  wire [3:0]  current_epoch_t1,
     input  wire        flush,             // Flush signal
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -37,7 +39,14 @@ module inst_memory #(
     input  wire        ext_mem_resp_last,
     output wire        ext_mem_resp_ready,
     input  wire [31:0] ext_mem_bypass_data,
-    input  wire        use_external_refill  // 1=use external refill, 0=internal
+    input  wire        use_external_refill,  // 1=use external refill, 0=internal
+
+    // DDR3/XIP fetch debug summary
+    output wire [7:0]  debug_ic_high_miss_count,
+    output wire [7:0]  debug_ic_mem_req_count,
+    output wire [7:0]  debug_ic_mem_resp_count,
+    output wire [7:0]  debug_ic_cpu_resp_count,
+    output wire [7:0]  debug_ic_state_flags
 );
 
 // Internal signals
@@ -116,6 +125,8 @@ icache #(
 
     // Epoch
     .current_epoch    (current_epoch     ),
+    .current_epoch_t0 (current_epoch_t0  ),
+    .current_epoch_t1 (current_epoch_t1  ),
     .flush            (flush             ),
 
     // Memory interface for fills
@@ -128,7 +139,13 @@ icache #(
     .mem_resp_ready   (icache_mem_resp_ready),
 
     // Bypass from direct backing store read
-    .bypass_data      (miss_bypass_data)
+    .bypass_data      (miss_bypass_data),
+
+    .debug_high_miss_count(debug_ic_high_miss_count),
+    .debug_mem_req_count  (debug_ic_mem_req_count),
+    .debug_mem_resp_count (debug_ic_mem_resp_count),
+    .debug_cpu_resp_count (debug_ic_cpu_resp_count),
+    .debug_state_flags    (debug_ic_state_flags)
 );
 
 // External refill interface assignments

@@ -120,6 +120,7 @@ reg [31:0]        stored_pc;
 reg [31:0]        stored_imm;
 reg [31:0]        stored_op_a;     // for JALR
 reg [15:0]        stored_order_id;
+reg [0:0]         stored_tid;
 reg               stored_br;
 reg               stored_br_addr_mode;
 reg               stored_valid;
@@ -143,6 +144,7 @@ always @(posedge clk or negedge rstn) begin
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
         stored_order_id     <= 16'd0;
+        stored_tid          <= 1'b0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
         stored_valid        <= 1'b0;
@@ -153,6 +155,7 @@ always @(posedge clk or negedge rstn) begin
         stored_imm          <= in_imm;
         stored_op_a         <= op_A_pre;   // for JALR (rs1 value)
         stored_order_id     <= in_order_id;
+        stored_tid          <= in_tid;
         stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
         stored_valid        <= in_valid;
@@ -176,7 +179,7 @@ always @(posedge clk or negedge rstn) begin
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
         br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
-        br_tid_r      <= out_tid_r;  // use output register's tid
+        br_tid_r      <= stored_tid;
         br_order_id_r <= stored_order_id;
         br_complete_r <= stored_valid && stored_br;
     end

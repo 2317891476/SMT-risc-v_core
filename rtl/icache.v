@@ -29,6 +29,8 @@ module icache #(
 
     // Epoch tracking for stale-fill suppression
     input  wire [3:0]               current_epoch,
+    input  wire [3:0]               current_epoch_t0,
+    input  wire [3:0]               current_epoch_t1,
     input  wire                     flush,
 
     // Refill interface
@@ -41,7 +43,14 @@ module icache #(
     output wire                     mem_resp_ready,
 
     // Direct backing-store word for the requested address
-    input  wire [31:0]              bypass_data
+    input  wire [31:0]              bypass_data,
+
+    // DDR3/XIP fetch debug summary
+    output wire [7:0]               debug_high_miss_count,
+    output wire [7:0]               debug_mem_req_count,
+    output wire [7:0]               debug_mem_resp_count,
+    output wire [7:0]               debug_cpu_resp_count,
+    output wire [7:0]               debug_state_flags
 );
 
 localparam SETS           = CACHE_SIZE / (LINE_SIZE * WAYS);
@@ -72,8 +81,16 @@ reg                  req_valid_r;
 reg [INDEX_W-1:0]      miss_index_r;
 reg [TAG_W-1:0]        miss_tag_r;
 reg [3:0]              miss_epoch_r;
+reg [OFFSET_W-1:0]     miss_offset_r;
+reg [TID_WIDTH-1:0]    miss_tid_r;
+reg                    miss_wait_resp_r;
+reg [31:0]             miss_word_r;
 reg [LINE_SIZE*8-1:0]  fill_line_r;
 reg [$clog2(WORDS_PER_LINE):0] fill_cnt_r;
+reg [7:0]              debug_high_miss_count_r;
+reg [7:0]              debug_mem_req_count_r;
+reg [7:0]              debug_mem_resp_count_r;
+reg [7:0]              debug_cpu_resp_count_r;
 
 wire [TAG_W-1:0]    req_tag    = cpu_req_addr[ADDR_WIDTH-1 : OFFSET_W + INDEX_W];
 wire [INDEX_W-1:0]  req_index  = cpu_req_addr[OFFSET_W + INDEX_W - 1 : OFFSET_W];
@@ -83,8 +100,17 @@ wire hit = valid_array[req_index_r][0] && (tag_array[req_index_r][0] == req_tag_
 wire [31:0] cached_data = data_array[req_index_r][0][req_offset_r * 8 +: 32];
 wire [31:0] resp_data_sel =
     (hit && ((cached_data != 32'd0) || (bypass_data == 32'd0))) ? cached_data : bypass_data;
+wire [($clog2(WORDS_PER_LINE)-1):0] req_word_offset = req_offset_r[OFFSET_W-1:2];
+wire [($clog2(WORDS_PER_LINE)-1):0] miss_word_offset = miss_offset_r[OFFSET_W-1:2];
+wire high_latency_miss = req_addr_r[31];
+wire [3:0] miss_current_epoch = miss_tid_r == {TID_WIDTH{1'b0}} ? current_epoch_t0 : current_epoch_t1;
 
 assign mem_resp_ready = 1'b1;
+assign debug_high_miss_count = debug_high_miss_count_r;
+assign debug_mem_req_count   = debug_mem_req_count_r;
+assign debug_mem_resp_count  = debug_mem_resp_count_r;
+assign debug_cpu_resp_count  = debug_cpu_resp_count_r;
+assign debug_state_flags     = {state, fill_cnt_r[2:0], mem_req_valid, mem_req_ready, mem_resp_valid};
 
 integer i;
 integer j;
@@ -111,8 +137,16 @@ always @(posedge clk or negedge rstn) begin
         miss_index_r   <= {INDEX_W{1'b0}};
         miss_tag_r     <= {TAG_W{1'b0}};
         miss_epoch_r   <= 4'd0;
+        miss_offset_r  <= {OFFSET_W{1'b0}};
+        miss_tid_r     <= {TID_WIDTH{1'b0}};
+        miss_wait_resp_r <= 1'b0;
+        miss_word_r    <= 32'd0;
         fill_line_r    <= {(LINE_SIZE * 8){1'b0}};
         fill_cnt_r     <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
+        debug_high_miss_count_r <= 8'd0;
+        debug_mem_req_count_r   <= 8'd0;
+        debug_mem_resp_count_r  <= 8'd0;
+        debug_cpu_resp_count_r  <= 8'd0;
 
         for (i = 0; i < SETS; i = i + 1) begin
             for (j = 0; j < WAYS; j = j + 1) begin
@@ -126,7 +160,10 @@ always @(posedge clk or negedge rstn) begin
         cpu_resp_data  <= resp_data_sel;
         cpu_resp_tid   <= req_tid_r;
         cpu_resp_epoch <= req_epoch_r;
-        cpu_resp_valid <= req_valid_r;
+        // Low-address RAM misses can use the synchronous bypass word and
+        // respond immediately. DDR3/XIP misses must wait for the external
+        // refill, otherwise IF would consume the low RAM bypass value.
+        cpu_resp_valid <= req_valid_r && (hit || !high_latency_miss);
 
         req_valid_r <= cpu_req_valid;
         if (cpu_req_valid) begin
@@ -140,10 +177,21 @@ always @(posedge clk or negedge rstn) begin
 
         case (state)
             S_IDLE: begin
-                if (req_valid_r && !hit) begin
+                if (req_valid_r && !hit && high_latency_miss) begin
+                    // Low-address ROM misses are already served by the
+                    // synchronous bypass word above.  Do not start a
+                    // background refill for them: with SMT enabled, thread1's
+                    // low ROM spin can otherwise keep the cache refill FSM busy
+                    // exactly when thread0 launches the next DDR3/XIP miss,
+                    // causing that high-address request to be dropped.
+                    debug_high_miss_count_r <= debug_high_miss_count_r + 8'd1;
                     miss_index_r <= req_index_r;
                     miss_tag_r   <= req_tag_r;
                     miss_epoch_r <= req_epoch_r;
+                    miss_offset_r <= req_offset_r;
+                    miss_tid_r    <= req_tid_r;
+                    miss_wait_resp_r <= 1'b1;
+                    miss_word_r   <= 32'd0;
                     fill_line_r  <= {(LINE_SIZE * 8){1'b0}};
                     fill_cnt_r   <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
                     mem_req_addr <= {req_addr_r[ADDR_WIDTH-1:OFFSET_W], {OFFSET_W{1'b0}}};
@@ -154,6 +202,9 @@ always @(posedge clk or negedge rstn) begin
 
             S_MISS_REQ: begin
                 if (mem_req_ready) begin
+                    if (mem_req_addr[31]) begin
+                        debug_mem_req_count_r <= debug_mem_req_count_r + 8'd1;
+                    end
                     mem_req_valid <= 1'b0;
                     fill_line_r   <= {(LINE_SIZE * 8){1'b0}};
                     fill_cnt_r    <= {($clog2(WORDS_PER_LINE) + 1){1'b0}};
@@ -163,7 +214,13 @@ always @(posedge clk or negedge rstn) begin
 
             S_MISS_DATA: begin
                 if (mem_resp_valid) begin
+                    if (miss_wait_resp_r) begin
+                        debug_mem_resp_count_r <= debug_mem_resp_count_r + 8'd1;
+                    end
                     fill_line_r[fill_cnt_r * 32 +: 32] <= mem_resp_data;
+                    if (fill_cnt_r[$clog2(WORDS_PER_LINE)-1:0] == miss_word_offset) begin
+                        miss_word_r <= mem_resp_data;
+                    end
                     if (mem_resp_last) begin
                         state <= S_REFILL;
                     end
@@ -174,11 +231,21 @@ always @(posedge clk or negedge rstn) begin
             end
 
             S_REFILL: begin
-                if (!flush && (miss_epoch_r == current_epoch)) begin
+                if (!flush && (miss_epoch_r == miss_current_epoch)) begin
                     valid_array[miss_index_r][0] <= 1'b1;
                     tag_array[miss_index_r][0]   <= miss_tag_r;
                     data_array[miss_index_r][0]  <= fill_line_r;
                 end
+                if (miss_wait_resp_r) begin
+                    cpu_resp_data  <= miss_word_r;
+                    cpu_resp_tid   <= miss_tid_r;
+                    cpu_resp_epoch <= miss_epoch_r;
+                    cpu_resp_valid <= !flush && (miss_epoch_r == miss_current_epoch);
+                    if (!flush && (miss_epoch_r == miss_current_epoch)) begin
+                        debug_cpu_resp_count_r <= debug_cpu_resp_count_r + 8'd1;
+                    end
+                end
+                miss_wait_resp_r <= 1'b0;
                 state <= S_IDLE;
             end
 
