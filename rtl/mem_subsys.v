@@ -69,6 +69,9 @@ module mem_subsys (
     output wire [7:0]  debug_uart_tx_byte,
     output wire [7:0]  debug_uart_status_load_count,
     output wire [7:0]  debug_uart_tx_store_count,
+    input  wire        debug_store_buffer_empty,
+    input  wire [2:0]  debug_store_buffer_count_t0,
+    input  wire [2:0]  debug_store_buffer_count_t1,
     output wire [127:0] debug_ddr3_m0_bus
 
 `ifdef ENABLE_DDR3
@@ -160,6 +163,8 @@ wire        m0_ddr3_resp_last;
 wire        m1_ddr3_req_ready;
 wire        m1_ddr3_resp_valid;
 wire [31:0] m1_ddr3_resp_data;
+wire        ddr3_calib_done_w = ddr3_init_calib_complete;
+wire        ddr3_bridge_idle_w;
 `else
 wire addr_is_ddr3_m0 = 1'b0;
 wire addr_is_ddr3_m1 = 1'b0;
@@ -170,11 +175,23 @@ wire        m0_ddr3_resp_last = 1'b0;
 wire        m1_ddr3_req_ready = 1'b0;
 wire        m1_ddr3_resp_valid = 1'b0;
 wire [31:0] m1_ddr3_resp_data = 32'd0;
+wire        ddr3_calib_done_w = 1'b0;
+wire        ddr3_bridge_idle_w = 1'b1;
 // synthesis translate_off
 wire m0_ddr3_req     = 1'b0;
 wire m1_ddr3_req     = 1'b0;
 // synthesis translate_on
 `endif
+
+wire [31:0] ddr3_status_word = {
+    18'd0,
+    debug_store_buffer_count_t1,
+    debug_store_buffer_count_t0,
+    5'd0,
+    ddr3_bridge_idle_w,
+    debug_store_buffer_empty,
+    ddr3_calib_done_w
+};
 
 // M2 (RoCC DMA) address decode - RAM-only access (0x0000_0000 - 0x0000_3FFF)
 wire addr_is_ram_m2     = (m2_req_addr >= `RAM_CACHEABLE_BASE) && (m2_req_addr <= `RAM_CACHEABLE_TOP);
@@ -388,10 +405,18 @@ reg        uart_pending_valid_r;
 reg [7:0]  uart_pending_byte_r;
 reg        uart_tx_enable_r;
 reg        uart_rx_enable_r;
-reg        uart_rx_valid_r;
 reg        uart_rx_overrun_r;
 reg        uart_rx_frame_err_r;
-reg [7:0]  uart_rx_data_r;
+localparam integer UART_RX_FIFO_DEPTH = 8;
+localparam integer UART_RX_FIFO_PTR_W = 3;
+// Keep the RX FIFO in discrete registers. The benchmark loader exercises a
+// sustained push/pop pattern on FPGA, and LUTRAM-style async read inference
+// can introduce board-only read-during-write ambiguity that does not show up
+// in RTL simulation.
+(* ram_style = "registers", shreg_extract = "no" *) reg [7:0] uart_rx_fifo [0:UART_RX_FIFO_DEPTH-1];
+reg [UART_RX_FIFO_PTR_W-1:0] uart_rx_head_r;
+reg [UART_RX_FIFO_PTR_W-1:0] uart_rx_tail_r;
+reg [UART_RX_FIFO_PTR_W:0]   uart_rx_count_r;
 reg [7:0]  debug_uart_status_load_count_r;
 reg [7:0]  debug_uart_tx_store_count_r;
 reg [7:0]  debug_uart_tx_write_count_r;
@@ -401,8 +426,15 @@ wire       uart_status_busy;
 wire       uart_rx_byte_valid;
 wire [7:0] uart_rx_byte;
 wire       uart_rx_frame_error;
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+reg        uart_rx_mmio_resp_valid_r;
+reg [31:0] uart_rx_mmio_resp_data_r;
+`endif
 
 assign uart_status_busy = uart_busy || uart_pending_valid_r || uart_tx_start_r;
+wire       uart_rx_valid_w = (uart_rx_count_r != 0);
+wire       uart_rx_fifo_full_w = (uart_rx_count_r == UART_RX_FIFO_DEPTH);
+wire [7:0] uart_rx_head_data = uart_rx_fifo[uart_rx_head_r];
 
 wire [31:0] uart_status_word = {
     25'd0,
@@ -410,11 +442,11 @@ wire [31:0] uart_status_word = {
     uart_rx_enable_r,
     uart_rx_frame_err_r,
     uart_rx_overrun_r,
-    uart_rx_valid_r,
+    uart_rx_valid_w,
     (~uart_status_busy && uart_tx_enable_r),
     uart_status_busy
 };
-wire [31:0] uart_ctrl_word = {29'd0, uart_rx_valid_r, uart_rx_enable_r, uart_tx_enable_r};
+wire [31:0] uart_ctrl_word = {29'd0, uart_rx_valid_w, uart_rx_enable_r, uart_tx_enable_r};
 
 // UART write byte extraction: pick the first non-zero byte lane
 function [7:0] select_mmio_byte;
@@ -436,6 +468,9 @@ wire uart_ctrl_write = m1_mmio_req && addr_is_uart_ctrl_m1 && m1_req_write;
 wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
 wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
+wire uart_rx_fifo_clear = uart_ctrl_write && (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4]);
+wire uart_rx_read_fire = uart_rx_read && uart_rx_valid_w;
+wire uart_rx_push_fire = uart_rx_byte_valid && (!uart_rx_fifo_full_w || uart_rx_read_fire);
 wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
 wire [7:0] debug_uart_flags = {
     uart_tx_write,
@@ -484,17 +519,25 @@ always @(posedge clk or negedge rstn) begin
         uart_pending_byte_r  <= 8'd0;
         uart_tx_enable_r     <= 1'b1;
         uart_rx_enable_r     <= 1'b1;
-        uart_rx_valid_r      <= 1'b0;
         uart_rx_overrun_r    <= 1'b0;
         uart_rx_frame_err_r  <= 1'b0;
-        uart_rx_data_r       <= 8'd0;
+        uart_rx_head_r       <= {UART_RX_FIFO_PTR_W{1'b0}};
+        uart_rx_tail_r       <= {UART_RX_FIFO_PTR_W{1'b0}};
+        uart_rx_count_r      <= {(UART_RX_FIFO_PTR_W+1){1'b0}};
         debug_uart_status_load_count_r <= 8'd0;
         debug_uart_tx_store_count_r <= 8'd0;
         debug_uart_tx_write_count_r <= 8'd0;
         debug_uart_tx_write_seen_r <= 1'b0;
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+        uart_rx_mmio_resp_valid_r <= 1'b0;
+        uart_rx_mmio_resp_data_r <= 32'd0;
+`endif
     end else begin
         uart_tx_start_r <= 1'b0;
         debug_uart_tx_write_seen_r <= uart_tx_write;
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+        uart_rx_mmio_resp_valid_r <= 1'b0;
+`endif
 
         // TX: accept store into pending register
         if (uart_store_accept) begin
@@ -522,13 +565,12 @@ always @(posedge clk or negedge rstn) begin
             uart_rx_enable_r <= uart_ctrl_write_byte[1];
             if (uart_ctrl_write_byte[2]) uart_rx_overrun_r   <= 1'b0;
             if (uart_ctrl_write_byte[3]) uart_rx_frame_err_r <= 1'b0;
-            if (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4])
-                uart_rx_valid_r <= 1'b0;
         end
 
-        // RX data pop on read
-        if (uart_rx_read) begin
-            uart_rx_valid_r <= 1'b0;
+        if (uart_rx_fifo_clear) begin
+            uart_rx_head_r  <= {UART_RX_FIFO_PTR_W{1'b0}};
+            uart_rx_tail_r  <= {UART_RX_FIFO_PTR_W{1'b0}};
+            uart_rx_count_r <= {(UART_RX_FIFO_PTR_W+1){1'b0}};
         end
 
         // RX frame error latch
@@ -536,14 +578,39 @@ always @(posedge clk or negedge rstn) begin
             uart_rx_frame_err_r <= 1'b1;
         end
 
-        // RX byte arrival
-        if (uart_rx_byte_valid) begin
-            if (uart_rx_valid_r && !uart_rx_read) begin
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+        // Capture UART_RXDATA into a dedicated response register so the test
+        // profile does not depend on a same-cycle FIFO array peek at response
+        // time. The LSU still sees a one-cycle registered MMIO response.
+        if (uart_rx_read) begin
+            uart_rx_mmio_resp_valid_r <= 1'b1;
+            uart_rx_mmio_resp_data_r <= {24'd0, uart_rx_valid_w ? uart_rx_head_data : 8'd0};
+        end
+`endif
+
+        if (!uart_rx_fifo_clear) begin
+            if (uart_rx_byte_valid && !uart_rx_push_fire) begin
                 uart_rx_overrun_r <= 1'b1;
-            end else begin
-                uart_rx_data_r  <= uart_rx_byte;
-                uart_rx_valid_r <= 1'b1;
             end
+
+            case ({uart_rx_read_fire, uart_rx_push_fire})
+                2'b10: begin
+                    uart_rx_head_r  <= uart_rx_head_r + {{(UART_RX_FIFO_PTR_W-1){1'b0}}, 1'b1};
+                    uart_rx_count_r <= uart_rx_count_r - {{UART_RX_FIFO_PTR_W{1'b0}}, 1'b1};
+                end
+                2'b01: begin
+                    uart_rx_fifo[uart_rx_tail_r] <= uart_rx_byte;
+                    uart_rx_tail_r <= uart_rx_tail_r + {{(UART_RX_FIFO_PTR_W-1){1'b0}}, 1'b1};
+                    uart_rx_count_r <= uart_rx_count_r + {{UART_RX_FIFO_PTR_W{1'b0}}, 1'b1};
+                end
+                2'b11: begin
+                    uart_rx_fifo[uart_rx_tail_r] <= uart_rx_byte;
+                    uart_rx_head_r <= uart_rx_head_r + {{(UART_RX_FIFO_PTR_W-1){1'b0}}, 1'b1};
+                    uart_rx_tail_r <= uart_rx_tail_r + {{(UART_RX_FIFO_PTR_W-1){1'b0}}, 1'b1};
+                end
+                default: begin
+                end
+            endcase
         end
     end
 end
@@ -579,12 +646,17 @@ always @(posedge clk or negedge rstn) begin
             end else if (addr_is_uart_status_m1 && !m1_req_write) begin
                 mmio_resp_data_r <= uart_status_word;
             end else if (addr_is_uart_rx_m1 && !m1_req_write) begin
-                mmio_resp_data_r <= {24'd0, uart_rx_data_r};
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+                mmio_resp_valid_r <= 1'b0;
+                mmio_resp_data_r <= 32'd0;
+`else
+                mmio_resp_data_r <= {24'd0, uart_rx_head_data};
+`endif
             end else if (addr_is_uart_ctrl_m1 && !m1_req_write) begin
                 mmio_resp_data_r <= uart_ctrl_word;
 `ifdef ENABLE_DDR3
             end else if (addr_is_ddr3_status_m1 && !m1_req_write) begin
-                mmio_resp_data_r <= {31'd0, ddr3_init_calib_complete};
+                mmio_resp_data_r <= ddr3_status_word;
 `endif
             end else begin
                 mmio_resp_data_r <= 32'd0;
@@ -596,15 +668,31 @@ end
 // Response mux - MMIO returns a registered single-cycle response so LSU_REQ can
 // handshake the request first and then observe the completion in LSU_WAIT_RESP.
 `ifdef ENABLE_DDR3
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+assign m1_resp_valid = uart_rx_mmio_resp_valid_r ? 1'b1
+                    : mmio_resp_valid_r ? 1'b1
+                    : m1_ddr3_resp_valid ? 1'b1
+                    : m1_resp_valid_int;
+assign m1_resp_data  = uart_rx_mmio_resp_valid_r ? uart_rx_mmio_resp_data_r
+                    : mmio_resp_valid_r ? mmio_resp_data_r
+                    : m1_ddr3_resp_valid ? m1_ddr3_resp_data
+                    : m1_resp_data_int;
+`else
 assign m1_resp_valid = mmio_resp_valid_r ? 1'b1
                     : m1_ddr3_resp_valid ? 1'b1
                     : m1_resp_valid_int;
 assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r
                     : m1_ddr3_resp_valid ? m1_ddr3_resp_data
                     : m1_resp_data_int;
+`endif
+`else
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+assign m1_resp_valid = uart_rx_mmio_resp_valid_r ? 1'b1 : mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
+assign m1_resp_data  = uart_rx_mmio_resp_valid_r ? uart_rx_mmio_resp_data_r : mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
 `else
 assign m1_resp_valid = mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
 assign m1_resp_data  = mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
+`endif
 `endif
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -654,6 +742,7 @@ wire [7:0] debug_m0_flags = {
     ddr3_req_valid_r,
     ddr3_req_ready
 };
+assign ddr3_bridge_idle_w = (ddr3_arb_state == DDR3_ARB_IDLE) && !ddr3_req_valid_r;
 
 assign ddr3_req_valid = ddr3_req_valid_r;
 assign ddr3_req_addr  = ddr3_req_addr_r;

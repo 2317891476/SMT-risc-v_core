@@ -1980,6 +1980,9 @@ wire [31:0] sb_mem_write_addr;
 wire [31:0] sb_mem_write_data;
 wire [3:0]  sb_mem_write_wen;
 wire        sb_mem_write_ready;
+wire        lsu_debug_store_buffer_empty;
+wire [2:0]  lsu_debug_store_buffer_count_t0;
+wire [2:0]  lsu_debug_store_buffer_count_t1;
 wire [7:0]  legacy_tube_status;
 wire        legacy_uart_tx;
 wire        legacy_debug_uart_status_busy;
@@ -2059,6 +2062,9 @@ lsu_shell #(
     .sb_mem_write_data  (sb_mem_write_data    ),
     .sb_mem_write_wen   (sb_mem_write_wen     ),
     .sb_mem_write_ready (sb_mem_write_ready   ),
+    .debug_store_buffer_empty(lsu_debug_store_buffer_empty),
+    .debug_store_buffer_count_t0(lsu_debug_store_buffer_count_t0),
+    .debug_store_buffer_count_t1(lsu_debug_store_buffer_count_t1),
 
     // Load hazard output
     .load_hazard        (lsu_load_hazard      ),
@@ -2495,6 +2501,9 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .debug_uart_tx_byte(mem_subsys_debug_uart_tx_byte),
         .debug_uart_status_load_count(mem_subsys_debug_uart_status_load_count),
         .debug_uart_tx_store_count(mem_subsys_debug_uart_tx_store_count),
+        .debug_store_buffer_empty(lsu_debug_store_buffer_empty),
+        .debug_store_buffer_count_t0(lsu_debug_store_buffer_count_t0),
+        .debug_store_buffer_count_t1(lsu_debug_store_buffer_count_t1),
         .debug_ddr3_m0_bus (mem_subsys_debug_ddr3_m0_bus)
 
 `ifdef ENABLE_DDR3

@@ -30,6 +30,10 @@ Boolean Done;
 
 long Begin_Time, End_Time, User_Time;
 long Microseconds, Dhrystones_Per_Second;
+unsigned long long Bench_Start_Cycles, Bench_Stop_Cycles;
+unsigned long long Bench_Start_Instret, Bench_Stop_Instret;
+unsigned long long Bench_Total_Cycles, Bench_Total_Instret;
+unsigned long Bench_Ipc_X1000;
 
 int main (int argc, char **argv)
 {
@@ -40,6 +44,7 @@ int main (int argc, char **argv)
   Enumeration Enum_Loc;
   Str_30 Str_1_Loc;
   Str_30 Str_2_Loc;
+  unsigned long long instret_delta;
   REG int Run_Index;
   REG int Number_Of_Runs;
 
@@ -88,6 +93,8 @@ int main (int argc, char **argv)
   while (!Done) {
     debug_printf("Trying %d runs through Dhrystone:\n", Number_Of_Runs);
 
+    Bench_Start_Cycles = board_read_mcycle64();
+    Bench_Start_Instret = board_read_minstret64();
     setStats(1);
     Start_Timer();
 
@@ -122,8 +129,12 @@ int main (int argc, char **argv)
 
     Stop_Timer();
     setStats(0);
+    Bench_Stop_Cycles = board_read_mcycle64();
+    Bench_Stop_Instret = board_read_minstret64();
 
     User_Time = End_Time - Begin_Time;
+    Bench_Total_Cycles = Bench_Stop_Cycles - Bench_Start_Cycles;
+    Bench_Total_Instret = Bench_Stop_Instret - Bench_Start_Instret;
 
     if (User_Time < Too_Small_Time) {
       printf("Measured time too small to obtain meaningful results\n");
@@ -186,12 +197,24 @@ int main (int argc, char **argv)
 
   Microseconds = ((User_Time / Number_Of_Runs) * Mic_secs_Per_Second) / HZ;
   Dhrystones_Per_Second = (HZ * Number_Of_Runs) / User_Time;
+  instret_delta = Bench_Total_Instret;
+  if (Bench_Total_Cycles != 0ULL) {
+    Bench_Ipc_X1000 = (unsigned long)((instret_delta * 1000ULL) / Bench_Total_Cycles);
+  } else {
+    Bench_Ipc_X1000 = 0UL;
+  }
 
+  printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
+  printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
+  printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
   printf("DHRYSTONE DONE\n");
   for (;;) {
     board_delay_ms(250);
+    printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
+    printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
+    printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
     printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
     printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
     printf("DHRYSTONE DONE\n");

@@ -945,6 +945,60 @@ python fpga/scripts/run_board_feedback.py --profile core_diag --port COM5 --capt
 python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 10.0
 ```
 
+#### 当前 DDR3 Bridge Step2-Only 辅助调试支线（2026-04-18）
+
+当前还保留一条**不替代 §13.3 主基线**的 DDR3 bridge 精定位支线：`fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only ...`。这条支线只用于把 `M1 store/load -> mem_subsys -> ddr3_mem_port -> MIG -> DDR3 -> readback` 的相邻地址写后读问题继续压缩，不用于宣告 Dhrystone / loader 主线已经通过。
+
+**固定命令**
+
+```powershell
+# 只跑基础回归 + bridge stress TB + Step2-only 顶层仿真
+python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --skip-vivado --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10
+
+# 跑完整 FPGA 流程（create project -> synth -> aggressive impl -> bitstream -> JTAG -> UART capture）
+python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10
+```
+
+**当前 Step2-only case 定义**
+
+| Case | 变体 | 说明 | 通过 token |
+|------|------|------|------|
+| `C=1` | `addr0_single` | `0x8000_0000` 单写 → drain/idle → 单读 | `S2 START C=1` / `S2 OK C=1` |
+| `C=2` | `addr1_single` | `0x8000_0004` 单写 → drain/idle → 单读 | `S2 START C=2` / `S2 OK C=2` |
+| `C=3` | `C3_base` | `sw addr0` → `sw addr1` → `fence` → `wait_drain_ready` → 只读 `addr0` | `S2 START C=3` / `S2 AFTER WRITE C=3` / `S2 OK C=3` |
+| `C=4` | `C3_nop` | 与 `C3_base` 相同，但双写之间固定插入 `100` 个 `nop` | `S2 START C=4` / `S2 AFTER WRITE C=4` / `S2 OK C=4` |
+| `C=5` | `C3_barrier` | `sw addr0` → `fence` → `lw addr0` 校验 → `sw addr1` → `fence` → drain → 只读 `addr0` | `S2 START C=5` / `S2 AFTER WRITE C=5` / `S2 OK C=5` |
+
+**这条支线当前固定的 fail-fast 顺序**
+
+1. `python verification/run_all_tests.py --basic`
+2. `python verification/run_all_tests.py --basic --fpga-config`
+3. `ddr3_mem_port` bridge stress TB
+4. `tb_ax7203_top_ddr3_bridge_step2_only_smoke.sv`
+5. 只有顶层仿真通过，才继续 Vivado create project / synth / aggressive impl / bitstream / JTAG / UART capture
+
+**当前已确认的证据**
+
+| 项目 | 当前结果 | 证据 |
+|------|------|------|
+| Step2-only 顶层仿真 | `PASS`，`ready=1 retire=1 calib=1 tube=04`，`C=1..5` 全部 `START/AFTER WRITE/OK` 到齐 | `build/fpga_bridge_audit_step2_only/06_run_step2_only_top_sim.log` |
+| 最新辅助 bitstream | `BuildID=0x69E371F2` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| 当前辅助 bitstream 时序 | `WNS=+0.624ns`, `WHS=+0.059ns`, `All user specified timing constraints are met.` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
+| 脚本化 10 秒板测 gate | **未稳定通过**；当前 `summary.txt` 仍记录 `FailedStage=uart_load_and_capture`，原因是自动抓包没有稳定收齐 `C=4/C=5` | `build/fpga_bridge_audit_step2_only/summary.txt`, `build/ddr3_bridge_audit_step2_only_uart_capture.txt` |
+| 20 秒人工复抓 | 已看到 `S2 READY`、`C=3/4/5` 的 `START/AFTER WRITE`，`C=4/C=5` 的 `OK`，以及 `S2 AALL OK`；同时出现 `S2 OK C=0` 和之后大量重复 `S2 OK C=1` 噪声 | `build/ddr3_bridge_audit_step2_only_uart_capture_rerun.txt` |
+
+**当前结论**
+
+- 这条支线的 **RTL/仿真闭环已经打通**，`C3_base / C3_nop / C3_barrier` 三变体在顶层仿真中都能稳定通过。
+- 当前剩余问题是**板级 UART 观测与自动抓包稳定性**，而不是 Step2-only ROM、本地 smoke testbench 或综合/实现本身。
+- 在这条支线的板级 10 秒自动 gate 稳定之前，README 不把它升级成“当前主线已通过”的硬门禁，也不据此宣告 Dhrystone / loader 主线已恢复。
+
+**当前板级分类约定**
+
+- 只看到 `S2 START C=n`，看不到 `S2 AFTER WRITE C=n`：优先怀疑双写窗口内挂死。
+- 能看到 `S2 AFTER WRITE C=n`，看不到 `S2 OK C=n`：优先怀疑 drain/idle 或最终 readback 可见性。
+- 没有 `S2 BAD`，但只剩畸变 token（如 `S2 OK C=0` / `S2 AALL OK`）：当前按“UART 观测不稳”归档，不直接下结论为 bridge 数据错误。
+
 > **归档说明**: 以下 §13.8-§13.18 中涉及旧 Scoreboard、`RS=4`、`SMT_MODE=0`、`10~12.5MHz`、早期 OoO bring-up、`run_board_feedback.py` 低频板测等内容，均为历史排障/优化记录。文中“当前”仅表示该时间点的状态，不代表本节前述 25MHz SMT 主基线。
 
 ### 13.7 CoreMark 性能测试
@@ -1057,6 +1111,17 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 > 20 MHz WNS 仅 +0.326ns，25 MHz 不可行。如需更高频率需进一步流水化 issue selection。
 
 ### 13.10 Dhrystone 板级测试（2026-04）
+
+> **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前真正阻塞 Dhrystone / DDR3 loader 主线恢复的，不再是这里的旧 `legacy_mem_subsys` 路径，而是 §13.6 中记录的 `--bridge-audit-step2-only` 辅助支线。最新状态是：Step2-only 顶层仿真已通过，25MHz 辅助 bitstream `BuildID=0x69E371F2` 的综合/实现/JTAG 都通过，但 10 秒脚本化板级 UART gate 仍不稳定，因此 README 还不能把 Dhrystone 宣告为“当前主线已板测通过”。
+
+**最新相关状态（2026-04-18）**
+
+| 项目 | 当前状态 | 说明 |
+|------|------|------|
+| Dhrystone 主线板测 | 🔄 仍未恢复为硬门禁 | 先解决 §13.6 的 DDR3 bridge Step2-only 自动板测稳定性 |
+| Step2-only 顶层仿真 | ✅ | `C=1..5` 全部通过，`tube_status=0x04` |
+| Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E371F2`, `WNS=+0.624ns`, `WHS=+0.059ns` |
+| Step2-only 脚本化板测 | ⚠️ | 自动 10 秒 UART 抓包仍不稳定，见 `build/fpga_bridge_audit_step2_only/summary.txt` |
 
 **板测基础设施**
 

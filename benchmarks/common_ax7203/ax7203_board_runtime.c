@@ -311,6 +311,20 @@ uint64_t board_read_mcycle64(void) {
     return (((uint64_t)hi1) << 32) | (uint64_t)lo;
 }
 
+uint64_t board_read_minstret64(void) {
+    uint32_t hi0;
+    uint32_t lo;
+    uint32_t hi1;
+
+    do {
+        __asm__ volatile("rdinstreth %0" : "=r"(hi0));
+        __asm__ volatile("rdinstret %0" : "=r"(lo));
+        __asm__ volatile("rdinstreth %0" : "=r"(hi1));
+    } while (hi0 != hi1);
+
+    return (((uint64_t)hi1) << 32) | (uint64_t)lo;
+}
+
 int board_vprintf(const char *fmt, va_list ap) {
     va_list aq;
     int count;

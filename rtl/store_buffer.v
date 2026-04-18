@@ -83,7 +83,10 @@ module store_buffer #(
 
     output wire [31:0]              forward_data,        // Forwarded data (if exact match)
     output wire                     forward_valid,       // Forward data is valid
-    output wire                     load_hazard          // Stall: unresolved/partial overlap
+    output wire                     load_hazard,         // Stall: unresolved/partial overlap
+    output wire                     debug_empty,
+    output wire [SB_IDX_W:0]        debug_count_t0,
+    output wire [SB_IDX_W:0]        debug_count_t1
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -345,6 +348,9 @@ end
 assign forward_data = fwd_data_r;
 assign forward_valid = fwd_valid_r;
 assign load_hazard = hazard_r;
+assign debug_empty = sb_empty_t0 && sb_empty_t1;
+assign debug_count_t0 = sb_count[0];
+assign debug_count_t1 = sb_count[1];
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Sequential Logic - Single Next-State Calculation

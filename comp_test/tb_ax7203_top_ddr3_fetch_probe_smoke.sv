@@ -34,7 +34,7 @@ module tb_ax7203_top_ddr3_fetch_probe_smoke;
 `else
     localparam integer TB_TIMEOUT_NS = 50_000_000;
 `endif
-    localparam integer MAX_PAYLOAD_BYTES = 4096;
+    localparam integer MAX_PAYLOAD_BYTES = 16384;
     localparam [119:0] READY_TOKEN = 120'h424F4F542044445233205245414459; // BOOT DDR3 READY
     localparam [79:0] LOAD_START_TOKEN = 80'h4C4F4144205354415254; // LOAD START
     localparam [55:0] LOAD_OK_TOKEN = 56'h4C4F4144204F4B; // LOAD OK

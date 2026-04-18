@@ -18,6 +18,8 @@ set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
 set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
 set ddr3_fetch_debug [ax7203_env_or_default AX7203_DDR3_FETCH_DEBUG 0]
+set ddr3_bridge_audit [ax7203_env_or_default AX7203_DDR3_BRIDGE_AUDIT 0]
+set transport_uart_rxdata_reg_test [ax7203_env_or_default AX7203_TRANSPORT_UART_RXDATA_REG_TEST 0]
 set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 16] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
@@ -59,6 +61,8 @@ puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "ENABLE_DDR3: $enable_ddr3"
 puts "DDR3_FETCH_DEBUG: $ddr3_fetch_debug"
+puts "DDR3_BRIDGE_AUDIT: $ddr3_bridge_audit"
+puts "TRANSPORT_UART_RXDATA_REG_TEST: $transport_uart_rxdata_reg_test"
 puts "SMT_MODE: $smt_mode"
 puts "RS depth: $rs_depth"
 puts "RS idx width: $rs_idx_w"
@@ -96,6 +100,16 @@ if {$ddr3_fetch_debug} {
 } else {
     set ddr3_fetch_debug_def ""
 }
+if {$ddr3_bridge_audit} {
+    set ddr3_bridge_audit_def "DDR3_BRIDGE_AUDIT=1"
+} else {
+    set ddr3_bridge_audit_def ""
+}
+if {$transport_uart_rxdata_reg_test} {
+    set transport_uart_rxdata_reg_test_def "TRANSPORT_UART_RXDATA_REG_TEST=1"
+} else {
+    set transport_uart_rxdata_reg_test_def ""
+}
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -108,6 +122,8 @@ set_property verilog_define [list \
     {*}$l2_pt \
     {*}$ddr3_def \
     {*}$ddr3_fetch_debug_def \
+    {*}$ddr3_bridge_audit_def \
+    {*}$transport_uart_rxdata_reg_test_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 

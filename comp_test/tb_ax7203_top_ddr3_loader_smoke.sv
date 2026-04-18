@@ -34,12 +34,15 @@ module tb_ax7203_top_ddr3_loader_smoke;
 `else
     localparam integer TB_TIMEOUT_NS = 80_000_000;
 `endif
-    localparam integer MAX_PAYLOAD_BYTES = 4096;
+    localparam integer MAX_PAYLOAD_BYTES = 16384;
     localparam [119:0] READY_TOKEN = 120'h424F4F542044445233205245414459; // BOOT DDR3 READY
     localparam [79:0] LOAD_START_TOKEN = 80'h4C4F4144205354415254; // LOAD START
     localparam [55:0] LOAD_OK_TOKEN = 56'h4C4F4144204F4B; // LOAD OK
     localparam [111:0] EXEC_PASS_TOKEN = 112'h4444523320455845432050415353; // DDR3 EXEC PASS
     localparam [7:0] LOADER_ACK_BYTE = 8'h06;
+    localparam [7:0] LOADER_BLOCK_ACK_BYTE = 8'h17;
+    localparam [7:0] LOADER_BLOCK_NACK_BYTE = 8'h15;
+    localparam integer BLOCK_CHECKSUM_BYTES = 64;
 
     reg [7:0] payload [0:MAX_PAYLOAD_BYTES-1];
     integer payload_size;
@@ -52,6 +55,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
     reg saw_load_start;
     reg saw_load_ok;
     reg saw_exec_pass;
+    integer block_ack_count;
+    integer block_nack_count;
     reg [127:0] shift128;
     event payload_ack_event;
 
@@ -115,14 +120,6 @@ module tb_ax7203_top_ddr3_loader_smoke;
         end
     endtask
 
-    task automatic send_payload_bytes;
-        begin
-            for (payload_idx = 0; payload_idx < payload_size; payload_idx = payload_idx + 1) begin
-                send_uart_byte(payload[payload_idx]);
-            end
-        end
-    endtask
-
     task automatic send_payload_chunk;
         integer chunk_idx;
         begin
@@ -132,6 +129,46 @@ module tb_ax7203_top_ddr3_loader_smoke;
                     payload_idx = payload_idx + 1;
                 end
             end
+        end
+    endtask
+
+    task automatic send_payload_block;
+        integer block_start_idx;
+        integer block_end_idx;
+        integer block_checksum;
+        integer block_log_start;
+        integer prev_block_ack_count;
+        integer prev_block_nack_count;
+        begin
+            block_start_idx = payload_idx;
+            block_end_idx = payload_idx + BLOCK_CHECKSUM_BYTES;
+            if (block_end_idx > payload_size)
+                block_end_idx = payload_size;
+            block_log_start = block_start_idx;
+            block_checksum = 0;
+
+            while (payload_idx < block_end_idx) begin
+                $display("[AX7203_DDR3_LOADER_TB] send chunk start_idx=%0d", payload_idx);
+                send_payload_chunk();
+                @payload_ack_event;
+                #(UART_BIT_NS * 4);
+            end
+
+            for (block_start_idx = block_start_idx; block_start_idx < block_end_idx; block_start_idx = block_start_idx + 1)
+                block_checksum = (block_checksum + payload[block_start_idx]) & 32'hFFFF_FFFF;
+
+            $display("[AX7203_DDR3_LOADER_TB] send block checksum block_start=%0d block_end=%0d checksum=%08x", block_log_start, block_end_idx, block_checksum);
+            prev_block_ack_count = block_ack_count;
+            prev_block_nack_count = block_nack_count;
+            send_u32_le(block_checksum[31:0]);
+            @payload_ack_event;
+            #(UART_BIT_NS * 4);
+            wait ((block_ack_count != prev_block_ack_count) || (block_nack_count != prev_block_nack_count));
+            if (block_nack_count != prev_block_nack_count) begin
+                $display("[AX7203_DDR3_LOADER] unexpected block NACK payload_idx=%0d", payload_idx);
+                $fatal(1);
+            end
+            #(UART_BIT_NS * 8);
         end
     endtask
 
@@ -163,6 +200,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
         saw_load_start = 1'b0;
         saw_load_ok = 1'b0;
         saw_exec_pass = 1'b0;
+        block_ack_count = 0;
+        block_nack_count = 0;
         shift128 = 128'd0;
         #100;
         sys_rst_n = 1'b1;
@@ -179,14 +218,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
         #(UART_BIT_NS * 40);
         sent_payload = 1;
         payload_idx = 0;
-        while (payload_idx < payload_size) begin
-            $display("[AX7203_DDR3_LOADER_TB] send chunk start_idx=%0d", payload_idx);
-            send_payload_chunk();
-            if (payload_idx < payload_size) begin
-                @payload_ack_event;
-                #(UART_BIT_NS * 4);
-            end
-        end
+        while (payload_idx < payload_size)
+            send_payload_block();
     end
 
     always @(posedge core_uart_tx_start) begin
@@ -205,6 +238,12 @@ module tb_ax7203_top_ddr3_loader_smoke;
             saw_load_start <= 1'b1;
         if ((core_uart_tx_byte == LOADER_ACK_BYTE) && (sent_payload != 0))
             -> payload_ack_event;
+        if ((core_uart_tx_byte == LOADER_BLOCK_ACK_BYTE) && (sent_payload != 0)) begin
+            block_ack_count = block_ack_count + 1;
+        end
+        if ((core_uart_tx_byte == LOADER_BLOCK_NACK_BYTE) && (sent_payload != 0)) begin
+            block_nack_count = block_nack_count + 1;
+        end
         if ({shift128[47:0], core_uart_tx_byte} == LOAD_OK_TOKEN)
             saw_load_ok <= 1'b1;
         if ({shift128[103:0], core_uart_tx_byte} == EXEC_PASS_TOKEN)
@@ -215,8 +254,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
 
     initial begin : timeout_guard
         #TB_TIMEOUT_NS;
-        $display("[AX7203_DDR3_LOADER] TIMEOUT ready=%0b load_ok=%0b exec_pass=%0b sent_header=%0d sent_payload=%0d payload_idx=%0d uart_bytes=%0d tube=%02h led=%b",
-                 saw_ready, saw_load_ok, saw_exec_pass, sent_header, sent_payload, payload_idx, uart_byte_count,
+        $display("[AX7203_DDR3_LOADER] TIMEOUT ready=%0b load_ok=%0b exec_pass=%0b sent_header=%0d sent_payload=%0d payload_idx=%0d uart_bytes=%0d block_ack=%0d block_nack=%0d tube=%02h led=%b",
+                 saw_ready, saw_load_ok, saw_exec_pass, sent_header, sent_payload, payload_idx, uart_byte_count, block_ack_count, block_nack_count,
                  dut.tube_status, led);
         $display("[AX7203_DDR3_LOADER] DDR3 core_req_v=%0b core_req_r=%0b addr=%08h wr=%0b resp_v=%0b arb_state=%0d owner=%0d req_v=%0b req_r=%0b m0r=%0b m1r=%0b m0rv=%0b m1rv=%0b",
                  dut.core_ddr3_req_valid,
@@ -239,8 +278,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
         if (dut.tube_status == 8'h04)
             saw_exec_pass <= 1'b1;
         if (sys_rst_n && saw_ready && saw_load_ok && saw_exec_pass && dut.tube_status == 8'h04) begin
-            $display("[AX7203_DDR3_LOADER] PASS ready=%0b load_ok=%0b exec_pass=%0b uart_bytes=%0d tube=%02h led=%b",
-                     saw_ready, saw_load_ok, saw_exec_pass, uart_byte_count, dut.tube_status, led);
+            $display("[AX7203_DDR3_LOADER] PASS ready=%0b load_ok=%0b exec_pass=%0b uart_bytes=%0d block_ack=%0d block_nack=%0d tube=%02h led=%b",
+                     saw_ready, saw_load_ok, saw_exec_pass, uart_byte_count, block_ack_count, block_nack_count, dut.tube_status, led);
             $finish;
         end
     end

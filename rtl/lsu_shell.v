@@ -129,6 +129,9 @@ module lsu_shell #(
     output wire [31:0]        sb_mem_write_data,
     output wire [3:0]         sb_mem_write_wen,
     input  wire               sb_mem_write_ready,
+    output wire               debug_store_buffer_empty,
+    output wire [2:0]         debug_store_buffer_count_t0,
+    output wire [2:0]         debug_store_buffer_count_t1,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Load Hazard Output (to scoreboard for stalling)
@@ -154,6 +157,9 @@ wire                     sb_mem_write_ready_mux;
 wire [31:0]              sb_forward_data;
 wire                     sb_forward_valid;
 wire                     sb_load_hazard;
+wire                     sb_debug_empty;
+wire [2:0]               sb_debug_count_t0;
+wire [2:0]               sb_debug_count_t1;
 
 // Load vs Store classification
 wire is_load  = req_valid && !req_wen;
@@ -253,7 +259,10 @@ store_buffer #(
 
     .forward_data           (sb_forward_data),
     .forward_valid          (sb_forward_valid),
-    .load_hazard            (sb_load_hazard)
+    .load_hazard            (sb_load_hazard),
+    .debug_empty            (sb_debug_empty),
+    .debug_count_t0         (sb_debug_count_t0),
+    .debug_count_t1         (sb_debug_count_t1)
 );
 
 // Export Store Buffer memory interface
@@ -261,6 +270,9 @@ assign sb_mem_write_valid = sb_mem_write_valid_int;
 assign sb_mem_write_addr  = sb_mem_write_addr_int;
 assign sb_mem_write_data  = sb_mem_write_data_int;
 assign sb_mem_write_wen   = sb_mem_write_wen_int;
+assign debug_store_buffer_empty = sb_debug_empty;
+assign debug_store_buffer_count_t0 = sb_debug_count_t0;
+assign debug_store_buffer_count_t1 = sb_debug_count_t1;
 
 // =============================================================================
 // Task 6: State Machine for Variable-Latency Memory Access
