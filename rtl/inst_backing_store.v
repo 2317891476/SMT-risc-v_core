@@ -57,6 +57,35 @@ always @(posedge clk or negedge rstn) begin
 end
 
 assign inst_o = inst_o_r;
+`elsif VERILATOR_MAINLINE
+// Verilator mainline runs also need deterministic ROM contents from inst.hex,
+// but they should not pull in the FPGA clocking/board wrappers. Mirror the
+// synchronous ROM behavior here so the preload boot ROM executes exactly from
+// the generated inst.hex image.
+reg [7:0] mem [0:(IROM_SPACE*4)-1];
+reg [31:0] inst_o_r;
+integer i;
+
+initial begin
+    for (i = 0; i < (IROM_SPACE*4); i = i + 1) begin
+        mem[i] = 8'd0;
+    end
+    $readmemh("inst.hex", mem);
+end
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn)
+        inst_o_r <= 32'd0;
+    else
+        inst_o_r <= {
+            mem[{inst_addr_2, 2'b00} + 2'd3],
+            mem[{inst_addr_2, 2'b00} + 2'd2],
+            mem[{inst_addr_2, 2'b00} + 2'd1],
+            mem[{inst_addr_2, 2'b00} + 2'd0]
+        };
+end
+
+assign inst_o = inst_o_r;
 `else
 // The stable RAM instance - benches should poke this directly
 ram_bfm #(

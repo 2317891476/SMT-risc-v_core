@@ -39,6 +39,10 @@ module adam_riscv(
     output wire [7:0] debug_uart_tx_store_count,
     output wire       debug_uart_tx_byte_valid,
     output wire [7:0] debug_uart_tx_byte,
+`ifdef VERILATOR_FAST_UART
+    input  wire       fast_uart_rx_byte_valid,
+    input  wire [7:0] fast_uart_rx_byte,
+`endif
     output wire [7:0] debug_last_iss0_pc_lo,
     output wire [7:0] debug_last_iss1_pc_lo,
     output wire       debug_branch_pending_any,
@@ -2501,6 +2505,10 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .debug_uart_tx_byte(mem_subsys_debug_uart_tx_byte),
         .debug_uart_status_load_count(mem_subsys_debug_uart_status_load_count),
         .debug_uart_tx_store_count(mem_subsys_debug_uart_tx_store_count),
+`ifdef VERILATOR_FAST_UART
+        .fast_uart_rx_byte_valid(fast_uart_rx_byte_valid),
+        .fast_uart_rx_byte      (fast_uart_rx_byte),
+`endif
         .debug_store_buffer_empty(lsu_debug_store_buffer_empty),
         .debug_store_buffer_count_t0(lsu_debug_store_buffer_count_t0),
         .debug_store_buffer_count_t1(lsu_debug_store_buffer_count_t1),

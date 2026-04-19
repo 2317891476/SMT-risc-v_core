@@ -53,10 +53,16 @@ TIMING_DETAIL_AGGR = PROJECT_DIR / "reports" / "timing_detail_aggressive.rpt"
 UTILIZATION_AGGR = PROJECT_DIR / "reports" / "utilization_aggressive.rpt"
 BUILD_ID_FILE = PROJECT_DIR / "adam_riscv_ax7203_bitstream_id.txt"
 UART_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.txt"
+UART_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.bin"
+UART_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.loader.decoded.txt"
+UART_SMOKE_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.txt"
+UART_SMOKE_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.bin"
+UART_SMOKE_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.loader.decoded.txt"
 TRANSPORT_CAPTURE_FILE = BUILD_DIR / "uart_loader_transport_capture.txt"
 BRIDGE_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_uart_capture.txt"
 BRIDGE_STEPS_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_steps_uart_capture.txt"
-STEP2_ONLY_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_step2_only_uart_capture.txt"
+STEP2_ONLY_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_step2_only_uart_capture.bin"
+STEP2_ONLY_CAPTURE_DECODED_FILE = BUILD_DIR / "ddr3_bridge_audit_step2_only_uart_capture.decoded.txt"
 UART_PAYLOAD_CHUNK_BYTES = 4
 UART_PAYLOAD_ACK = 0x06
 UART_BLOCK_CHECKSUM_BYTES = 64
@@ -73,6 +79,16 @@ UART_BOARD_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
 UART_BOARD_BLOCK_GAP_S = 0.050
 UART_BOARD_BLOCK_RETRY_GAP_S = 0.500
 UART_BLOCK_RETRY_LIMIT = 8
+UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S = 8.0
+UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S = 8.0
+UART_MAINLINE_PAYLOAD_BYTE_DELAY_S = 0.002
+UART_MAINLINE_PAYLOAD_CHUNK_GAP_S = 0.030
+UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S = 0.080
+UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
+UART_MAINLINE_BLOCK_GAP_S = 0.080
+UART_MAINLINE_BLOCK_RETRY_GAP_S = 1.000
+UART_MAINLINE_BLOCK_RETRY_LIMIT = 10
+LOADER_FULL_GATE_PREFIX_BLOCKS = 16
 USE_REGISTERED_UART_RXDATA = True
 BLOCK_CHECKSUM_BYTES = 64
 TRANSPORT_CASE_SIZES = [16, 64, 256, 1024]
@@ -85,6 +101,46 @@ BRIDGE_STEPS_TOP_SIM_TIMEOUT_S = 300
 BRIDGE_STEPS_TOP_SIM_TB_TIMEOUT_NS = 1_000_000
 STEP2_ONLY_TOP_SIM_TIMEOUT_S = 300
 STEP2_ONLY_TOP_SIM_TB_TIMEOUT_NS = 2_000_000
+STEP2_BEACON_SOF = 0xA5
+STEP2_EVT_READY = 0x01
+STEP2_EVT_C1_OK = 0x11
+STEP2_EVT_C2_OK = 0x12
+STEP2_EVT_C3_START = 0x31
+STEP2_EVT_C3_AFTER = 0x32
+STEP2_EVT_C3_OK = 0x33
+STEP2_EVT_C4_START = 0x41
+STEP2_EVT_C4_AFTER = 0x42
+STEP2_EVT_C4_OK = 0x43
+STEP2_EVT_C5_START = 0x51
+STEP2_EVT_C5_AFTER = 0x52
+STEP2_EVT_C5_OK = 0x53
+STEP2_EVT_BAD = 0xE0
+STEP2_EVT_CAL_FAIL = 0xE1
+STEP2_EVT_TRAP = 0xEF
+STEP2_EVT_SUMMARY = 0xF0
+LOADER_EVT_READY = 0x01
+LOADER_EVT_LOAD_START = 0x02
+LOADER_EVT_BLOCK_ACK = 0x11
+LOADER_EVT_BLOCK_NACK = 0x12
+LOADER_EVT_READ_OK = 0x21
+LOADER_EVT_LOAD_OK = 0x22
+LOADER_EVT_JUMP = 0x23
+LOADER_EVT_CAL_FAIL = 0xE0
+LOADER_EVT_BAD_MAGIC = 0xE1
+LOADER_EVT_CHECKSUM_FAIL = 0xE2
+LOADER_EVT_READBACK_FAIL = 0xE3
+LOADER_EVT_READBACK_BLOCK_FAIL = 0xE4
+LOADER_EVT_RX_OVERRUN = 0xE5
+LOADER_EVT_RX_FRAME_ERR = 0xE6
+LOADER_EVT_DRAIN_TIMEOUT = 0xE7
+LOADER_EVT_SIZE_TOO_BIG = 0xE8
+LOADER_EVT_SUMMARY = 0xF0
+LOADER_SUM_READY = 0x01
+LOADER_SUM_LOAD_START = 0x02
+LOADER_SUM_READ_OK = 0x04
+LOADER_SUM_LOAD_OK = 0x08
+LOADER_SUM_JUMP = 0x10
+LOADER_SUM_ANY_BAD = 0x80
 
 
 def which_required(*names: str) -> str:
@@ -166,6 +222,20 @@ def fmt_optional_hex(value: object) -> str:
     return str(value)
 
 
+def clone_manifest_outputs(manifest: dict[str, object], out_dir: Path, stem: str) -> dict[str, object]:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    cloned = dict(manifest)
+    for key in ("elf", "bin"):
+        value = manifest.get(key)
+        if not value:
+            continue
+        src = Path(str(value))
+        dst = out_dir / f"{stem}{src.suffix}"
+        shutil.copy2(src, dst)
+        cloned[key] = str(dst)
+    return cloned
+
+
 def build_env(
     rs_depth: int,
     fetch_buffer_depth: int,
@@ -173,6 +243,8 @@ def build_env(
     *,
     fetch_debug: bool = False,
     bridge_audit: bool = False,
+    step2_beacon_debug: bool = False,
+    loader_beacon_debug: bool = False,
     uart_baud: int = 115200,
     rom_asm: Path | None = None,
     rom_march: str | None = None,
@@ -194,6 +266,8 @@ def build_env(
             "AX7203_TOP_MODULE": "adam_riscv_ax7203_top",
             "AX7203_DDR3_FETCH_DEBUG": "1" if fetch_debug else "0",
             "AX7203_DDR3_BRIDGE_AUDIT": "1" if bridge_audit else "0",
+            "AX7203_STEP2_BEACON_DEBUG": "1" if step2_beacon_debug else "0",
+            "AX7203_DDR3_LOADER_BEACON_DEBUG": "1" if loader_beacon_debug else "0",
             "AX7203_TRANSPORT_UART_RXDATA_REG_TEST": "1" if transport_uart_rxdata_reg_test else "0",
             "AX7203_MAX_THREADS": "4",
             "AX7203_SYNTH_JOBS": "4",
@@ -282,15 +356,19 @@ def write_payload_hex(binary: Path) -> None:
 
 def run_loader_top_sim(
     logs_dir: Path,
+    manifest: dict[str, object],
     *,
     rs_depth: int,
     fetch_buffer_depth: int,
     core_clk_mhz: float,
+    expect_exec_pass: bool,
+    full_gate_prefix_enable: bool = False,
+    full_gate_prefix_block_ack_target: int = LOADER_FULL_GATE_PREFIX_BLOCKS,
     fetch_debug: bool = False,
     uart_baud: int = 115200,
+    log_name: str = "05_run_loader_top_sim.log",
 ) -> Path:
-    tiny = compile_ddr3_asm_payload(TINY_PAYLOAD_ROM, logs_dir / "tiny_payload", "ddr3_exec_payload")
-    write_payload_hex(Path(tiny["bin"]))
+    write_payload_hex(Path(str(manifest["bin"])))
     run_logged(
         [
             sys.executable,
@@ -312,25 +390,56 @@ def run_loader_top_sim(
     tb_file = FETCH_PROBE_TB if fetch_debug else LOADER_TB
     out_file = out_dir / f"{tb_top}.out"
     debug_defines = ["-DDDR3_FETCH_DEBUG=1", "-DDDR3_FETCH_PROBE_FAST=1"] if fetch_debug else []
-    tb_uart_bit_ns = max(1, round(1_000_000_000.0 / float(uart_baud)))
+    if fetch_debug or expect_exec_pass:
+        sim_uart_clk_div = 4
+        fast_uart_inject = 0
+        initial_header_wait_bits = 80
+        initial_payload_wait_bits = 80
+        inter_u32_gap_bits = 64
+        chunk_ack_gap_bits = 4
+        block_done_gap_bits = 8
+    else:
+        sim_uart_clk_div = 4
+        fast_uart_inject = 1
+        initial_header_wait_bits = 8
+        initial_payload_wait_bits = 8
+        inter_u32_gap_bits = 2
+        chunk_ack_gap_bits = 1
+        block_done_gap_bits = 1
+    tb_uart_bit_ns = max(1, round(sim_uart_clk_div * (1000.0 / core_clk_mhz)))
+    payload_size = int(manifest["size_bytes"])
+    if expect_exec_pass:
+        tb_timeout_ns = max(5_000_000, int((payload_size + 512) * 14 * tb_uart_bit_ns * 6))
+        tb_timeout_ns = min(tb_timeout_ns, 20_000_000)
+        sim_timeout_s = 1200
+    elif full_gate_prefix_enable:
+        prefix_payload_size = min(payload_size, full_gate_prefix_block_ack_target * UART_BLOCK_CHECKSUM_BYTES)
+        tb_timeout_ns = max(12_000_000, int((prefix_payload_size + 512) * 14 * tb_uart_bit_ns * 4))
+        tb_timeout_ns = min(tb_timeout_ns, 60_000_000)
+        sim_timeout_s = 300
+    else:
+        tb_timeout_ns = max(40_000_000, int((payload_size + 1024) * 14 * tb_uart_bit_ns * 3))
+        tb_timeout_ns = min(tb_timeout_ns, 200_000_000)
+        sim_timeout_s = 1200
     compile_cmd = [
         which_required("iverilog"),
         "-g2012",
         "-DFPGA_MODE=1",
         "-DENABLE_MEM_SUBSYS=1",
         "-DENABLE_DDR3=1",
+        "-DAX7203_DDR3_LOADER_BEACON_DEBUG=1",
         "-DL2_PASSTHROUGH=1",
         "-DTRANSPORT_UART_RXDATA_REG_TEST=1",
         *debug_defines,
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=1",
-        "-DTB_SHORT_TIMEOUT_NS=30000000",
+        f"-DTB_SHORT_TIMEOUT_NS={tb_timeout_ns}",
         f"-DTB_UART_BIT_NS={tb_uart_bit_ns}",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
         f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
         f"-DFPGA_FETCH_BUFFER_DEPTH={fetch_buffer_depth}",
         f"-DFPGA_CLK_WIZ_HALF_DIV={derive_clk_wiz_half_div(core_clk_mhz)}",
-        f"-DFPGA_UART_CLK_DIV={derive_uart_clk_div(core_clk_mhz, uart_baud)}",
+        f"-DFPGA_UART_CLK_DIV={sim_uart_clk_div}",
         "-s",
         tb_top,
         "-o",
@@ -348,21 +457,40 @@ def run_loader_top_sim(
         str(tb_file),
     ]
     run_logged(compile_cmd, cwd=REPO_ROOT, log_path=logs_dir / "04_compile_loader_top_sim.log", timeout=300)
-    sim_log = logs_dir / "05_run_loader_top_sim.log"
+    sim_log = logs_dir / log_name
     run_logged(
         [
             which_required("vvp"),
             str(out_file),
-            f"+PAYLOAD_SIZE={tiny['size_bytes']}",
-            f"+PAYLOAD_CHECKSUM={tiny['checksum32']}",
+            f"+PAYLOAD_SIZE={int(manifest['size_bytes'])}",
+            f"+PAYLOAD_CHECKSUM={int(manifest['checksum32'])}",
+            f"+EXPECT_EXEC_PASS={1 if expect_exec_pass else 0}",
+            f"+FULL_GATE_PREFIX_ENABLE={1 if full_gate_prefix_enable else 0}",
+            f"+FULL_GATE_PREFIX_BLOCK_ACK_TARGET={full_gate_prefix_block_ack_target}",
+            f"+FAST_UART_INJECT={fast_uart_inject}",
+            f"+INITIAL_HEADER_WAIT_BITS={initial_header_wait_bits}",
+            f"+INITIAL_PAYLOAD_WAIT_BITS={initial_payload_wait_bits}",
+            f"+INTER_U32_GAP_BITS={inter_u32_gap_bits}",
+            f"+CHUNK_ACK_GAP_BITS={chunk_ack_gap_bits}",
+            f"+BLOCK_DONE_GAP_BITS={block_done_gap_bits}",
         ],
         cwd=ROM_DIR,
         log_path=sim_log,
-        timeout=1200,
+        timeout=sim_timeout_s,
     )
+    sim_text = read_text(sim_log)
     expect_token = "[AX7203_DDR3_FETCH_PROBE] PASS" if fetch_debug else "[AX7203_DDR3_LOADER] PASS"
-    if expect_token not in read_text(sim_log):
+    if expect_token not in sim_text:
         raise RuntimeError(f"DDR3 loader top simulation did not pass; see {sim_log}")
+    if not fetch_debug:
+        sim_result = analyze_loader_sim_log(sim_text)
+        if full_gate_prefix_enable:
+            if not loader_prefix_target_ok(sim_result, full_gate_prefix_block_ack_target):
+                raise RuntimeError(
+                    f"DDR3 loader full-prefix gate did not reach target {full_gate_prefix_block_ack_target}; see {sim_log}"
+                )
+        elif expect_exec_pass and not sim_result.get("saw_exec_pass", False):
+            raise RuntimeError(f"DDR3 loader quick gate missing EXEC_PASS; see {sim_log}")
     return sim_log
 
 
@@ -694,6 +822,7 @@ def run_step2_only_top_sim(
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=1",
         "-DDDR3_BRIDGE_AUDIT=1",
+        "-DAX7203_STEP2_BEACON_DEBUG=1",
         f"-DTB_SHORT_TIMEOUT_NS={STEP2_ONLY_TOP_SIM_TB_TIMEOUT_NS}",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
         f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
@@ -810,7 +939,7 @@ def run_transport_top_sim(
     return sim_log, manifest
 
 
-def build_dhrystone_payload(logs_dir: Path, *, cpu_hz: int, runs: int) -> dict[str, object]:
+def build_dhrystone_payload(logs_dir: Path, *, cpu_hz: int, runs: int, stem: str) -> dict[str, object]:
     run_logged(
         [
             sys.executable,
@@ -830,7 +959,8 @@ def build_dhrystone_payload(logs_dir: Path, *, cpu_hz: int, runs: int) -> dict[s
         timeout=600,
     )
     manifest_path = BUILD_DIR / "benchmark_images" / "dhrystone" / "dhrystone_ddr3.json"
-    return json.loads(manifest_path.read_text(encoding="ascii"))
+    manifest = json.loads(manifest_path.read_text(encoding="ascii"))
+    return clone_manifest_outputs(manifest, logs_dir / "payload_manifests", stem)
 
 
 def parse_fetch_probe(text: str) -> dict[str, object]:
@@ -972,143 +1102,457 @@ def analyze_bridge_steps_bad_line(text: str) -> dict[str, object]:
     }
 
 
-def analyze_step2_only_bad_line(text: str) -> dict[str, object]:
-    matches = re.findall(
-        r"(S2 BAD C=([0-9]) P=([0-9]) A=([0-9A-Fa-f]{8}) E=([0-9A-Fa-f]{8}) R=([0-9A-Fa-f]{8}) "
-        r"W0_A=([0-9A-Fa-f]{8}) W0_D=([0-9A-Fa-f]{8}) W1_A=([0-9A-Fa-f]{8}) W1_D=([0-9A-Fa-f]{8}) "
-        r"DR=([01]) ID=([01]) SBE=([01]) C0=([0-7]) C1=([0-7]) ST=([0-9A-Fa-f]{8}))",
+def step2_event_name(evt_type: int) -> str:
+    names = {
+        STEP2_EVT_READY: "READY",
+        STEP2_EVT_C1_OK: "C1_OK",
+        STEP2_EVT_C2_OK: "C2_OK",
+        STEP2_EVT_C3_START: "C3_START",
+        STEP2_EVT_C3_AFTER: "C3_AFTER",
+        STEP2_EVT_C3_OK: "C3_OK",
+        STEP2_EVT_C4_START: "C4_START",
+        STEP2_EVT_C4_AFTER: "C4_AFTER",
+        STEP2_EVT_C4_OK: "C4_OK",
+        STEP2_EVT_C5_START: "C5_START",
+        STEP2_EVT_C5_AFTER: "C5_AFTER",
+        STEP2_EVT_C5_OK: "C5_OK",
+        STEP2_EVT_BAD: "BAD",
+        STEP2_EVT_CAL_FAIL: "CAL_FAIL",
+        STEP2_EVT_TRAP: "TRAP",
+        STEP2_EVT_SUMMARY: "SUMMARY",
+    }
+    return names.get(evt_type, f"TYPE_{evt_type:02X}")
+
+
+def analyze_step2_only_beacon(raw_bytes: bytes) -> dict[str, object]:
+    ready_seen = False
+    case1_pass = False
+    case2_pass = False
+    saw_start_case3 = False
+    saw_after_write_case3 = False
+    case3_pass = False
+    saw_start_case4 = False
+    saw_after_write_case4 = False
+    case4_pass = False
+    saw_start_case5 = False
+    saw_after_write_case5 = False
+    case5_pass = False
+    summary_seen = False
+    summary_mask: int | None = None
+    saw_bad = False
+    saw_trap = False
+    saw_cal_fail = False
+    bad_detail: dict[str, object] = {}
+    last_progress_detail: dict[str, object] = {}
+    good_frames = 0
+    bad_frames = 0
+    dropped_duplicates = 0
+    session_active = False
+    session_complete = False
+    seen_seq: set[int] = set()
+    decoded_lines: list[str] = []
+
+    idx = 0
+    while idx + 4 < len(raw_bytes):
+        if raw_bytes[idx] != STEP2_BEACON_SOF:
+            idx += 1
+            continue
+
+        seq = raw_bytes[idx + 1]
+        evt_type = raw_bytes[idx + 2]
+        evt_arg = raw_bytes[idx + 3]
+        evt_chk = raw_bytes[idx + 4]
+        expected_chk = STEP2_BEACON_SOF ^ seq ^ evt_type ^ evt_arg
+        event_name = step2_event_name(evt_type)
+
+        if evt_chk != expected_chk:
+            bad_frames += 1
+            decoded_lines.append(
+                f"BAD_FRAME off=0x{idx:04X} seq=0x{seq:02X} type=0x{evt_type:02X} arg=0x{evt_arg:02X} "
+                f"chk=0x{evt_chk:02X} exp=0x{expected_chk:02X}"
+            )
+            idx += 1
+            continue
+
+        line = f"EVT off=0x{idx:04X} seq=0x{seq:02X} {event_name} arg=0x{evt_arg:02X}"
+        decoded_lines.append(line)
+
+        if evt_type == STEP2_EVT_READY:
+            ready_seen = True
+            case1_pass = False
+            case2_pass = False
+            saw_start_case3 = False
+            saw_after_write_case3 = False
+            case3_pass = False
+            saw_start_case4 = False
+            saw_after_write_case4 = False
+            case4_pass = False
+            saw_start_case5 = False
+            saw_after_write_case5 = False
+            case5_pass = False
+            summary_seen = False
+            summary_mask = None
+            saw_bad = False
+            saw_trap = False
+            saw_cal_fail = False
+            bad_detail = {}
+            last_progress_detail = {"kind": "ready", "line": line}
+            good_frames = 1
+            bad_frames = 0
+            dropped_duplicates = 0
+            seen_seq = {seq}
+            session_active = True
+            session_complete = False
+            idx += 5
+            continue
+
+        if not session_active or session_complete:
+            idx += 5
+            continue
+
+        if seq in seen_seq:
+            dropped_duplicates += 1
+            decoded_lines.append(
+                f"DUP_FRAME off=0x{idx:04X} seq=0x{seq:02X} {event_name} arg=0x{evt_arg:02X}"
+            )
+            idx += 5
+            continue
+
+        seen_seq.add(seq)
+        good_frames += 1
+
+        if evt_type == STEP2_EVT_C1_OK:
+            case1_pass = True
+            last_progress_detail = {"kind": "ok", "case": 1, "line": line}
+        elif evt_type == STEP2_EVT_C2_OK:
+            case2_pass = True
+            last_progress_detail = {"kind": "ok", "case": 2, "line": line}
+        elif evt_type == STEP2_EVT_C3_START:
+            saw_start_case3 = True
+            last_progress_detail = {"kind": "start", "case": 3, "line": line}
+        elif evt_type == STEP2_EVT_C3_AFTER:
+            saw_after_write_case3 = True
+            last_progress_detail = {"kind": "after_write", "case": 3, "line": line}
+        elif evt_type == STEP2_EVT_C3_OK:
+            case3_pass = True
+            last_progress_detail = {"kind": "ok", "case": 3, "line": line}
+        elif evt_type == STEP2_EVT_C4_START:
+            saw_start_case4 = True
+            last_progress_detail = {"kind": "start", "case": 4, "line": line}
+        elif evt_type == STEP2_EVT_C4_AFTER:
+            saw_after_write_case4 = True
+            last_progress_detail = {"kind": "after_write", "case": 4, "line": line}
+        elif evt_type == STEP2_EVT_C4_OK:
+            case4_pass = True
+            last_progress_detail = {"kind": "ok", "case": 4, "line": line}
+        elif evt_type == STEP2_EVT_C5_START:
+            saw_start_case5 = True
+            last_progress_detail = {"kind": "start", "case": 5, "line": line}
+        elif evt_type == STEP2_EVT_C5_AFTER:
+            saw_after_write_case5 = True
+            last_progress_detail = {"kind": "after_write", "case": 5, "line": line}
+        elif evt_type == STEP2_EVT_C5_OK:
+            case5_pass = True
+            last_progress_detail = {"kind": "ok", "case": 5, "line": line}
+        elif evt_type == STEP2_EVT_BAD:
+            saw_bad = True
+            bad_detail = {
+                "case": evt_arg & 0x0F,
+                "phase": (evt_arg >> 4) & 0x0F,
+                "line": line,
+            }
+            last_progress_detail = {
+                "kind": "bad",
+                "case": evt_arg & 0x0F,
+                "phase": (evt_arg >> 4) & 0x0F,
+                "line": line,
+            }
+        elif evt_type == STEP2_EVT_CAL_FAIL:
+            saw_cal_fail = True
+            last_progress_detail = {"kind": "cal_fail", "line": line}
+        elif evt_type == STEP2_EVT_TRAP:
+            saw_trap = True
+            last_progress_detail = {"kind": "trap", "line": line}
+        elif evt_type == STEP2_EVT_SUMMARY:
+            summary_seen = True
+            summary_mask = evt_arg
+            last_progress_detail = {"kind": "summary", "line": line}
+            session_complete = True
+
+        idx += 5
+
+    all_ok_seen = bool(summary_seen and summary_mask is not None and (summary_mask & 0x1F) == 0x1F and (summary_mask & 0x80) == 0)
+    return {
+        "ready_seen": ready_seen,
+        "saw_start_case1": False,
+        "case1_pass": case1_pass,
+        "saw_start_case2": False,
+        "case2_pass": case2_pass,
+        "saw_start_case3": saw_start_case3,
+        "saw_after_write_case3": saw_after_write_case3,
+        "case3_pass": case3_pass,
+        "saw_start_case4": saw_start_case4,
+        "saw_after_write_case4": saw_after_write_case4,
+        "case4_pass": case4_pass,
+        "saw_start_case5": saw_start_case5,
+        "saw_after_write_case5": saw_after_write_case5,
+        "case5_pass": case5_pass,
+        "summary_seen": summary_seen,
+        "summary_mask": summary_mask,
+        "all_ok_seen": all_ok_seen,
+        "saw_bad": saw_bad,
+        "saw_trap": saw_trap,
+        "saw_cal_fail": saw_cal_fail,
+        "bad_reason": "step2_bad" if saw_bad else ("step2_trap" if saw_trap else ("step2_cal_fail" if saw_cal_fail else "none")),
+        "bad_detail": bad_detail,
+        "last_phase_detail": {},
+        "last_progress_detail": last_progress_detail,
+        "good_frames": good_frames,
+        "bad_frames": bad_frames,
+        "dropped_duplicate_frames": dropped_duplicates,
+        "decoded_text": "\n".join(decoded_lines) + ("\n" if decoded_lines else ""),
+    }
+
+
+def analyze_step2_only_sim_log(text: str) -> dict[str, object]:
+    summary_match = re.findall(r"EVT SUMMARY seq=\d+ mask=([0-9A-Fa-f]{2})", text)
+    pass_line = re.findall(r"(\[AX7203_DDR3_S2\] PASS .*)", text)
+    pass_text = pass_line[-1] if pass_line else ""
+    summary_mask = int(summary_match[-1], 16) if summary_match else (int(re.findall(r"mask=([0-9A-Fa-f]{2})", pass_text)[-1], 16) if re.findall(r"mask=([0-9A-Fa-f]{2})", pass_text) else None)
+    good_frames = int(re.findall(r"good=(\d+)", pass_text)[-1]) if re.findall(r"good=(\d+)", pass_text) else 0
+    bad_frames = int(re.findall(r"bad=(\d+)", pass_text)[-1]) if re.findall(r"bad=(\d+)", pass_text) else 0
+    dropped_duplicates = int(re.findall(r"dup=(\d+)", pass_text)[-1]) if re.findall(r"dup=(\d+)", pass_text) else 0
+    all_ok_seen = bool("[AX7203_DDR3_S2] PASS" in text and summary_mask is not None and (summary_mask & 0x1F) == 0x1F and (summary_mask & 0x80) == 0)
+    return {
+        "ready_seen": "[AX7203_DDR3_S2] EVT READY" in text,
+        "saw_start_case1": False,
+        "case1_pass": "[AX7203_DDR3_S2] EVT C1_OK" in text,
+        "saw_start_case2": False,
+        "case2_pass": "[AX7203_DDR3_S2] EVT C2_OK" in text,
+        "saw_start_case3": "[AX7203_DDR3_S2] EVT C3_START" in text,
+        "saw_after_write_case3": "[AX7203_DDR3_S2] EVT C3_AFTER" in text,
+        "case3_pass": "[AX7203_DDR3_S2] EVT C3_OK" in text,
+        "saw_start_case4": "[AX7203_DDR3_S2] EVT C4_START" in text,
+        "saw_after_write_case4": "[AX7203_DDR3_S2] EVT C4_AFTER" in text,
+        "case4_pass": "[AX7203_DDR3_S2] EVT C4_OK" in text,
+        "saw_start_case5": "[AX7203_DDR3_S2] EVT C5_START" in text,
+        "saw_after_write_case5": "[AX7203_DDR3_S2] EVT C5_AFTER" in text,
+        "case5_pass": "[AX7203_DDR3_S2] EVT C5_OK" in text,
+        "summary_seen": bool(summary_match),
+        "summary_mask": summary_mask,
+        "all_ok_seen": all_ok_seen,
+        "saw_bad": "[AX7203_DDR3_S2] EVT BAD" in text,
+        "saw_trap": "[AX7203_DDR3_S2] EVT TRAP" in text,
+        "saw_cal_fail": "[AX7203_DDR3_S2] EVT CAL_FAIL" in text,
+        "bad_reason": "step2_bad" if "[AX7203_DDR3_S2] EVT BAD" in text else ("step2_trap" if "[AX7203_DDR3_S2] EVT TRAP" in text else ("step2_cal_fail" if "[AX7203_DDR3_S2] EVT CAL_FAIL" in text else "none")),
+        "bad_detail": {},
+        "last_phase_detail": {},
+        "last_progress_detail": {"kind": "sim_pass", "line": "[AX7203_DDR3_S2] PASS"} if "[AX7203_DDR3_S2] PASS" in text else {},
+        "good_frames": good_frames,
+        "bad_frames": bad_frames,
+        "dropped_duplicate_frames": dropped_duplicates,
+        "capture_bytes": 0,
+        "decoded_log_path": "",
+    }
+
+
+def loader_event_name(evt_type: int) -> str:
+    names = {
+        LOADER_EVT_READY: "READY",
+        LOADER_EVT_LOAD_START: "LOAD_START",
+        LOADER_EVT_BLOCK_ACK: "BLOCK_ACK",
+        LOADER_EVT_BLOCK_NACK: "BLOCK_NACK",
+        LOADER_EVT_READ_OK: "READ_OK",
+        LOADER_EVT_LOAD_OK: "LOAD_OK",
+        LOADER_EVT_JUMP: "JUMP",
+        LOADER_EVT_CAL_FAIL: "CAL_FAIL",
+        LOADER_EVT_BAD_MAGIC: "BAD_MAGIC",
+        LOADER_EVT_CHECKSUM_FAIL: "CHECKSUM_FAIL",
+        LOADER_EVT_READBACK_FAIL: "READBACK_FAIL",
+        LOADER_EVT_READBACK_BLOCK_FAIL: "READBACK_BLOCK_FAIL",
+        LOADER_EVT_RX_OVERRUN: "RX_OVERRUN",
+        LOADER_EVT_RX_FRAME_ERR: "RX_FRAME_ERR",
+        LOADER_EVT_DRAIN_TIMEOUT: "DRAIN_TIMEOUT",
+        LOADER_EVT_SIZE_TOO_BIG: "SIZE_TOO_BIG",
+        LOADER_EVT_SUMMARY: "SUMMARY",
+    }
+    return names.get(evt_type, f"TYPE_{evt_type:02X}")
+
+
+def loader_summary_ok(summary_mask: object) -> bool:
+    return isinstance(summary_mask, int) and (summary_mask & 0x1F) == 0x1F and (summary_mask & LOADER_SUM_ANY_BAD) == 0
+
+
+def loader_prefix_target_ok(loader_result: dict[str, object], target: int) -> bool:
+    max_block_ack = loader_result.get("max_block_ack_arg")
+    return (
+        bool(loader_result.get("ready_seen", False))
+        and bool(loader_result.get("load_start_seen", False))
+        and int(loader_result.get("block_ack_events", 0)) >= target
+        and isinstance(max_block_ack, int)
+        and max_block_ack >= (target - 1)
+        and int(loader_result.get("block_nack_events", 0)) == 0
+        and not bool(loader_result.get("bad_seen", False))
+    )
+
+
+def reduce_loader_events(
+    events: list[tuple[int, int, int]],
+    *,
+    decoded_lines: list[str] | None = None,
+    bad_frames: int = 0,
+) -> dict[str, object]:
+    ready_seen = False
+    load_start_seen = False
+    read_ok_seen = False
+    load_ok_seen = False
+    jump_seen = False
+    summary_seen = False
+    summary_mask: int | None = None
+    bad_seen = False
+    bad_code: int | None = None
+    bad_block: int | None = None
+    first_bad_event_offset: int | None = None
+    block_ack_events = 0
+    block_nack_events = 0
+    max_block_ack_arg: int | None = None
+    good_frames = 0
+    dropped_duplicates = 0
+    session_active = False
+    seen_seq: set[int] = set()
+
+    for event_idx, (seq, evt_type, evt_arg) in enumerate(events):
+        if evt_type == LOADER_EVT_READY:
+            ready_seen = True
+            load_start_seen = False
+            read_ok_seen = False
+            load_ok_seen = False
+            jump_seen = False
+            summary_seen = False
+            summary_mask = None
+            bad_seen = False
+            bad_code = None
+            bad_block = None
+            first_bad_event_offset = None
+            block_ack_events = 0
+            block_nack_events = 0
+            max_block_ack_arg = None
+            good_frames = 1
+            dropped_duplicates = 0
+            session_active = True
+            seen_seq = {seq}
+            continue
+
+        if not session_active:
+            continue
+        if seq in seen_seq:
+            dropped_duplicates += 1
+            continue
+        seen_seq.add(seq)
+        good_frames += 1
+
+        if evt_type == LOADER_EVT_LOAD_START:
+            load_start_seen = True
+        elif evt_type == LOADER_EVT_BLOCK_ACK:
+            block_ack_events += 1
+            if max_block_ack_arg is None or evt_arg > max_block_ack_arg:
+                max_block_ack_arg = evt_arg
+        elif evt_type == LOADER_EVT_BLOCK_NACK:
+            block_nack_events += 1
+        elif evt_type == LOADER_EVT_READ_OK:
+            read_ok_seen = True
+        elif evt_type == LOADER_EVT_LOAD_OK:
+            load_ok_seen = True
+        elif evt_type == LOADER_EVT_JUMP:
+            jump_seen = True
+        elif evt_type == LOADER_EVT_SUMMARY:
+            summary_seen = True
+            summary_mask = evt_arg
+        else:
+            bad_seen = True
+            bad_code = evt_type
+            bad_block = evt_arg
+            if first_bad_event_offset is None:
+                first_bad_event_offset = event_idx
+
+    bad_reason = loader_event_name(bad_code) if bad_seen and bad_code is not None else "none"
+    return {
+        "ready_seen": ready_seen,
+        "load_start_seen": load_start_seen,
+        "read_ok_seen": read_ok_seen,
+        "load_ok_seen": load_ok_seen,
+        "jump_seen": jump_seen,
+        "summary_seen": summary_seen,
+        "summary_mask": summary_mask,
+        "summary_ok_seen": loader_summary_ok(summary_mask),
+        "bad_seen": bad_seen,
+        "bad_code": bad_code,
+        "bad_block": bad_block,
+        "first_bad_event_offset": first_bad_event_offset,
+        "bad_reason": bad_reason,
+        "block_ack_events": block_ack_events,
+        "block_nack_events": block_nack_events,
+        "max_block_ack_arg": max_block_ack_arg,
+        "good_frames": good_frames,
+        "bad_frames": bad_frames,
+        "dropped_duplicate_frames": dropped_duplicates,
+        "decoded_text": "\n".join(decoded_lines or []) + ("\n" if decoded_lines else ""),
+    }
+
+
+def analyze_loader_beacon(raw_bytes: bytes) -> dict[str, object]:
+    events: list[tuple[int, int, int]] = []
+    decoded_lines: list[str] = []
+    passthrough = bytearray()
+    bad_frames = 0
+    idx = 0
+    while idx < len(raw_bytes):
+        if raw_bytes[idx] != STEP2_BEACON_SOF:
+            passthrough.append(raw_bytes[idx])
+            idx += 1
+            continue
+        if idx + 4 >= len(raw_bytes):
+            break
+        seq = raw_bytes[idx + 1]
+        evt_type = raw_bytes[idx + 2]
+        evt_arg = raw_bytes[idx + 3]
+        evt_chk = raw_bytes[idx + 4]
+        exp_chk = STEP2_BEACON_SOF ^ seq ^ evt_type ^ evt_arg
+        if evt_chk != exp_chk:
+            bad_frames += 1
+            decoded_lines.append(
+                f"BAD_FRAME off=0x{idx:04X} seq=0x{seq:02X} type=0x{evt_type:02X} "
+                f"arg=0x{evt_arg:02X} chk=0x{evt_chk:02X} exp=0x{exp_chk:02X}"
+            )
+            passthrough.append(raw_bytes[idx])
+            idx += 1
+            continue
+        decoded_lines.append(f"EVT off=0x{idx:04X} seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
+        events.append((seq, evt_type, evt_arg))
+        idx += 5
+    result = reduce_loader_events(events, decoded_lines=decoded_lines, bad_frames=bad_frames)
+    result["passthrough_bytes"] = bytes(passthrough)
+    return result
+
+
+def analyze_loader_sim_log(text: str) -> dict[str, object]:
+    events: list[tuple[int, int, int]] = []
+    decoded_lines: list[str] = []
+    for seq_s, type_s, arg_s in re.findall(
+        r"\[AX7203_DDR3_LOADER_EVT\]\s+seq=([0-9A-Fa-f]{2})\s+type=([0-9A-Fa-f]{2})\s+arg=([0-9A-Fa-f]{2})",
         text,
-    )
-    if not matches:
-        return {}
-    (
-        line,
-        case_s,
-        phase_s,
-        addr_s,
-        exp_s,
-        act_s,
-        w0_addr_s,
-        w0_data_s,
-        w1_addr_s,
-        w1_data_s,
-        drain_s,
-        idle_s,
-        sbe_s,
-        c0_s,
-        c1_s,
-        status_s,
-    ) = matches[-1]
-    return {
-        "line": line,
-        "case": int(case_s),
-        "phase": int(phase_s),
-        "addr": int(addr_s, 16),
-        "expected": int(exp_s, 16),
-        "actual": int(act_s, 16),
-        "write0_addr": int(w0_addr_s, 16),
-        "write0_data": int(w0_data_s, 16),
-        "write1_addr": int(w1_addr_s, 16),
-        "write1_data": int(w1_data_s, 16),
-        "drain_ready": int(drain_s),
-        "bridge_idle": int(idle_s),
-        "store_buffer_empty": int(sbe_s),
-        "store_count_t0": int(c0_s),
-        "store_count_t1": int(c1_s),
-        "status_word": int(status_s, 16),
-    }
-
-
-def analyze_step2_only_last_phase(text: str) -> dict[str, object]:
-    matches = re.findall(r"(S2 PH C=([0-9]) P=([0-9]))", text)
-    if not matches:
-        return {}
-    line, case_s, phase_s = matches[-1]
-    return {
-        "line": line,
-        "case": int(case_s),
-        "phase": int(phase_s),
-    }
-
-
-def analyze_step2_only_last_progress(text: str) -> dict[str, object]:
-    pattern = re.compile(
-        r"(S2 START C=([1-5]))"
-        r"|"
-        r"(S2 AFTER WRITE C=([3-5]))"
-        r"|"
-        r"(S2 OK C=([1-5]))"
-        r"|"
-        r"(S2 PH C=([0-9]) P=([0-9]))"
-    )
-    last_match: dict[str, object] = {}
-    for match in pattern.finditer(text):
-        if match.group(1):
-            last_match = {
-                "line": match.group(1),
-                "kind": "start",
-                "case": int(match.group(2)),
-            }
-        elif match.group(3):
-            last_match = {
-                "line": match.group(3),
-                "kind": "after_write",
-                "case": int(match.group(4)),
-            }
-        elif match.group(5):
-            last_match = {
-                "line": match.group(5),
-                "kind": "ok",
-                "case": int(match.group(6)),
-            }
-        elif match.group(7):
-            last_match = {
-                "line": match.group(7),
-                "kind": "phase",
-                "case": int(match.group(8)),
-                "phase": int(match.group(9)),
-            }
-    if not last_match:
-        return {}
-    return last_match
-
-
-def step2_case_window(text: str, case_num: int) -> str:
-    start_token = f"S2 START C={case_num}"
-    start_idx = text.find(start_token)
-    if start_idx < 0:
-        return ""
-    end_candidates: list[int] = []
-    for next_case in range(case_num + 1, 6):
-        idx = text.find(f"S2 START C={next_case}", start_idx + len(start_token))
-        if idx >= 0:
-            end_candidates.append(idx)
-    all_ok_idx = text.find("S2 ALL OK", start_idx + len(start_token))
-    if all_ok_idx >= 0:
-        end_candidates.append(all_ok_idx)
-    noisy_all_ok_idx = text.find("S2 AALL OK", start_idx + len(start_token))
-    if noisy_all_ok_idx >= 0:
-        end_candidates.append(noisy_all_ok_idx)
-    end_idx = min(end_candidates) if end_candidates else len(text)
-    return text[start_idx:end_idx]
-
-
-def step2_window_has_start(window: str, case_num: int) -> bool:
-    return f"S2 START C={case_num}" in window
-
-
-def step2_window_has_after_write(window: str, case_num: int) -> bool:
-    if case_num < 3:
-        return False
-    if f"S2 AFTER WRITE C={case_num}" in window:
-        return True
-    return "S2 AFTER WRITE C=" in window
-
-
-def step2_window_has_ok(window: str, case_num: int) -> bool:
-    if f"S2 OK C={case_num}" in window:
-        return True
-    return re.search(r"S2 OK C=+[0-9]", window) is not None
+    ):
+        seq = int(seq_s, 16)
+        evt_type = int(type_s, 16)
+        evt_arg = int(arg_s, 16)
+        decoded_lines.append(f"EVT seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
+        events.append((seq, evt_type, evt_arg))
+    result = reduce_loader_events(events, decoded_lines=decoded_lines, bad_frames=0)
+    result["passthrough_bytes"] = b""
+    result["capture_bytes"] = 0
+    result["saw_exec_pass"] = ("DDR3 EXEC PASS" in text) or bool(re.search(r"\bexec_pass=1\b", text))
+    result["decoded_log_path"] = ""
+    return result
 
 
 def capture_bridge_audit_stream(
@@ -1232,28 +1676,8 @@ def capture_step2_only_stream(
     *,
     reset_buffers: bool = True,
 ) -> dict[str, object]:
-    text_bytes = bytearray()
-    ready_seen = False
-    saw_start_case1 = False
-    case1_pass = False
-    saw_start_case2 = False
-    case2_pass = False
-    saw_start_case3 = False
-    saw_after_write_case3 = False
-    case3_pass = False
-    saw_start_case4 = False
-    saw_after_write_case4 = False
-    case4_pass = False
-    saw_start_case5 = False
-    saw_after_write_case5 = False
-    case5_pass = False
-    all_ok_seen = False
-    saw_bad = False
-    saw_trap = False
-    bad_reason = "none"
-    bad_detail: dict[str, object] = {}
-    last_phase_detail: dict[str, object] = {}
-    last_progress_detail: dict[str, object] = {}
+    raw_bytes = bytearray()
+    analysis = analyze_step2_only_beacon(b"")
 
     if reset_buffers:
         ser.reset_input_buffer()
@@ -1263,72 +1687,21 @@ def capture_step2_only_stream(
     while time.monotonic() < deadline:
         chunk = ser.read(4096)
         if chunk:
-            text_bytes.extend(chunk)
-            text = text_bytes.decode("latin1", errors="ignore")
-            ready_seen = "S2 READY" in text
-            active_text = slice_after_last_token(text, "S2 READY")
-            case1_window = step2_case_window(active_text, 1)
-            case2_window = step2_case_window(active_text, 2)
-            case3_window = step2_case_window(active_text, 3)
-            case4_window = step2_case_window(active_text, 4)
-            case5_window = step2_case_window(active_text, 5)
-            saw_start_case1 = step2_window_has_start(case1_window, 1)
-            case1_pass = step2_window_has_ok(case1_window, 1)
-            saw_start_case2 = step2_window_has_start(case2_window, 2)
-            case2_pass = step2_window_has_ok(case2_window, 2)
-            saw_start_case3 = step2_window_has_start(case3_window, 3)
-            saw_after_write_case3 = step2_window_has_after_write(case3_window, 3)
-            case3_pass = step2_window_has_ok(case3_window, 3)
-            saw_start_case4 = step2_window_has_start(case4_window, 4)
-            saw_after_write_case4 = step2_window_has_after_write(case4_window, 4)
-            case4_pass = step2_window_has_ok(case4_window, 4)
-            saw_start_case5 = step2_window_has_start(case5_window, 5)
-            saw_after_write_case5 = step2_window_has_after_write(case5_window, 5)
-            case5_pass = step2_window_has_ok(case5_window, 5)
-            all_ok_seen = ("S2 ALL OK" in active_text) or ("S2 AALL OK" in active_text)
-            last_phase_detail = analyze_step2_only_last_phase(active_text)
-            last_progress_detail = analyze_step2_only_last_progress(active_text)
-            bad_detail = analyze_step2_only_bad_line(active_text)
-            saw_trap = "S2 TRAP" in active_text
-            if bad_detail:
-                saw_bad = True
-                bad_reason = "step2_bad"
-                break
-            if saw_trap:
-                bad_reason = "step2_trap"
-                break
-            if all_ok_seen:
+            raw_bytes.extend(chunk)
+            analysis = analyze_step2_only_beacon(bytes(raw_bytes))
+            if analysis.get("summary_seen"):
                 break
         else:
             time.sleep(0.001)
 
-    text = text_bytes.decode("latin1", errors="ignore")
+    analysis = analyze_step2_only_beacon(bytes(raw_bytes))
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    log_path.write_text(text, encoding="latin1", errors="ignore")
-    return {
-        "ready_seen": ready_seen,
-        "saw_start_case1": saw_start_case1,
-        "case1_pass": case1_pass,
-        "saw_start_case2": saw_start_case2,
-        "case2_pass": case2_pass,
-        "saw_start_case3": saw_start_case3,
-        "saw_after_write_case3": saw_after_write_case3,
-        "case3_pass": case3_pass,
-        "saw_start_case4": saw_start_case4,
-        "saw_after_write_case4": saw_after_write_case4,
-        "case4_pass": case4_pass,
-        "saw_start_case5": saw_start_case5,
-        "saw_after_write_case5": saw_after_write_case5,
-        "case5_pass": case5_pass,
-        "all_ok_seen": all_ok_seen,
-        "saw_bad": saw_bad,
-        "saw_trap": saw_trap,
-        "bad_reason": bad_reason,
-        "bad_detail": bad_detail,
-        "last_phase_detail": last_phase_detail,
-        "last_progress_detail": last_progress_detail,
-        "capture_bytes": len(text_bytes),
-    }
+    log_path.write_bytes(bytes(raw_bytes))
+    decoded_path = STEP2_ONLY_CAPTURE_DECODED_FILE if log_path == STEP2_ONLY_CAPTURE_FILE else log_path.with_suffix(".decoded.txt")
+    decoded_path.write_text(str(analysis.get("decoded_text", "")), encoding="utf-8")
+    analysis["capture_bytes"] = len(raw_bytes)
+    analysis["decoded_log_path"] = str(decoded_path)
+    return analysis
 
 
 def capture_bridge_audit(port: str, capture_seconds: int, log_path: Path, *, uart_baud: int = 115200) -> dict[str, object]:
@@ -1465,8 +1838,10 @@ def drive_uart_loader(
     ser,
     manifest: dict[str, object],
     capture_seconds: int,
-    log_path: Path,
+    text_log_path: Path,
     *,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
     expect_dhrystone: bool = True,
 ) -> dict[str, object]:
     payload = Path(str(manifest["bin"])).read_bytes()
@@ -1479,14 +1854,18 @@ def drive_uart_loader(
         int(manifest["checksum32"]),
     )
 
-    text_bytes = bytearray()
+    raw_bytes = bytearray()
+    loader_analysis = analyze_loader_beacon(b"")
+    passthrough_len = 0
     sent_header = False
     sent_payload = False
     header_sent_at = 0.0
     start = time.monotonic()
     blind_header_deadline = start + 1.0
     deadline = start + capture_seconds
-    log_path.parent.mkdir(parents=True, exist_ok=True)
+    text_log_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+    loader_decoded_path.parent.mkdir(parents=True, exist_ok=True)
     payload_ack_timeout = False
     payload_ack_credit = 0
     payload_ack_count = 0
@@ -1496,34 +1875,35 @@ def drive_uart_loader(
     payload_block_retry_count = 0
     payload_block_retry_limit_hit = False
     payload_failed_block = -1
-    active_text = ""
-    pending_block_reply = ""
+    pending_block_replies: list[str] = []
 
-    def active_text_from_text_bytes() -> str:
-        text = text_bytes.decode("latin1", errors="ignore")
-        session_start = text.rfind("BENCH LOADER")
-        return text[session_start:] if session_start >= 0 else text
+    def active_text() -> str:
+        return bytes(loader_analysis.get("passthrough_bytes", b"")).decode("latin1", errors="ignore")
 
     def ingest_serial_bytes(chunk: bytes) -> str:
-        nonlocal payload_ack_credit, payload_ack_count, pending_block_reply
+        nonlocal loader_analysis, passthrough_len, payload_ack_credit, payload_ack_count
         if chunk:
-            text_bytes.extend(chunk)
-            ack_hits = chunk.count(UART_PAYLOAD_ACK)
-            if ack_hits:
-                payload_ack_credit += ack_hits
-                payload_ack_count += ack_hits
-            if UART_BLOCK_NACK in chunk:
-                pending_block_reply = "nack"
-            elif UART_BLOCK_ACK in chunk and not pending_block_reply:
-                pending_block_reply = "ack"
-        return active_text_from_text_bytes()
+            raw_bytes.extend(chunk)
+            loader_analysis = analyze_loader_beacon(bytes(raw_bytes))
+            passthrough = bytes(loader_analysis.get("passthrough_bytes", b""))
+            new_passthrough = passthrough[passthrough_len:]
+            passthrough_len = len(passthrough)
+            for byte in new_passthrough:
+                if byte == UART_PAYLOAD_ACK:
+                    payload_ack_credit += 1
+                    payload_ack_count += 1
+                elif byte == UART_BLOCK_ACK:
+                    pending_block_replies.append("ack")
+                elif byte == UART_BLOCK_NACK:
+                    pending_block_replies.append("nack")
+        return active_text()
 
     def wait_payload_ack() -> bool:
         nonlocal payload_ack_credit
         if payload_ack_credit > 0:
             payload_ack_credit -= 1
             return True
-        end = time.monotonic() + UART_PAYLOAD_ACK_TIMEOUT_S
+        end = time.monotonic() + UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S
         while time.monotonic() < end:
             ack_chunk = ser.read(4096)
             if ack_chunk:
@@ -1536,20 +1916,15 @@ def drive_uart_loader(
         return False
 
     def wait_block_reply() -> str:
-        nonlocal pending_block_reply
-        if pending_block_reply:
-            reply = pending_block_reply
-            pending_block_reply = ""
-            return reply
-        end = time.monotonic() + UART_BLOCK_REPLY_TIMEOUT_S
+        if pending_block_replies:
+            return pending_block_replies.pop(0)
+        end = time.monotonic() + UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S
         while time.monotonic() < end:
             reply_chunk = ser.read(4096)
             if reply_chunk:
                 ingest_serial_bytes(reply_chunk)
-                if pending_block_reply:
-                    reply = pending_block_reply
-                    pending_block_reply = ""
-                    return reply
+                if pending_block_replies:
+                    return pending_block_replies.pop(0)
             else:
                 time.sleep(0.001)
         return "timeout"
@@ -1570,30 +1945,23 @@ def drive_uart_loader(
     while time.monotonic() < deadline:
         chunk = ser.read(4096)
         if chunk:
-            active_text = ingest_serial_bytes(chunk)
-            if (not sent_header) and "BOOT DDR3 READY" in active_text:
+            current_text = ingest_serial_bytes(chunk)
+            if (not sent_header) and bool(loader_analysis.get("ready_seen", False)):
                 time.sleep(0.2)
                 write_header_slow()
                 sent_header = True
                 header_sent_at = time.monotonic()
-            if expect_dhrystone and sent_payload and "DHRYSTONE DONE" in active_text:
+            if expect_dhrystone and sent_payload and "DHRYSTONE DONE" in current_text:
                 break
-            last_load_ok = active_text.rfind("LOAD OK")
-            last_probe = active_text.rfind("M0D ")
-            probe_region = active_text[last_load_ok:] if last_load_ok >= 0 else ""
             if (
                 (not expect_dhrystone)
                 and sent_payload
-                and last_load_ok >= 0
-                and last_probe > last_load_ok
-                and probe_region.count("M0D ") >= 3
-                and "\n" in active_text[last_probe:]
+                and bool(loader_analysis.get("summary_ok_seen", False))
             ):
                 break
+            if bool(loader_analysis.get("bad_seen", False)):
+                break
         elif (not sent_header) and time.monotonic() >= blind_header_deadline:
-            # The loader waits for the header after printing BOOT DDR3 READY.
-            # Opening the serial port after JTAG may miss that short banner, so
-            # send the header once after a quiet grace period.
             write_header_slow()
             sent_header = True
             header_sent_at = time.monotonic()
@@ -1602,7 +1970,7 @@ def drive_uart_loader(
             sent_header
             and (not sent_payload)
             and (
-                ("LOAD START" in active_text)
+                bool(loader_analysis.get("load_start_seen", False))
                 or (header_sent_at != 0.0 and time.monotonic() >= (header_sent_at + UART_HEADER_TO_PAYLOAD_GRACE_S))
             )
         ):
@@ -1613,6 +1981,13 @@ def drive_uart_loader(
                 wait_for_chunk_ack=wait_payload_ack,
                 wait_for_block_reply=wait_block_reply,
                 after_block_nack=lambda: drain_serial_quiet(0.100),
+                byte_delay_s=UART_MAINLINE_PAYLOAD_BYTE_DELAY_S,
+                chunk_gap_s=UART_MAINLINE_PAYLOAD_CHUNK_GAP_S,
+                pre_block_checksum_gap_s=UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S,
+                checksum_byte_delay_s=UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S,
+                block_gap_s=UART_MAINLINE_BLOCK_GAP_S,
+                block_retry_gap_s=UART_MAINLINE_BLOCK_RETRY_GAP_S,
+                retry_limit=UART_MAINLINE_BLOCK_RETRY_LIMIT,
             )
             payload_chunks_sent += int(send_result["payload_chunks_sent"])
             payload_ack_timeout = bool(send_result["payload_ack_timeout"])
@@ -1623,33 +1998,34 @@ def drive_uart_loader(
             payload_failed_block = int(send_result["payload_failed_block"])
             sent_payload = True
             deadline = max(deadline, time.monotonic() + capture_seconds)
+            if payload_ack_timeout or payload_block_retry_limit_hit or bool(loader_analysis.get("bad_seen", False)):
+                break
 
-    log_path.write_bytes(bytes(text_bytes))
-    active_text = active_text_from_text_bytes()
-    fetch_probe = parse_fetch_probe(active_text)
-    bad_block = analyze_loader_bad_block(active_text, payload)
-    bad_checksum = analyze_loader_bad_checksum(active_text)
-    write_blocks = analyze_loader_write_blocks(active_text, payload)
-    benchmark_counters = parse_benchmark_counters(active_text)
+    loader_analysis = analyze_loader_beacon(bytes(raw_bytes))
+    passthrough_bytes = bytes(loader_analysis.get("passthrough_bytes", b""))
+    current_text = passthrough_bytes.decode("latin1", errors="ignore")
+    text_log_path.write_text(current_text, encoding="latin1", errors="ignore")
+    raw_log_path.write_bytes(bytes(raw_bytes))
+    loader_decoded_path.write_text(str(loader_analysis.get("decoded_text", "")), encoding="utf-8")
+
+    fetch_probe = parse_fetch_probe(current_text)
+    bad_block = analyze_loader_bad_block(current_text, payload)
+    bad_checksum = analyze_loader_bad_checksum(current_text)
+    write_blocks = analyze_loader_write_blocks(current_text, payload)
+    benchmark_counters = parse_benchmark_counters(current_text)
     bad_reason = "none"
-    for token in (
-        "LOAD BAD CHECKSUM",
-        "LOAD BAD BLK",
-        "LOAD BAD READ",
-        "BAD_BYTE",
-        "DRAIN TIMEOUT",
-        "BAD MAGIC",
-        "CAL FAIL",
-        "RX OVERRUN",
-        "RX FRAME ERR",
-    ):
-        if token in active_text:
-            bad_reason = token
-            break
-    if bad_reason == "none" and payload_block_retry_limit_hit:
+    if bool(loader_analysis.get("bad_seen", False)):
+        bad_reason = str(loader_analysis.get("bad_reason", "none"))
+    elif payload_block_retry_limit_hit:
         bad_reason = "BLOCK RETRY LIMIT"
-    if bad_reason == "none" and payload_ack_timeout and payload_failed_block >= 0:
+    elif payload_ack_timeout and payload_failed_block >= 0:
         bad_reason = "BLOCK ACK TIMEOUT"
+    elif any(token in current_text for token in ("BAD MAGIC", "LOAD BAD", "BAD_BYTE", "CAL FAIL", "RX OVERRUN", "RX FRAME ERR", "DRAIN TIMEOUT")):
+        for token in ("LOAD BAD CHECKSUM", "LOAD BAD BLK", "LOAD BAD READ", "BAD_BYTE", "DRAIN TIMEOUT", "BAD MAGIC", "CAL FAIL", "RX OVERRUN", "RX FRAME ERR"):
+            if token in current_text:
+                bad_reason = token
+                break
+
     return {
         "sent_header": sent_header,
         "sent_payload": sent_payload,
@@ -1663,27 +2039,43 @@ def drive_uart_loader(
         "payload_block_retry_limit_hit": payload_block_retry_limit_hit,
         "payload_failed_block": payload_failed_block,
         "payload_size_bytes": len(payload),
-        "saw_ready": "BOOT DDR3 READY" in active_text,
-        "saw_load_start": "LOAD START" in active_text,
-        "saw_load_ok": "LOAD OK" in active_text,
+        "saw_ready": bool(loader_analysis.get("ready_seen", False)),
+        "saw_load_start": bool(loader_analysis.get("load_start_seen", False)),
+        "saw_read_ok": bool(loader_analysis.get("read_ok_seen", False)),
+        "saw_load_ok": bool(loader_analysis.get("load_ok_seen", False)),
+        "saw_jump": bool(loader_analysis.get("jump_seen", False)),
+        "loader_summary_seen": bool(loader_analysis.get("summary_seen", False)),
+        "loader_summary_mask": loader_analysis.get("summary_mask"),
+        "loader_summary_ok": bool(loader_analysis.get("summary_ok_seen", False)),
+        "loader_bad_seen": bool(loader_analysis.get("bad_seen", False)),
+        "loader_bad_code": loader_analysis.get("bad_code"),
+        "loader_bad_block": loader_analysis.get("bad_block"),
+        "loader_good_frames": int(loader_analysis.get("good_frames", 0)),
+        "loader_bad_frames": int(loader_analysis.get("bad_frames", 0)),
+        "loader_dropped_duplicate_frames": int(loader_analysis.get("dropped_duplicate_frames", 0)),
+        "loader_block_ack_events": int(loader_analysis.get("block_ack_events", 0)),
+        "loader_block_nack_events": int(loader_analysis.get("block_nack_events", 0)),
+        "loader_decoded_log_path": str(loader_decoded_path),
+        "uart_capture_raw_file": str(raw_log_path),
+        "uart_capture_text_file": str(text_log_path),
         "saw_probe": bool(fetch_probe.get("lines")),
         "fetch_probe": fetch_probe,
         "bad_block": bad_block,
         "bad_checksum": bad_checksum,
         "write_blocks": write_blocks,
         "bad_reason": bad_reason,
-        "saw_start": "DHRYSTONE START" in active_text,
-        "saw_done": "DHRYSTONE DONE" in active_text,
+        "saw_start": "DHRYSTONE START" in current_text,
+        "saw_done": "DHRYSTONE DONE" in current_text,
         "saw_bad": any(
-            token in active_text
+            token in current_text
             for token in ("BAD MAGIC", "LOAD BAD", "BAD_BYTE", "CAL FAIL", "RX OVERRUN", "RX FRAME ERR", "DRAIN TIMEOUT")
         ),
-        "dhrystones_per_second": re.findall(r"Dhrystones per Second:\s+([0-9]+)", active_text),
-        "microseconds_per_run": re.findall(r"Microseconds for one run through Dhrystone:\s+([0-9]+)", active_text),
+        "dhrystones_per_second": re.findall(r"Dhrystones per Second:\s+([0-9]+)", current_text),
+        "microseconds_per_run": re.findall(r"Microseconds for one run through Dhrystone:\s+([0-9]+)", current_text),
         "bench_cycles": benchmark_counters["cycles"],
         "bench_instret": benchmark_counters["instret"],
         "bench_ipc_x1000": benchmark_counters["ipc_x1000"],
-        "capture_bytes": len(text_bytes),
+        "capture_bytes": len(raw_bytes),
     }
 
 
@@ -1851,16 +2243,34 @@ def drive_uart_transport_sessions(ser, manifests: list[dict[str, object]], captu
     }
 
 
-def run_uart_loader_capture(port: str, manifest: dict[str, object], capture_seconds: int, log_path: Path) -> dict[str, object]:
+def run_uart_loader_capture(
+    port: str,
+    manifest: dict[str, object],
+    capture_seconds: int,
+    text_log_path: Path,
+    *,
+    uart_baud: int = 115200,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    expect_dhrystone: bool = True,
+) -> dict[str, object]:
     try:
         import serial  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on local environment
         raise RuntimeError("pyserial is required for board benchmark UART loading") from exc
 
-    with serial.Serial(port, 115200, timeout=0.05) as ser:
+    with serial.Serial(port, uart_baud, timeout=0.05) as ser:
         ser.reset_input_buffer()
         ser.reset_output_buffer()
-        return drive_uart_loader(ser, manifest, capture_seconds, log_path)
+        return drive_uart_loader(
+            ser,
+            manifest,
+            capture_seconds,
+            text_log_path,
+            raw_log_path=raw_log_path,
+            loader_decoded_path=loader_decoded_path,
+            expect_dhrystone=expect_dhrystone,
+        )
 
 
 def write_summary(path: Path, lines: list[str]) -> None:
@@ -1904,12 +2314,17 @@ def main() -> int:
     failure_detail = ""
     current_stage = "init"
     manifest: dict[str, object] = {}
+    smoke_manifest: dict[str, object] = {}
+    baseline_manifest: dict[str, object] = {}
     transport_manifests: list[dict[str, object]] = []
     transport_tb_results: list[dict[str, object]] = []
     bridge_tb_results: list[dict[str, object]] = []
     uart_result: dict[str, object] = {}
+    uart_smoke_result: dict[str, object] = {}
     build_id = "N/A"
     sim_log = logs_dir / "not_run.log"
+    loader_quick_sim_log = logs_dir / "not_run.log"
+    loader_full_sim_log = logs_dir / "not_run.log"
     capture_file = (
         STEP2_ONLY_CAPTURE_FILE
         if args.bridge_audit_step2_only
@@ -1932,6 +2347,8 @@ def main() -> int:
         args.core_clk_mhz,
         fetch_debug=args.fetch_debug and not args.transport_only,
         bridge_audit=args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only,
+        step2_beacon_debug=args.bridge_audit_step2_only,
+        loader_beacon_debug=not (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only),
         uart_baud=args.uart_baud,
         rom_asm=STEP2_ONLY_ROM if args.bridge_audit_step2_only else (BRIDGE_STEPS_ROM if args.bridge_audit_steps else (BRIDGE_STRESS_ROM if args.bridge_audit else (TRANSPORT_ROM if args.transport_only else LOADER_ROM))),
         rom_march="rv32i_zicsr" if (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only) else None,
@@ -1997,6 +2414,9 @@ def main() -> int:
                 core_clk_mhz=args.core_clk_mhz,
                 uart_baud=args.uart_baud,
             )
+            if args.skip_vivado:
+                uart_result = analyze_step2_only_sim_log(read_text(sim_log))
+                uart_result["decoded_log_path"] = str(sim_log)
         elif args.bridge_audit:
             current_stage = "bridge_stress_tb"
             bridge_tb_results = run_bridge_stress_tb(logs_dir)
@@ -2010,16 +2430,6 @@ def main() -> int:
                 uart_baud=args.uart_baud,
             )
         else:
-            current_stage = "loader_top_sim"
-            sim_log = logs_dir / "05_run_loader_top_sim.log"
-            sim_log = run_loader_top_sim(
-                logs_dir,
-                rs_depth=args.rs_depth,
-                fetch_buffer_depth=args.fetch_buffer_depth,
-                core_clk_mhz=args.core_clk_mhz,
-                fetch_debug=args.fetch_debug,
-                uart_baud=args.uart_baud,
-            )
             if args.fetch_debug:
                 current_stage = "build_fetch_probe_payload"
                 probe_payload = compile_ddr3_asm_payload(TINY_PAYLOAD_ROM, logs_dir / "fetch_probe_payload", "ddr3_fetch_probe_payload")
@@ -2030,9 +2440,79 @@ def main() -> int:
                     "size_bytes": int(probe_payload["size_bytes"]),
                     "checksum32": int(probe_payload["checksum32"]),
                 }
+                current_stage = "loader_top_sim"
+                sim_log = logs_dir / "05_run_loader_top_sim.log"
+                sim_log = run_loader_top_sim(
+                    logs_dir,
+                    manifest,
+                    rs_depth=args.rs_depth,
+                    fetch_buffer_depth=args.fetch_buffer_depth,
+                    core_clk_mhz=args.core_clk_mhz,
+                    expect_exec_pass=False,
+                    full_gate_prefix_enable=False,
+                    fetch_debug=True,
+                    uart_baud=args.uart_baud,
+                    log_name="05_run_loader_top_sim.log",
+                )
             else:
-                current_stage = "build_dhrystone_payload"
-                manifest = build_dhrystone_payload(logs_dir, cpu_hz=int(args.core_clk_mhz * 1_000_000), runs=args.dhrystone_runs)
+                current_stage = "build_loader_quick_payload"
+                quick_payload = compile_ddr3_asm_payload(TINY_PAYLOAD_ROM, logs_dir / "loader_quick_payload", "ddr3_loader_quick_payload")
+                quick_manifest = {
+                    "bin": str(quick_payload["bin"]),
+                    "entry": int(quick_payload["entry"]),
+                    "load_addr": int(quick_payload["load_addr"]),
+                    "size_bytes": int(quick_payload["size_bytes"]),
+                    "checksum32": int(quick_payload["checksum32"]),
+                }
+                current_stage = "loader_quick_sim"
+                loader_quick_sim_log = run_loader_top_sim(
+                    logs_dir / "loader_quick",
+                    quick_manifest,
+                    rs_depth=args.rs_depth,
+                    fetch_buffer_depth=args.fetch_buffer_depth,
+                    core_clk_mhz=args.core_clk_mhz,
+                    expect_exec_pass=True,
+                    full_gate_prefix_enable=False,
+                    uart_baud=args.uart_baud,
+                    log_name="05_run_loader_quick_sim.log",
+                )
+                current_stage = "build_dhrystone_smoke_payload"
+                smoke_manifest = build_dhrystone_payload(
+                    logs_dir,
+                    cpu_hz=int(args.core_clk_mhz * 1_000_000),
+                    runs=1,
+                    stem="dhrystone_smoke",
+                )
+                current_stage = "loader_full_payload_sim"
+                loader_full_sim_log = run_loader_top_sim(
+                    logs_dir / "loader_full",
+                    smoke_manifest,
+                    rs_depth=args.rs_depth,
+                    fetch_buffer_depth=args.fetch_buffer_depth,
+                    core_clk_mhz=args.core_clk_mhz,
+                    expect_exec_pass=False,
+                    full_gate_prefix_enable=True,
+                    full_gate_prefix_block_ack_target=LOADER_FULL_GATE_PREFIX_BLOCKS,
+                    uart_baud=args.uart_baud,
+                    log_name="06_run_loader_full_payload_sim.log",
+                )
+                sim_log = loader_full_sim_log
+                current_stage = "build_dhrystone_baseline_payload"
+                baseline_manifest = (
+                    smoke_manifest
+                    if args.dhrystone_runs == 1
+                    else build_dhrystone_payload(
+                        logs_dir,
+                        cpu_hz=int(args.core_clk_mhz * 1_000_000),
+                        runs=args.dhrystone_runs,
+                        stem="dhrystone_baseline",
+                    )
+                )
+                manifest = baseline_manifest
+                if args.skip_vivado:
+                    uart_result = analyze_loader_sim_log(read_text(loader_full_sim_log))
+                    uart_result["decoded_log_path"] = str(loader_full_sim_log)
+                    capture_file = loader_full_sim_log
 
         if not args.skip_vivado:
             vivado = which_required("vivado.bat", "vivado")
@@ -2081,26 +2561,77 @@ def main() -> int:
                             reset_buffers=False,
                         )
             else:
-                current_stage = "program_jtag"
-                run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
-                build_id = parse_build_id(BUILD_ID_FILE)
-                current_stage = "uart_load_and_capture"
                 try:
                     import serial  # type: ignore
                 except ImportError as exc:  # pragma: no cover - depends on local environment
                     raise RuntimeError("pyserial is required for board benchmark UART loading") from exc
-                with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
-                    ser.reset_input_buffer()
-                    ser.reset_output_buffer()
-                    if args.transport_only:
+                current_stage = "program_jtag"
+                run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                build_id = parse_build_id(BUILD_ID_FILE)
+                if args.transport_only:
+                    current_stage = "uart_load_and_capture"
+                    with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                        ser.reset_input_buffer()
+                        ser.reset_output_buffer()
                         uart_result = drive_uart_transport_sessions(ser, transport_manifests, args.capture_seconds, capture_file)
+                elif args.fetch_debug:
+                    current_stage = "uart_load_and_capture"
+                    uart_result = run_uart_loader_capture(
+                        args.port,
+                        manifest,
+                        args.capture_seconds,
+                        UART_CAPTURE_FILE,
+                        uart_baud=args.uart_baud,
+                        raw_log_path=UART_CAPTURE_RAW_FILE,
+                        loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
+                        expect_dhrystone=False,
+                    )
+                else:
+                    current_stage = "uart_load_and_capture_smoke"
+                    uart_smoke_result = run_uart_loader_capture(
+                        args.port,
+                        smoke_manifest,
+                        args.capture_seconds,
+                        UART_SMOKE_CAPTURE_FILE,
+                        uart_baud=args.uart_baud,
+                        raw_log_path=UART_SMOKE_CAPTURE_RAW_FILE,
+                        loader_decoded_path=UART_SMOKE_CAPTURE_LOADER_DECODED_FILE,
+                        expect_dhrystone=True,
+                    )
+                    if uart_smoke_result.get("loader_bad_seen"):
+                        raise RuntimeError(f"Smoke loader beacon reported failure ({uart_smoke_result.get('bad_reason', 'unknown')}); see {UART_SMOKE_CAPTURE_FILE}")
+                    if not uart_smoke_result.get("loader_summary_seen"):
+                        raise RuntimeError(f"Smoke loader beacon missing SUMMARY; see {UART_SMOKE_CAPTURE_FILE}")
+                    if not uart_smoke_result.get("loader_summary_ok"):
+                        raise RuntimeError(f"Smoke loader SUMMARY indicates failure; see {UART_SMOKE_CAPTURE_FILE}")
+                    if not uart_smoke_result.get("saw_start"):
+                        raise RuntimeError(f"Smoke board run missing DHRYSTONE START; see {UART_SMOKE_CAPTURE_FILE}")
+                    if not uart_smoke_result.get("saw_done"):
+                        raise RuntimeError(f"Smoke board run missing DHRYSTONE DONE; see {UART_SMOKE_CAPTURE_FILE}")
+                    if args.dhrystone_runs == 1:
+                        uart_result = dict(uart_smoke_result)
+                        capture_file = UART_SMOKE_CAPTURE_FILE
                     else:
-                        uart_result = drive_uart_loader(ser, manifest, args.capture_seconds, capture_file, expect_dhrystone=not args.fetch_debug)
+                        current_stage = "program_jtag_baseline"
+                        run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "11_program_jtag_baseline.log", timeout=1800)
+                        build_id = parse_build_id(BUILD_ID_FILE)
+                        current_stage = "uart_load_and_capture_baseline"
+                        uart_result = run_uart_loader_capture(
+                            args.port,
+                            baseline_manifest,
+                            args.capture_seconds,
+                            UART_CAPTURE_FILE,
+                            uart_baud=args.uart_baud,
+                            raw_log_path=UART_CAPTURE_RAW_FILE,
+                            loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
+                            expect_dhrystone=True,
+                        )
+                        capture_file = UART_CAPTURE_FILE
             if args.bridge_audit_step2_only:
-                if uart_result.get("saw_bad") or uart_result.get("saw_trap"):
+                if uart_result.get("saw_bad") or uart_result.get("saw_trap") or uart_result.get("saw_cal_fail"):
                     raise RuntimeError(f"DDR3 step2-only board profile reported failure ({uart_result.get('bad_reason', 'unknown')}); see {capture_file}")
                 if not uart_result.get("ready_seen"):
-                    raise RuntimeError(f"DDR3 step2-only board profile did not print S2 READY; see {capture_file}")
+                    raise RuntimeError(f"DDR3 step2-only board profile did not emit READY beacon; see {capture_file}")
                 if not uart_result.get("case1_pass"):
                     raise RuntimeError(f"DDR3 step2-only board profile did not complete case1; see {capture_file}")
                 if not uart_result.get("case2_pass"):
@@ -2111,8 +2642,10 @@ def main() -> int:
                     raise RuntimeError(f"DDR3 step2-only board profile did not complete case4; see {capture_file}")
                 if not uart_result.get("case5_pass"):
                     raise RuntimeError(f"DDR3 step2-only board profile did not complete case5; see {capture_file}")
+                if not uart_result.get("summary_seen"):
+                    raise RuntimeError(f"DDR3 step2-only board profile did not emit SUMMARY beacon; see {capture_file}")
                 if not uart_result.get("all_ok_seen"):
-                    raise RuntimeError(f"DDR3 step2-only board profile did not print S2 ALL OK; see {capture_file}")
+                    raise RuntimeError(f"DDR3 step2-only board profile emitted a failing SUMMARY mask; see {capture_file}")
             elif args.bridge_audit_steps:
                 if uart_result.get("saw_bad"):
                     raise RuntimeError(f"DDR3 bridge-steps board profile reported compare failure; see {capture_file}")
@@ -2137,18 +2670,22 @@ def main() -> int:
                 if int(uart_result.get("session_count", 0)) != len(transport_manifests):
                     raise RuntimeError(f"Transport board session count mismatch ({uart_result.get('session_count', 0)}/{len(transport_manifests)}); see {capture_file}")
             else:
-                if uart_result.get("saw_bad"):
-                    raise RuntimeError(f"UART reported loader error ({uart_result.get('bad_reason', 'unknown')}); see {capture_file}")
-                if not uart_result.get("saw_ready") and not uart_result.get("saw_load_start"):
-                    raise RuntimeError(f"UART missing BOOT DDR3 READY/LOAD START; see {capture_file}")
-                if not uart_result.get("sent_payload"):
-                    raise RuntimeError(f"Payload was not sent; see {capture_file}")
-                if not uart_result.get("saw_load_ok"):
-                    raise RuntimeError(f"UART missing LOAD OK; see {capture_file}")
                 if args.fetch_debug:
+                    if uart_result.get("loader_bad_seen"):
+                        raise RuntimeError(f"Fetch-debug loader beacon reported failure ({uart_result.get('bad_reason', 'unknown')}); see {capture_file}")
+                    if not uart_result.get("loader_summary_seen"):
+                        raise RuntimeError(f"Fetch-debug loader beacon missing SUMMARY; see {capture_file}")
+                    if not uart_result.get("loader_summary_ok"):
+                        raise RuntimeError(f"Fetch-debug loader SUMMARY indicates failure; see {capture_file}")
                     if not uart_result.get("saw_probe"):
                         raise RuntimeError(f"UART missing M0D fetch probe beacon; see {capture_file}")
                 else:
+                    if uart_result.get("loader_bad_seen"):
+                        raise RuntimeError(f"Loader beacon reported failure ({uart_result.get('bad_reason', 'unknown')}); see {capture_file}")
+                    if not uart_result.get("loader_summary_seen"):
+                        raise RuntimeError(f"Loader beacon missing SUMMARY; see {capture_file}")
+                    if not uart_result.get("loader_summary_ok"):
+                        raise RuntimeError(f"Loader SUMMARY indicates failure; see {capture_file}")
                     if not uart_result.get("saw_start"):
                         raise RuntimeError(f"UART missing DHRYSTONE START; see {capture_file}")
                     if not uart_result.get("saw_done"):
@@ -2158,6 +2695,16 @@ def main() -> int:
         failure_detail = str(exc)
 
     timing = parse_timing_summary(TIMING_SUMMARY_AGGR)
+    loader_quick_sim_result = (
+        analyze_loader_sim_log(read_text(loader_quick_sim_log))
+        if loader_quick_sim_log and loader_quick_sim_log.exists()
+        else {}
+    )
+    loader_full_sim_result = (
+        analyze_loader_sim_log(read_text(loader_full_sim_log))
+        if loader_full_sim_log and loader_full_sim_log.exists()
+        else {}
+    )
     fetch_probe = uart_result.get("fetch_probe", {}) if isinstance(uart_result.get("fetch_probe", {}), dict) else {}
     bad_block = uart_result.get("bad_block", {}) if isinstance(uart_result.get("bad_block", {}), dict) else {}
     bad_checksum = uart_result.get("bad_checksum", {}) if isinstance(uart_result.get("bad_checksum", {}), dict) else {}
@@ -2192,7 +2739,13 @@ def main() -> int:
         f"RegisteredUartRxdata: {USE_REGISTERED_UART_RXDATA}",
         f"BuildID: {build_id}",
         f"TopSimLog: {sim_log}",
+        f"LoaderQuickSimLog: {loader_quick_sim_log}",
+        f"LoaderFullPayloadSimLog: {loader_full_sim_log}",
+        "LoaderFullGateMode: prefix16",
+        f"LoaderFullGateTargetBlocks: {LOADER_FULL_GATE_PREFIX_BLOCKS}",
         f"BenchmarkManifest: {manifest.get('bin', 'N/A')}",
+        f"SmokeManifest: {smoke_manifest.get('bin', 'N/A')}",
+        f"BaselineManifest: {baseline_manifest.get('bin', 'N/A')}",
         f"TransportBoardPayloadCount: {len(transport_manifests)}",
         f"TransportTbCaseCount: {len(transport_tb_results)}",
         f"BridgeTbCaseCount: {len(bridge_tb_results)}",
@@ -2202,10 +2755,25 @@ def main() -> int:
         f"WNS: {timing['wns']}",
         f"WHS: {timing['whs']}",
         f"ConstraintsMet: {timing['constraints_met']}",
-        f"UartCaptureFile: {capture_file}",
+        f"UartCaptureFile: {capture_file if capture_file.exists() else (sim_log if sim_log else 'N/A')}",
+        f"UartCaptureRawFile: {uart_result.get('uart_capture_raw_file', 'N/A')}",
+        f"LoaderDecodedCaptureFile: {uart_result.get('loader_decoded_log_path', uart_result.get('decoded_log_path', 'N/A'))}",
+        f"SmokeCaptureFile: {UART_SMOKE_CAPTURE_FILE if UART_SMOKE_CAPTURE_FILE.exists() else 'N/A'}",
+        f"SmokeCaptureRawFile: {UART_SMOKE_CAPTURE_RAW_FILE if UART_SMOKE_CAPTURE_RAW_FILE.exists() else 'N/A'}",
+        f"SmokeLoaderDecodedFile: {UART_SMOKE_CAPTURE_LOADER_DECODED_FILE if UART_SMOKE_CAPTURE_LOADER_DECODED_FILE.exists() else 'N/A'}",
+        f"SmokePassed: {bool(uart_smoke_result.get('loader_summary_ok', False) and uart_smoke_result.get('saw_start', False) and uart_smoke_result.get('saw_done', False))}",
+        f"SmokeLoaderSummaryMask: {fmt_optional_hex(uart_smoke_result.get('loader_summary_mask', 'N/A'))}",
+        f"SmokeSawDhrystoneStart: {uart_smoke_result.get('saw_start', False)}",
+        f"SmokeSawDhrystoneDone: {uart_smoke_result.get('saw_done', False)}",
+        f"BaselineCaptureFile: {UART_CAPTURE_FILE if UART_CAPTURE_FILE.exists() else 'N/A'}",
+        f"BaselineCaptureRawFile: {UART_CAPTURE_RAW_FILE if UART_CAPTURE_RAW_FILE.exists() else 'N/A'}",
+        f"BaselineLoaderDecodedFile: {UART_CAPTURE_LOADER_DECODED_FILE if UART_CAPTURE_LOADER_DECODED_FILE.exists() else 'N/A'}",
+        f"BaselinePassed: {bool(uart_result.get('loader_summary_ok', False) and uart_result.get('saw_start', False) and uart_result.get('saw_done', False))}",
         f"UartSawReady: {uart_result.get('saw_ready', uart_result.get('ready_seen', False))}",
         f"UartSawLoadStart: {uart_result.get('saw_load_start', False)}",
+        f"UartSawReadOK: {uart_result.get('saw_read_ok', False)}",
         f"UartSawLoadOK: {uart_result.get('saw_load_ok', False)}",
+        f"UartSawJump: {uart_result.get('saw_jump', False)}",
         f"UartBadReason: {uart_result.get('bad_reason', 'none')}",
         f"UartPayloadAckTimeout: {uart_result.get('payload_ack_timeout', False)}",
         f"UartPayloadChunksSent: {uart_result.get('payload_chunks_sent', 0)}",
@@ -2216,6 +2784,31 @@ def main() -> int:
         f"UartPayloadBlockRetryCount: {uart_result.get('payload_block_retry_count', 0)}",
         f"UartPayloadBlockRetryLimitHit: {uart_result.get('payload_block_retry_limit_hit', False)}",
         f"UartPayloadFailedBlock: {uart_result.get('payload_failed_block', -1)}",
+        f"LoaderReadySeen: {uart_result.get('saw_ready', False)}",
+        f"LoaderLoadStartSeen: {uart_result.get('saw_load_start', False)}",
+        f"LoaderReadOkSeen: {uart_result.get('saw_read_ok', False)}",
+        f"LoaderLoadOkSeen: {uart_result.get('saw_load_ok', False)}",
+        f"LoaderJumpSeen: {uart_result.get('saw_jump', False)}",
+        f"LoaderSummarySeen: {uart_result.get('loader_summary_seen', False)}",
+        f"LoaderSummaryMask: {fmt_optional_hex(uart_result.get('loader_summary_mask', 'N/A'))}",
+        f"LoaderSummaryOk: {uart_result.get('loader_summary_ok', False)}",
+        f"LoaderBadSeen: {uart_result.get('loader_bad_seen', False)}",
+        f"LoaderBadCode: {fmt_optional_hex(uart_result.get('loader_bad_code', 'N/A'))}",
+        f"LoaderBadBlock: {uart_result.get('loader_bad_block', 'N/A')}",
+        f"LoaderGoodFrames: {uart_result.get('loader_good_frames', 0)}",
+        f"LoaderBadFrames: {uart_result.get('loader_bad_frames', 0)}",
+        f"LoaderDroppedDuplicateFrames: {uart_result.get('loader_dropped_duplicate_frames', 0)}",
+        f"LoaderBlockAckEvents: {uart_result.get('loader_block_ack_events', 0)}",
+        f"LoaderBlockNackEvents: {uart_result.get('loader_block_nack_events', 0)}",
+        f"LoaderFullGateAckEvents: {loader_full_sim_result.get('block_ack_events', 0)}",
+        f"LoaderFullGateMaxAckBlock: {loader_full_sim_result.get('max_block_ack_arg', 'N/A')}",
+        f"LoaderFullGateNackEvents: {loader_full_sim_result.get('block_nack_events', 0)}",
+        f"LoaderFullGatePass: {loader_prefix_target_ok(loader_full_sim_result, LOADER_FULL_GATE_PREFIX_BLOCKS)}",
+        f"LoaderFullGateBadSeen: {loader_full_sim_result.get('bad_seen', False)}",
+        f"LoaderFullGateBadCode: {fmt_optional_hex(loader_full_sim_result.get('bad_code', 'N/A'))}",
+        f"LoaderFullGateBadBlock: {loader_full_sim_result.get('bad_block', 'N/A')}",
+        f"LoaderFullGateFirstBadEventOffset: {loader_full_sim_result.get('first_bad_event_offset', 'N/A')}",
+        f"LoaderQuickGateExecPassSeen: {loader_quick_sim_result.get('saw_exec_pass', False)}",
         f"UartSawFetchProbe: {uart_result.get('saw_probe', False)}",
         f"FetchProbeClassification: {fetch_probe.get('classification', 'N/A')}",
         f"FetchProbeLastLine: {fetch_probe.get('last_line', 'N/A')}",
@@ -2277,7 +2870,11 @@ def main() -> int:
         "Step2VariantCase4: nop_pad",
         "Step2VariantCase5: load_barrier",
         f"Step2AllOkSeen: {uart_result.get('all_ok_seen', False)}",
+        f"Step2SummarySeen: {uart_result.get('summary_seen', False)}",
+        f"Step2SummaryMask: {fmt_optional_hex(uart_result.get('summary_mask', 'N/A'))}",
         f"Step2TrapSeen: {uart_result.get('saw_trap', False)}",
+        f"Step2CalFailSeen: {uart_result.get('saw_cal_fail', False)}",
+        f"Step2BadSeen: {uart_result.get('saw_bad', False)}",
         f"Step2BadCase: {step2_only_bad.get('case', 'N/A')}",
         f"Step2BadPhase: {step2_only_bad.get('phase', 'N/A')}",
         f"Step2BadAddr: {fmt_optional_hex(step2_only_bad.get('addr', 'N/A'))}",
@@ -2301,6 +2898,10 @@ def main() -> int:
         f"Step2LastProgressCase: {step2_last_progress.get('case', 'N/A')}",
         f"Step2LastProgressPhase: {step2_last_progress.get('phase', 'N/A')}",
         f"Step2LastProgressLine: {step2_last_progress.get('line', '')}",
+        f"Step2GoodFrames: {uart_result.get('good_frames', 0)}",
+        f"Step2BadFrames: {uart_result.get('bad_frames', 0)}",
+        f"Step2DroppedDuplicateFrames: {uart_result.get('dropped_duplicate_frames', 0)}",
+        f"Step2DecodedCaptureFile: {uart_result.get('decoded_log_path', 'N/A')}",
         f"UartCaptureBytes: {uart_result.get('capture_bytes', 0)}",
         f"BenchCycles: {uart_result.get('bench_cycles', '')}",
         f"BenchInstRetired: {uart_result.get('bench_instret', '')}",

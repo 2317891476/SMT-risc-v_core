@@ -42,10 +42,17 @@ integer t;
 // -----------------------------------------------------------
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
+`ifdef VERILATOR_MAINLINE_PRELOAD_BOOT
+        pc[0]      <= 32'h80000000;
+        pc_next[0] <= 32'h80000004;
+        pc[1]      <= THREAD1_BOOT_PC;
+        pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+`else
         pc[0]      <= 32'h00000000;
         pc_next[0] <= 32'h00000004;
         pc[1]      <= THREAD1_BOOT_PC;
         pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+`endif
     end
     else begin
         for (t = 0; t < N_T; t = t + 1) begin

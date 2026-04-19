@@ -69,6 +69,10 @@ module mem_subsys (
     output wire [7:0]  debug_uart_tx_byte,
     output wire [7:0]  debug_uart_status_load_count,
     output wire [7:0]  debug_uart_tx_store_count,
+`ifdef VERILATOR_FAST_UART
+    input  wire        fast_uart_rx_byte_valid,
+    input  wire [7:0]  fast_uart_rx_byte,
+`endif
     input  wire        debug_store_buffer_empty,
     input  wire [2:0]  debug_store_buffer_count_t0,
     input  wire [2:0]  debug_store_buffer_count_t1,
@@ -104,6 +108,8 @@ initial begin
     for (ram_init_idx = 0; ram_init_idx < 4096; ram_init_idx = ram_init_idx + 1)
         ram[ram_init_idx] = 32'd0;
 `ifdef FPGA_MODE
+    $readmemh("mem_subsys_ram.hex", ram);
+`elsif VERILATOR_MAINLINE
     $readmemh("mem_subsys_ram.hex", ram);
 `endif
 end
@@ -144,8 +150,10 @@ wire addr_is_uart_status_m1 = (m1_req_addr == `UART_STATUS_ADDR);
 wire addr_is_uart_rx_m1 = (m1_req_addr == `UART_RXDATA_ADDR);
 wire addr_is_uart_ctrl_m1 = (m1_req_addr == `UART_CTRL_ADDR);
 wire addr_is_ddr3_status_m1 = (m1_req_addr == `DDR3_STATUS_ADDR);
+wire addr_is_debug_beacon_evt_m1 = (m1_req_addr == `DEBUG_BEACON_EVT_ADDR);
 wire addr_is_uart_m1    = addr_is_uart_tx_m1 || addr_is_uart_status_m1
-                        || addr_is_uart_rx_m1 || addr_is_uart_ctrl_m1;
+                        || addr_is_uart_rx_m1 || addr_is_uart_ctrl_m1
+                        || addr_is_debug_beacon_evt_m1;
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
 wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_plic_m1;
@@ -210,11 +218,14 @@ wire        m0_l2_resp_valid;
 wire [31:0] m0_l2_resp_data;
 wire        m0_l2_resp_last;
 
-// M1 ready: MMIO is immediate (except UART TX backpressure), cached goes through arbiter
-// UART TX write stalls when pending buffer is full.
+// M1 ready: MMIO is immediate except for UART TX backpressure and the optional
+// Step2-only beacon event mailbox.
+wire       debug_beacon_evt_ready_w;
 wire m1_mmio_ready = addr_is_uart_tx_m1 && m1_req_write
                    ? (uart_tx_enable_r && !uart_pending_valid_r)
-                   : 1'b1;
+                   : (addr_is_debug_beacon_evt_m1 && m1_req_write
+                      ? debug_beacon_evt_ready_w
+                      : 1'b1);
 `ifdef ENABLE_DDR3
 assign m1_req_ready = addr_is_ddr3_m1    ? m1_ddr3_req_ready
                    : addr_is_uncached_m1 ? (m1_mmio_req && m1_mmio_ready)
@@ -401,6 +412,7 @@ localparam integer UART_CLK_DIV = 4;
 
 reg        uart_tx_start_r;
 reg [7:0]  uart_tx_data_r;
+reg        uart_tx_launch_valid_r;
 reg        uart_pending_valid_r;
 reg [7:0]  uart_pending_byte_r;
 reg        uart_tx_enable_r;
@@ -426,12 +438,31 @@ wire       uart_status_busy;
 wire       uart_rx_byte_valid;
 wire [7:0] uart_rx_byte;
 wire       uart_rx_frame_error;
+wire       uart_rx_serial_byte_valid;
+wire [7:0] uart_rx_serial_byte;
+wire       uart_rx_serial_frame_error;
+wire       uart_stage_pending_byte;
+wire       uart_stage_beacon_byte;
+wire [7:0] uart_stage_byte_w;
+wire       debug_beacon_evt_write;
+wire       debug_beacon_evt_fire;
+wire [7:0] debug_beacon_evt_type_w;
+wire [7:0] debug_beacon_evt_arg_w;
+wire       debug_beacon_byte_valid_w;
+wire       debug_beacon_byte_ready_w;
+wire [7:0] debug_beacon_byte_w;
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
 reg        uart_rx_mmio_resp_valid_r;
 reg [31:0] uart_rx_mmio_resp_data_r;
 `endif
 
-assign uart_status_busy = uart_busy || uart_pending_valid_r || uart_tx_start_r;
+assign uart_status_busy = uart_busy || uart_pending_valid_r || uart_tx_launch_valid_r || uart_tx_start_r
+`ifdef AX7203_STEP2_BEACON_DEBUG
+                        || debug_beacon_byte_valid_w
+`elsif AX7203_DDR3_LOADER_BEACON_DEBUG
+                        || debug_beacon_byte_valid_w
+`endif
+                        ;
 wire       uart_rx_valid_w = (uart_rx_count_r != 0);
 wire       uart_rx_fifo_full_w = (uart_rx_count_r == UART_RX_FIFO_DEPTH);
 wire [7:0] uart_rx_head_data = uart_rx_fifo[uart_rx_head_r];
@@ -466,12 +497,20 @@ endfunction
 wire uart_tx_write  = m1_mmio_req && addr_is_uart_tx_m1 && m1_req_write;
 wire uart_ctrl_write = m1_mmio_req && addr_is_uart_ctrl_m1 && m1_req_write;
 wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
+assign debug_beacon_evt_write = m1_mmio_req && addr_is_debug_beacon_evt_m1 && m1_req_write;
 wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
+assign debug_beacon_evt_type_w = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
+assign debug_beacon_evt_arg_w = m1_req_wdata[15:8];
 wire uart_rx_fifo_clear = uart_ctrl_write && (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4]);
 wire uart_rx_read_fire = uart_rx_read && uart_rx_valid_w;
 wire uart_rx_push_fire = uart_rx_byte_valid && (!uart_rx_fifo_full_w || uart_rx_read_fire);
 wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
+assign debug_beacon_evt_fire = debug_beacon_evt_write && m1_req_ready;
+assign debug_beacon_byte_ready_w = uart_tx_enable_r && !uart_busy && !uart_pending_valid_r && !uart_tx_launch_valid_r && !uart_store_accept;
+assign uart_stage_pending_byte = uart_pending_valid_r && !uart_busy && !uart_tx_launch_valid_r;
+assign uart_stage_beacon_byte = !uart_stage_pending_byte && debug_beacon_byte_valid_w && debug_beacon_byte_ready_w;
+assign uart_stage_byte_w = uart_stage_pending_byte ? uart_pending_byte_r : debug_beacon_byte_w;
 wire [7:0] debug_uart_flags = {
     uart_tx_write,
     uart_store_accept,
@@ -505,16 +544,57 @@ uart_rx #(
     .rst_n       (rstn               ),
     .enable      (uart_rx_enable_r   ),
     .rx          (uart_rx            ),
-    .byte_valid  (uart_rx_byte_valid ),
-    .byte_data   (uart_rx_byte       ),
-    .frame_error (uart_rx_frame_error)
+    .byte_valid  (uart_rx_serial_byte_valid ),
+    .byte_data   (uart_rx_serial_byte       ),
+    .frame_error (uart_rx_serial_frame_error)
 );
+
+`ifdef VERILATOR_FAST_UART
+assign uart_rx_byte_valid  = fast_uart_rx_byte_valid ? 1'b1 : uart_rx_serial_byte_valid;
+assign uart_rx_byte        = fast_uart_rx_byte_valid ? fast_uart_rx_byte : uart_rx_serial_byte;
+assign uart_rx_frame_error = uart_rx_serial_frame_error;
+`else
+assign uart_rx_byte_valid  = uart_rx_serial_byte_valid;
+assign uart_rx_byte        = uart_rx_serial_byte;
+assign uart_rx_frame_error = uart_rx_serial_frame_error;
+`endif
+
+`ifdef AX7203_STEP2_BEACON_DEBUG
+debug_beacon_tx u_debug_beacon_tx (
+    .clk       (clk                    ),
+    .rstn      (rstn                   ),
+    .evt_valid (debug_beacon_evt_fire  ),
+    .evt_ready (debug_beacon_evt_ready_w),
+    .evt_type  (debug_beacon_evt_type_w),
+    .evt_arg   (debug_beacon_evt_arg_w ),
+    .byte_valid(debug_beacon_byte_valid_w),
+    .byte_ready(debug_beacon_byte_ready_w),
+    .byte_data (debug_beacon_byte_w    )
+);
+`elsif AX7203_DDR3_LOADER_BEACON_DEBUG
+debug_beacon_tx u_debug_beacon_tx (
+    .clk       (clk                    ),
+    .rstn      (rstn                   ),
+    .evt_valid (debug_beacon_evt_fire  ),
+    .evt_ready (debug_beacon_evt_ready_w),
+    .evt_type  (debug_beacon_evt_type_w),
+    .evt_arg   (debug_beacon_evt_arg_w ),
+    .byte_valid(debug_beacon_byte_valid_w),
+    .byte_ready(debug_beacon_byte_ready_w),
+    .byte_data (debug_beacon_byte_w    )
+);
+`else
+assign debug_beacon_evt_ready_w = 1'b1;
+assign debug_beacon_byte_valid_w = 1'b0;
+assign debug_beacon_byte_w = 8'd0;
+`endif
 
 // UART TX pending + RX control FSM
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         uart_tx_start_r      <= 1'b0;
         uart_tx_data_r       <= 8'd0;
+        uart_tx_launch_valid_r <= 1'b0;
         uart_pending_valid_r <= 1'b0;
         uart_pending_byte_r  <= 8'd0;
         uart_tx_enable_r     <= 1'b1;
@@ -552,11 +632,18 @@ always @(posedge clk or negedge rstn) begin
         if (uart_tx_write && !debug_uart_tx_write_seen_r)
             debug_uart_tx_write_count_r <= debug_uart_tx_write_count_r + 8'd1;
 
-        // TX: drain pending when uart_tx is free
-        if (uart_pending_valid_r && !uart_busy) begin
-            uart_tx_data_r       <= uart_pending_byte_r;
-            uart_tx_start_r      <= 1'b1;
-            uart_pending_valid_r <= 1'b0;
+        // TX: first stage the byte into a local launch register, then pulse
+        // tx_start on the following cycle so the serializer samples stable
+        // tx_data instead of a same-edge update.
+        if (uart_tx_launch_valid_r && !uart_busy) begin
+            uart_tx_start_r <= 1'b1;
+            uart_tx_launch_valid_r <= 1'b0;
+        end else if (uart_stage_pending_byte || uart_stage_beacon_byte) begin
+            uart_tx_data_r <= uart_stage_byte_w;
+            uart_tx_launch_valid_r <= 1'b1;
+            if (uart_stage_pending_byte) begin
+                uart_pending_valid_r <= 1'b0;
+            end
         end
 
         // CTRL register write

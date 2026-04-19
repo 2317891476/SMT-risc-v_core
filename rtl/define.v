@@ -173,6 +173,7 @@
 `define UART_RXDATA_ADDR    32'h1300_0018
 `define UART_CTRL_ADDR      32'h1300_001C
 `define DDR3_STATUS_ADDR    32'h1300_0020
+`define DEBUG_BEACON_EVT_ADDR 32'h1300_0024
 
 // CLINT (Core Local Interruptor) - Machine Timer
 `define CLINT_BASE          32'h0200_0000

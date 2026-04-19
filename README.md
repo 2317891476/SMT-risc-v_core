@@ -905,6 +905,74 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 | Block RAM Tile | `0` | 365 | `0.00%` |
 | DSP48E1 | `4` | 740 | `0.54%` |
 
+### 13.5.1 WSL Verilator + Mock Memory 高速验证环境（当前）
+
+除 §13.3 的 AX7203 板级主基线外，当前仓库还保留一套**不替代板级环境**的第二验证环境：**Windows 工作树 + WSL 内 Verilator 构建/运行 + 仓库内产物回写**。它的目标不是复刻 MIG / DDR3 PHY / bit-level UART，而是更快地验证 loader / benchmark / OoO / cache / `mem_subsys` 主线语义，并输出 `mcycle/minstret/IPC` 等性能信息。
+
+**当前固定边界**
+
+- DUT 顶层：`adam_riscv`
+- 保留：OoO core、`mem_subsys`、L1 ICache、MMIO、benchmark payload、CSR / `mcycle` / `minstret`
+- 替换：`adam_riscv_ax7203_top`、`ddr3_mem_port`、MIG / DDR3 PHY、板级 bit-level UART
+- mock boundary：`adam_riscv` 对外暴露的 DDR3 高层 `req/resp` 接口
+- 默认模式：`direct preload`
+- 第二模式：`loader-semantic`（byte-level 注入，当前仅完成骨架）
+- Verilator 运行环境：**仅 WSL**；Windows 侧通过 `wsl.exe` 调用，不提供 Windows-native fallback
+
+**当前入口命令**
+
+```powershell
+# 仅构建 Verilator preload 主线
+python fpga/scripts/run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 1 --build-only
+
+# 运行 Verilator preload smoke
+python fpga/scripts/run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 1
+
+# 仅构建 Verilator loader-semantic 骨架
+python fpga/scripts/run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 1 --build-only
+```
+
+**当前实现文件**
+
+- `fpga/scripts/run_verilator_mainline.py`
+- `comp_test/verilator/verilator_mainline_top.sv`
+- `comp_test/verilator/mock_ddr3_mem.sv`
+- `comp_test/verilator/verilator_main.cpp`
+- `rom/test_verilator_ddr3_preload.s`
+
+**当前状态（2026-04-19）**
+
+| 项目 | 当前结果 | 证据 |
+|------|------|------|
+| `preload --build-only` | ✅ 通过 | `build/verilator/mainline/preload/dhrystone_runs1/` |
+| `loader-semantic --build-only` | ✅ 通过 | `build/verilator/mainline/loader-semantic/dhrystone_runs1/` |
+| `preload --runs 1` | ⚠️ 环境已跑通，但停在 benchmark 早期路径 | `build/verilator/mainline/preload/dhrystone_runs1/summary.txt` |
+| `loader-semantic --runs 1` | ⚠️ byte-level 注入骨架已接通，但尚未完成 jump | `build/verilator/mainline/loader-semantic/dhrystone_runs1/summary.txt` |
+
+**当前 `preload` 主线结论**
+
+- 已确认 `direct preload` 能进入 DDR3 payload，`EntryReached=True`
+- 当前一次 smoke 已退休 `63,000` 条指令，`Cycles=313,496`，`IPCx1000=200`
+- `thread1` 已按 Verilator preload 专用路径固定 parked 到 `0x00000800`
+- 当前 UART 仅输出 `0\n1\n`，尚未到 `DHRYSTONE START`
+- 当前停滞点落在 `thread0` 的 benchmark 早期执行路径，最近 PC 为 `0x80000D64`
+- 因此当前 Verilator 环境的主要阻塞已经不是“环境起不来”或“高地址 fetch 不通”，而是**benchmark 进入 `main` 早期后的运行期停滞**
+
+**当前 `loader-semantic` 结论**
+
+- `LoaderBytesInjected=24`，说明 byte-level 注入已生效
+- 但当前 `EntryReached=False`、`LoaderSemanticPass=False`
+- 当前它只算 loader 主线的高速骨架，**还不能替代板级 loader 验收**
+
+**当前关键产物**
+
+- `build/verilator/mainline/preload/dhrystone_runs1/summary.txt`
+- `build/verilator/mainline/preload/dhrystone_runs1/summary.json`
+- `build/verilator/mainline/preload/dhrystone_runs1/uart.log`
+- `build/verilator/mainline/loader-semantic/dhrystone_runs1/summary.txt`
+
+> **说明**: 这套 Verilator 环境当前已经足够承担“高速复现 benchmark 主线停滞”的任务，但它**不是** §13.3 板级主基线的签核依据，也不代表 Dhrystone 已经重新上板通过。
+
 ### 13.6 历史/辅助自动板测入口（归档）
 
 `fpga/scripts/run_board_feedback.py` 与 `fpga/scripts/run_fpga_autodebug.py` 仍然保留，但它们在 README 中的定位已经调整为**历史/辅助自动板测入口**：
@@ -947,7 +1015,9 @@ python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buff
 
 #### 当前 DDR3 Bridge Step2-Only 辅助调试支线（2026-04-18）
 
-当前还保留一条**不替代 §13.3 主基线**的 DDR3 bridge 精定位支线：`fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only ...`。这条支线只用于把 `M1 store/load -> mem_subsys -> ddr3_mem_port -> MIG -> DDR3 -> readback` 的相邻地址写后读问题继续压缩，不用于宣告 Dhrystone / loader 主线已经通过。
+当前保留一条**不替代 §13.3 主基线**的 DDR3 bridge 精定位支线：`fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only ...`。这条支线只用于把 `M1 store/load -> mem_subsys -> ddr3_mem_port -> MIG -> DDR3 -> readback` 的相邻地址写后读问题继续压缩，不用于宣告 Dhrystone / loader 主线已经通过。
+
+> **当前状态（2026-04-18 晚）**: Step2-only 已从“ROM 逐字符 ASCII token”切换成“ROM 写事件寄存器 + 硬件代发 5-byte beacon 帧”的观测链。当前 `--skip-vivado` 顶层仿真和完整 FPGA flow 都已通过，脚本化 10 秒板测也已稳定通过。
 
 **固定命令**
 
@@ -959,15 +1029,39 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --skip-
 python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10
 ```
 
+**当前 Step2-only 观测协议**
+
+- Step2-only 专用 define: `AX7203_STEP2_BEACON_DEBUG`
+- Step2-only 专用 MMIO 事件寄存器: `DEBUG_BEACON_EVT_ADDR = 0x1300_0024`
+- 板级帧格式: `[A5][SEQ][TYPE][ARG][CHK]`
+- 校验: `CHK = 8'hA5 ^ seq ^ type ^ arg`
+- 重复发送策略:
+  - 常规事件 `2` 次
+  - `BAD/CAL_FAIL/TRAP` `3` 次
+  - `SUMMARY` `12` 次
+- Host / top smoke 均按 beacon 帧解析，不再依赖长 ASCII token
+
 **当前 Step2-only case 定义**
 
-| Case | 变体 | 说明 | 通过 token |
+| Case | 变体 | 说明 | 通过 beacon 事件 |
 |------|------|------|------|
-| `C=1` | `addr0_single` | `0x8000_0000` 单写 → drain/idle → 单读 | `S2 START C=1` / `S2 OK C=1` |
-| `C=2` | `addr1_single` | `0x8000_0004` 单写 → drain/idle → 单读 | `S2 START C=2` / `S2 OK C=2` |
-| `C=3` | `C3_base` | `sw addr0` → `sw addr1` → `fence` → `wait_drain_ready` → 只读 `addr0` | `S2 START C=3` / `S2 AFTER WRITE C=3` / `S2 OK C=3` |
-| `C=4` | `C3_nop` | 与 `C3_base` 相同，但双写之间固定插入 `100` 个 `nop` | `S2 START C=4` / `S2 AFTER WRITE C=4` / `S2 OK C=4` |
-| `C=5` | `C3_barrier` | `sw addr0` → `fence` → `lw addr0` 校验 → `sw addr1` → `fence` → drain → 只读 `addr0` | `S2 START C=5` / `S2 AFTER WRITE C=5` / `S2 OK C=5` |
+| `C=1` | `addr0_single` | `0x8000_0000` 单写 → drain/idle → 单读 | `C1_OK` |
+| `C=2` | `addr1_single` | `0x8000_0004` 单写 → drain/idle → 单读 | `C2_OK` |
+| `C=3` | `C3_base` | `sw addr0` → `sw addr1` → `fence` → `wait_drain_ready` → 只读 `addr0` | `C3_START` / `C3_AFTER` / `C3_OK` |
+| `C=4` | `C3_nop` | 与 `C3_base` 相同，但双写之间固定插入 `100` 个 `nop` | `C4_START` / `C4_AFTER` / `C4_OK` |
+| `C=5` | `C3_barrier` | `sw addr0` → `fence` → `lw addr0` 校验 → `sw addr1` → `fence` → drain → 只读 `addr0` | `C5_START` / `C5_AFTER` / `C5_OK` |
+
+**Step2-only 事件类型**
+
+| Type | 语义 |
+|------|------|
+| `0x01` | `READY` |
+| `0x11` / `0x12` | `C1_OK` / `C2_OK` |
+| `0x31` / `0x32` / `0x33` | `C3_START` / `C3_AFTER` / `C3_OK` |
+| `0x41` / `0x42` / `0x43` | `C4_START` / `C4_AFTER` / `C4_OK` |
+| `0x51` / `0x52` / `0x53` | `C5_START` / `C5_AFTER` / `C5_OK` |
+| `0xE0` / `0xE1` / `0xEF` | `BAD` / `CAL_FAIL` / `TRAP` |
+| `0xF0` | `SUMMARY(arg=summary_mask)` |
 
 **这条支线当前固定的 fail-fast 顺序**
 
@@ -981,23 +1075,24 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --port 
 
 | 项目 | 当前结果 | 证据 |
 |------|------|------|
-| Step2-only 顶层仿真 | `PASS`，`ready=1 retire=1 calib=1 tube=04`，`C=1..5` 全部 `START/AFTER WRITE/OK` 到齐 | `build/fpga_bridge_audit_step2_only/06_run_step2_only_top_sim.log` |
-| 最新辅助 bitstream | `BuildID=0x69E371F2` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
-| 当前辅助 bitstream 时序 | `WNS=+0.624ns`, `WHS=+0.059ns`, `All user specified timing constraints are met.` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
-| 脚本化 10 秒板测 gate | **未稳定通过**；当前 `summary.txt` 仍记录 `FailedStage=uart_load_and_capture`，原因是自动抓包没有稳定收齐 `C=4/C=5` | `build/fpga_bridge_audit_step2_only/summary.txt`, `build/ddr3_bridge_audit_step2_only_uart_capture.txt` |
-| 20 秒人工复抓 | 已看到 `S2 READY`、`C=3/4/5` 的 `START/AFTER WRITE`，`C=4/C=5` 的 `OK`，以及 `S2 AALL OK`；同时出现 `S2 OK C=0` 和之后大量重复 `S2 OK C=1` 噪声 | `build/ddr3_bridge_audit_step2_only_uart_capture_rerun.txt` |
+| Step2-only 顶层仿真 | `PASS`，`ready=1 retire=1 calib=1 tube=04`，`READY + C1/C2 + C3/C4/C5 START/AFTER/OK + SUMMARY(mask=0x1F)` 全部到齐 | `build/fpga_bridge_audit_step2_only/06_run_step2_only_top_sim.log` |
+| 最新辅助 bitstream | `BuildID=0x69E39477` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| 当前辅助 bitstream 时序 | `WNS=+0.522ns`, `WHS=+0.030ns`, `All user specified timing constraints are met.` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
+| 脚本化 10 秒板测 gate | `PASS`；板级抓包按 beacon 帧解析稳定恢复 `READY/C1..C5/SUMMARY`，`summary_mask=0x1F`，`any_bad=0` | `build/fpga_bridge_audit_step2_only/summary.txt` |
+| 板级原始抓包 | 二进制原始串口数据 | `build/ddr3_bridge_audit_step2_only_uart_capture.bin` |
+| 板级解码抓包 | Beacon 解码日志，最终事件落在 `SUMMARY arg=0x1F` | `build/ddr3_bridge_audit_step2_only_uart_capture.decoded.txt` |
 
 **当前结论**
 
-- 这条支线的 **RTL/仿真闭环已经打通**，`C3_base / C3_nop / C3_barrier` 三变体在顶层仿真中都能稳定通过。
-- 当前剩余问题是**板级 UART 观测与自动抓包稳定性**，而不是 Step2-only ROM、本地 smoke testbench 或综合/实现本身。
-- 在这条支线的板级 10 秒自动 gate 稳定之前，README 不把它升级成“当前主线已通过”的硬门禁，也不据此宣告 Dhrystone / loader 主线已恢复。
+- 这条支线的 **RTL/仿真闭环和板级 10 秒自动 gate 都已经打通**。
+- 之前的主要问题确实是**ASCII 逐字符观测链抗噪不足**，不是 core/bridge 主功能本身；当前 beacon 方案已经把 Step2-only 的自动板测稳定住。
+- 这条支线已经可以作为 DDR3 bridge 相邻地址写后读问题的稳定辅助 gate，但它仍然**不等价于 Dhrystone / DDR3 loader 主线已恢复**。
 
 **当前板级分类约定**
 
-- 只看到 `S2 START C=n`，看不到 `S2 AFTER WRITE C=n`：优先怀疑双写窗口内挂死。
-- 能看到 `S2 AFTER WRITE C=n`，看不到 `S2 OK C=n`：优先怀疑 drain/idle 或最终 readback 可见性。
-- 没有 `S2 BAD`，但只剩畸变 token（如 `S2 OK C=0` / `S2 AALL OK`）：当前按“UART 观测不稳”归档，不直接下结论为 bridge 数据错误。
+- 收到 `BAD(arg)`：`arg = {phase[3:0], case[3:0]}`，优先按 case/phase 分类。
+- 收到 `SUMMARY(mask)` 且 `mask[4:0]==5'b11111`、`mask[7]==0`：本轮 Step2-only 判定为 `PASS`。
+- 板级抓包以 `SUMMARY` 为最高优先级，不再依赖 ASCII token 是否完整拼接。
 
 > **归档说明**: 以下 §13.8-§13.18 中涉及旧 Scoreboard、`RS=4`、`SMT_MODE=0`、`10~12.5MHz`、早期 OoO bring-up、`run_board_feedback.py` 低频板测等内容，均为历史排障/优化记录。文中“当前”仅表示该时间点的状态，不代表本节前述 25MHz SMT 主基线。
 
@@ -1112,16 +1207,25 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 ### 13.10 Dhrystone 板级测试（2026-04）
 
-> **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前真正阻塞 Dhrystone / DDR3 loader 主线恢复的，不再是这里的旧 `legacy_mem_subsys` 路径，而是 §13.6 中记录的 `--bridge-audit-step2-only` 辅助支线。最新状态是：Step2-only 顶层仿真已通过，25MHz 辅助 bitstream `BuildID=0x69E371F2` 的综合/实现/JTAG 都通过，但 10 秒脚本化板级 UART gate 仍不稳定，因此 README 还不能把 Dhrystone 宣告为“当前主线已板测通过”。
+> **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前 `--bridge-audit-step2-only` 辅助支线已经通过 beacon 化稳定住自动板测，最新 25MHz 辅助 bitstream `BuildID=0x69E39477` 的综合/实现/JTAG/10 秒板测都通过。但这仍然只是 DDR3 bridge 的辅助定位支线，不等价于 Dhrystone 主线已经重新上板通过。
+
+> **补充（2026-04-19）**: 当前已新增一套 WSL Verilator + mock memory 高速环境，见 §13.5.1。它已经能在 `preload` 模式下把 Dhrystone 主线推进到 payload 内部并稳定复现停滞，但当前只输出 `0\n1\n`，尚未到 `DHRYSTONE START`；因此它说明“主线问题已压缩到 benchmark 早期运行期 bug”，但同样**不等价于板级 Dhrystone 主线已恢复通过**。
 
 **最新相关状态（2026-04-18）**
 
 | 项目 | 当前状态 | 说明 |
 |------|------|------|
-| Dhrystone 主线板测 | 🔄 仍未恢复为硬门禁 | 先解决 §13.6 的 DDR3 bridge Step2-only 自动板测稳定性 |
+| Dhrystone 主线板测 | 🔄 仍未恢复为硬门禁 | Step2-only 辅助支线已稳定，下一步回到 DDR3 loader / benchmark 主线 |
 | Step2-only 顶层仿真 | ✅ | `C=1..5` 全部通过，`tube_status=0x04` |
-| Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E371F2`, `WNS=+0.624ns`, `WHS=+0.059ns` |
-| Step2-only 脚本化板测 | ⚠️ | 自动 10 秒 UART 抓包仍不稳定，见 `build/fpga_bridge_audit_step2_only/summary.txt` |
+| Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E39477`, `WNS=+0.522ns`, `WHS=+0.030ns` |
+| Step2-only 脚本化板测 | ✅ | Beacon 抓包稳定通过，`summary_mask=0x1F`, `any_bad=0` |
+
+**当前 DDR3 loader 主线仿真 gate 语义**
+
+- `loader_quick_sim`：完整 tiny exec gate，仍要求 `READY + LOAD_START + READ_OK + LOAD_OK + JUMP + SUMMARY(mask ok) + DDR3 EXEC PASS`
+- `loader_full_payload_sim`：真实 Dhrystone payload 的 **prefix16 仿真 gate**
+- `prefix16` 固定只要求跨过前 `16` 个 `64B` block，覆盖历史第 `13` 个 block 的故障窗口；不再要求完整 payload、readback、`LOAD_OK/JUMP` 或 benchmark 执行
+- synth / impl / bitstream / board smoke 仍在 `quick + full-prefix` 两个仿真 gate 之后执行，这不代表板级验收放宽
 
 **板测基础设施**
 

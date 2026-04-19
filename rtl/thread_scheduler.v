@@ -25,6 +25,10 @@ always @(posedge clk or negedge rstn) begin
         rr_next   <= 1'b1;
     end
     else begin
+`ifdef VERILATOR_MAINLINE_PRELOAD_BOOT
+        fetch_tid <= 1'b0;
+        rr_next   <= 1'b1;
+`else
         if (!smt_mode) begin
             // Single-thread mode: always fetch from Thread 0
             fetch_tid <= 1'b0;
@@ -47,6 +51,7 @@ always @(posedge clk or negedge rstn) begin
                 fetch_tid <= fetch_tid;
             end
         end
+`endif
     end
 end
 
