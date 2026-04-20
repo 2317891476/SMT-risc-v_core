@@ -37,7 +37,7 @@ module exec_pipe1 #(
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
     input  wire [0:0]         in_tid,
-    input  wire [15:0]        in_order_id,   // Metadata from scoreboard
+    input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,   // Metadata from scoreboard
     input  wire [7:0]         in_epoch,
 
     // ─── ALU / AGU result (1-cycle path) ────────────────────────
@@ -62,7 +62,7 @@ module exec_pipe1 #(
     output wire [2:0]         mem_req_fu,
     output wire               mem_req_mem2reg,
     output wire [0:0]         mem_req_tid,
-    output wire [15:0]        mem_req_order_id,
+    output wire [`METADATA_ORDER_ID_W-1:0] mem_req_order_id,
     output wire [7:0]         mem_req_epoch,
 
     // ─── Multiplier result (3-cycle path) ───────────────────────
@@ -144,7 +144,7 @@ reg [4:0]  alu_out_rd_r;
 reg        alu_out_regs_write_r;
 reg [2:0]  alu_out_fu_r;
 reg [0:0]  alu_out_tid_r;
-reg [15:0] alu_out_order_id_r;
+reg [`METADATA_ORDER_ID_W-1:0] alu_out_order_id_r;
 reg [7:0]  alu_out_epoch_r;
 reg        mem_req_valid_r;
 reg        mem_req_wen_r;
@@ -157,7 +157,7 @@ reg        mem_req_regs_write_r;
 reg [2:0]  mem_req_fu_r;
 reg        mem_req_mem2reg_r;
 reg [0:0]  mem_req_tid_r;
-reg [15:0] mem_req_order_id_r;
+reg [`METADATA_ORDER_ID_W-1:0] mem_req_order_id_r;
 reg [7:0]  mem_req_epoch_r;
 
 always @(posedge clk or negedge rstn) begin
@@ -169,7 +169,7 @@ always @(posedge clk or negedge rstn) begin
         alu_out_regs_write_r <= 1'b0;
         alu_out_fu_r         <= 3'd0;
         alu_out_tid_r        <= 1'b0;
-        alu_out_order_id_r   <= 16'd0;
+        alu_out_order_id_r   <= {`METADATA_ORDER_ID_W{1'b0}};
         alu_out_epoch_r      <= 8'd0;
         mem_req_valid_r      <= 1'b0;
         mem_req_wen_r        <= 1'b0;
@@ -182,7 +182,7 @@ always @(posedge clk or negedge rstn) begin
         mem_req_fu_r         <= 3'd0;
         mem_req_mem2reg_r    <= 1'b0;
         mem_req_tid_r        <= 1'b0;
-        mem_req_order_id_r   <= 16'd0;
+        mem_req_order_id_r   <= {`METADATA_ORDER_ID_W{1'b0}};
         mem_req_epoch_r      <= 8'd0;
     end else begin
         alu_out_valid_r      <= is_alu_op;

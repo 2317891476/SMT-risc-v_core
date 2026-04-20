@@ -23,7 +23,7 @@ module exec_pipe0 #(
     input  wire [31:0]        in_op_b,       // rs2 data (after bypass)
     input  wire [4:0]         in_rs1_idx,    // rs1 index (used for CSR zimm ops)
     input  wire [31:0]        in_imm,
-    input  wire [15:0]        in_order_id,   // per-thread order id for flush bookkeeping
+    input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,   // per-thread order id for flush bookkeeping
     input  wire [2:0]         in_func3,
     input  wire               in_func7,
     input  wire [2:0]         in_alu_op,
@@ -63,7 +63,7 @@ module exec_pipe0 #(
     output wire               br_ctrl,       // branch taken
     output wire [31:0]        br_addr,       // branch target address
     output wire [0:0]         br_tid,        // which thread branched
-    output wire [15:0]        br_order_id,   // branch order id when redirecting
+    output wire [`METADATA_ORDER_ID_W-1:0] br_order_id,   // branch order id when redirecting
     output wire               br_complete    // branch execution complete (taken or not)
 );
 
@@ -112,14 +112,14 @@ reg [0:0]         out_tid_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
-reg [15:0]        br_order_id_r;
+reg [`METADATA_ORDER_ID_W-1:0] br_order_id_r;
 reg               br_complete_r;   // branch execution complete
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
 reg [31:0]        stored_imm;
 reg [31:0]        stored_op_a;     // for JALR
-reg [15:0]        stored_order_id;
+reg [`METADATA_ORDER_ID_W-1:0] stored_order_id;
 reg [0:0]         stored_tid;
 reg               stored_br;
 reg               stored_br_addr_mode;
@@ -138,12 +138,12 @@ always @(posedge clk or negedge rstn) begin
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
         br_tid_r            <= 1'b0;
-        br_order_id_r       <= 16'd0;
+        br_order_id_r       <= {`METADATA_ORDER_ID_W{1'b0}};
         br_complete_r       <= 1'b0;
         stored_pc           <= 32'd0;
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
-        stored_order_id     <= 16'd0;
+        stored_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
         stored_tid          <= 1'b0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;

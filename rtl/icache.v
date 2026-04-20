@@ -77,6 +77,13 @@ reg [OFFSET_W-1:0]   req_offset_r;
 reg [TID_WIDTH-1:0]  req_tid_r;
 reg [3:0]            req_epoch_r;
 reg                  req_valid_r;
+reg [ADDR_WIDTH-1:0] deferred_req_addr_r;
+reg [INDEX_W-1:0]    deferred_req_index_r;
+reg [TAG_W-1:0]      deferred_req_tag_r;
+reg [OFFSET_W-1:0]   deferred_req_offset_r;
+reg [TID_WIDTH-1:0]  deferred_req_tid_r;
+reg [3:0]            deferred_req_epoch_r;
+reg                  deferred_req_valid_r;
 
 reg [INDEX_W-1:0]      miss_index_r;
 reg [TAG_W-1:0]        miss_tag_r;
@@ -104,6 +111,14 @@ wire [($clog2(WORDS_PER_LINE)-1):0] req_word_offset = req_offset_r[OFFSET_W-1:2]
 wire [($clog2(WORDS_PER_LINE)-1):0] miss_word_offset = miss_offset_r[OFFSET_W-1:2];
 wire high_latency_miss = req_addr_r[31];
 wire [3:0] miss_current_epoch = miss_tid_r == {TID_WIDTH{1'b0}} ? current_epoch_t0 : current_epoch_t1;
+wire replay_deferred_req = !flush && !cpu_req_valid && deferred_req_valid_r && (state == S_IDLE);
+wire capture_cpu_req = cpu_req_valid || replay_deferred_req;
+wire [ADDR_WIDTH-1:0] cpu_req_addr_mux = replay_deferred_req ? deferred_req_addr_r : cpu_req_addr;
+wire [INDEX_W-1:0] cpu_req_index_mux = replay_deferred_req ? deferred_req_index_r : req_index;
+wire [TAG_W-1:0] cpu_req_tag_mux = replay_deferred_req ? deferred_req_tag_r : req_tag;
+wire [OFFSET_W-1:0] cpu_req_offset_mux = replay_deferred_req ? deferred_req_offset_r : req_offset;
+wire [TID_WIDTH-1:0] cpu_req_tid_mux = replay_deferred_req ? deferred_req_tid_r : cpu_req_tid;
+wire [3:0] cpu_req_epoch_mux = replay_deferred_req ? deferred_req_epoch_r : current_epoch;
 
 assign mem_resp_ready = 1'b1;
 assign debug_high_miss_count = debug_high_miss_count_r;
@@ -133,6 +148,13 @@ always @(posedge clk or negedge rstn) begin
         req_tid_r      <= {TID_WIDTH{1'b0}};
         req_epoch_r    <= 4'd0;
         req_valid_r    <= 1'b0;
+        deferred_req_addr_r   <= {ADDR_WIDTH{1'b0}};
+        deferred_req_index_r  <= {INDEX_W{1'b0}};
+        deferred_req_tag_r    <= {TAG_W{1'b0}};
+        deferred_req_offset_r <= {OFFSET_W{1'b0}};
+        deferred_req_tid_r    <= {TID_WIDTH{1'b0}};
+        deferred_req_epoch_r  <= 4'd0;
+        deferred_req_valid_r  <= 1'b0;
 
         miss_index_r   <= {INDEX_W{1'b0}};
         miss_tag_r     <= {TAG_W{1'b0}};
@@ -165,14 +187,31 @@ always @(posedge clk or negedge rstn) begin
         // refill, otherwise IF would consume the low RAM bypass value.
         cpu_resp_valid <= req_valid_r && (hit || !high_latency_miss);
 
-        req_valid_r <= cpu_req_valid;
-        if (cpu_req_valid) begin
-            req_addr_r   <= cpu_req_addr;
-            req_index_r  <= req_index;
-            req_tag_r    <= req_tag;
-            req_offset_r <= req_offset;
-            req_tid_r    <= cpu_req_tid;
-            req_epoch_r  <= current_epoch;
+        req_valid_r <= capture_cpu_req;
+        if (capture_cpu_req) begin
+            req_addr_r   <= cpu_req_addr_mux;
+            req_index_r  <= cpu_req_index_mux;
+            req_tag_r    <= cpu_req_tag_mux;
+            req_offset_r <= cpu_req_offset_mux;
+            req_tid_r    <= cpu_req_tid_mux;
+            req_epoch_r  <= cpu_req_epoch_mux;
+        end
+
+        if (flush) begin
+            deferred_req_valid_r <= 1'b0;
+        end else if (cpu_req_valid && (state != S_IDLE)) begin
+            // stage_if allows only one outstanding fetch; keep a single deferred
+            // request so a new high-address fetch arriving during refill does
+            // not get dropped before the FSM returns to S_IDLE.
+            deferred_req_addr_r   <= cpu_req_addr;
+            deferred_req_index_r  <= req_index;
+            deferred_req_tag_r    <= req_tag;
+            deferred_req_offset_r <= req_offset;
+            deferred_req_tid_r    <= cpu_req_tid;
+            deferred_req_epoch_r  <= current_epoch;
+            deferred_req_valid_r  <= 1'b1;
+        end else if (replay_deferred_req) begin
+            deferred_req_valid_r <= 1'b0;
         end
 
         case (state)

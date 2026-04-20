@@ -7,7 +7,11 @@ static inline volatile uint32_t *mmio32(uintptr_t addr) {
 }
 
 static inline void board_mmio_relax(void) {
+#ifdef VERILATOR_MAINLINE
+    __asm__ volatile("" ::: "memory");
+#else
     __asm__ volatile("nop\nnop\nnop");
+#endif
 }
 
 static inline unsigned char board_relaxed_load_u8(const volatile unsigned char *addr) {
@@ -22,10 +26,14 @@ static inline void board_relaxed_store_u8(volatile unsigned char *addr, unsigned
 }
 
 static void board_uart_tx_delay(void) {
+#ifdef VERILATOR_MAINLINE
+    return;
+#else
     unsigned long cycles = (AX7203_CPU_HZ / 115200UL) * 12UL;
     while (cycles-- != 0UL) {
         __asm__ volatile("nop");
     }
+#endif
 }
 
 void board_delay_cycles(uint32_t cycles) {

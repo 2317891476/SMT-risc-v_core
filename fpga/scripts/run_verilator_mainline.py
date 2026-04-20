@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -150,6 +151,7 @@ def build_benchmark_image(benchmark: str, runs: int, cpu_hz: int, out_dir: Path)
         "--ddr3-xip",
         "--emit-bin",
         "--manifest",
+        "--verilator-mainline",
     ]
     if benchmark == "dhrystone":
         cmd.extend(["--dhrystone-runs", str(runs)])
@@ -192,6 +194,7 @@ def build_verilator_command(
     top_sv: Path,
     mock_sv: Path,
     preload_direct_boot: bool,
+    enable_trace: bool,
 ) -> str:
     rtl_sources = load_rtl_sources()
     source_list = [
@@ -230,6 +233,8 @@ def build_verilator_command(
         "-DSMT_MODE=1",
         "-DENABLE_ROCC_ACCEL=0",
     ]
+    if enable_trace:
+        parts.append("--trace-fst")
     if preload_direct_boot:
         parts.append("-DVERILATOR_MAINLINE_PRELOAD_BOOT=1")
     parts.extend(quote_wsl(to_wsl_path(path)) for path in source_list)
@@ -237,11 +242,90 @@ def build_verilator_command(
     return " ".join(parts)
 
 
-def format_summary(summary: dict[str, object], *, benchmark: str, mode: str, runs: int) -> str:
+def maybe_decode_pc_window(
+    *,
+    summary: dict[str, object],
+    elf_path: Path,
+    run_dir: Path,
+    window: int = 0x20,
+) -> dict[str, object]:
+    result: dict[str, object] = {
+        "LastPcDecodedAvailable": False,
+        "LastPcDecodedInstruction": "",
+        "LastPcDecodedContextPath": "",
+    }
+    objdump = shutil.which("riscv-none-elf-objdump")
+    if not objdump or not elf_path.exists():
+        return result
+
+    try:
+        pc = int(summary.get("LastPcT0", 0))
+    except (TypeError, ValueError):
+        pc = 0
+    try:
+        pending_pc = int(summary.get("LastFetchPcPending", 0))
+    except (TypeError, ValueError):
+        pending_pc = 0
+    targets = [("LastPcT0", pc)]
+    if pending_pc and pending_pc != pc:
+        targets.append(("LastFetchPcPending", pending_pc))
+    if all(target_pc == 0 for _, target_pc in targets):
+        return result
+
+    context_path = run_dir / "pc_window.objdump.txt"
+    result["LastPcDecodedContextPath"] = str(context_path)
+    inst_re = re.compile(r"^\s*([0-9a-fA-F]+):\s+[0-9a-fA-F]+\s+(.+)$")
+    sections: list[str] = []
+    for target_name, target_pc in targets:
+        start = max(0, target_pc - window)
+        stop = target_pc + window + 4
+        cmd = [
+            objdump,
+            "-d",
+            "-S",
+            f"--start-address=0x{start:x}",
+            f"--stop-address=0x{stop:x}",
+            str(elf_path),
+        ]
+        proc = subprocess.run(
+            cmd,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+        sections.append(f"===== {target_name}=0x{target_pc:08X} =====\n")
+        sections.append(proc.stdout + proc.stderr)
+        if proc.returncode != 0:
+            continue
+        if target_name != "LastPcT0":
+            continue
+        target_hex = f"{target_pc:x}"
+        for line in proc.stdout.splitlines():
+            match = inst_re.match(line)
+            if not match:
+                continue
+            if match.group(1).lower() == target_hex.lower():
+                result["LastPcDecodedAvailable"] = True
+                result["LastPcDecodedInstruction"] = match.group(2).strip()
+                break
+    context_path.write_text("\n".join(sections), encoding="utf-8", errors="replace")
+    return result
+
+
+def format_summary(
+    summary: dict[str, object], *, benchmark: str, mode: str, runs: int, budget_cycles: int
+) -> str:
+    instret = int(summary.get("InstRetired", 0) or 0)
+    global_ipc_vs_budget = (instret / budget_cycles) if budget_cycles else 0.0
     lines = [
         f"Mode: {mode}",
         f"Benchmark: {benchmark}",
         f"Runs: {runs}",
+        f"ConfiguredRuns: {summary.get('ConfiguredRuns', runs)}",
+        f"EffectiveRuns: {summary.get('EffectiveRuns', runs)}",
+        f"VerilatorFixedRuns: {summary.get('VerilatorFixedRuns', False)}",
         f"ExitReason: {summary.get('ExitReason', 'N/A')}",
         f"EntryReached: {summary.get('EntryReached', False)}",
         f"BenchmarkStartSeen: {summary.get('BenchmarkStartSeen', False)}",
@@ -252,16 +336,25 @@ def format_summary(summary: dict[str, object], *, benchmark: str, mode: str, run
         f"Cycles: {summary.get('Cycles', 0)}",
         f"InstRetired: {summary.get('InstRetired', 0)}",
         f"IPCx1000: {summary.get('IPCx1000', 0)}",
+        f"GlobalIPCvsBudget: {global_ipc_vs_budget:.6f}",
         f"LastPcT0: 0x{int(summary.get('LastPcT0', 0)):08X}",
         f"LastPcT1: 0x{int(summary.get('LastPcT1', 0)):08X}",
         f"LastFetchPcPending: 0x{int(summary.get('LastFetchPcPending', 0)):08X}",
         f"LastFetchPcOut: 0x{int(summary.get('LastFetchPcOut', 0)):08X}",
         f"LastFetchIfInst: 0x{int(summary.get('LastFetchIfInst', 0)):08X}",
         f"LastFetchIfFlags: 0x{int(summary.get('LastFetchIfFlags', 0)):02X}",
+        f"LastIcStateFlags: 0x{int(summary.get('LastIcStateFlags', 0)):02X}",
         f"IcHighMissCount: {summary.get('IcHighMissCount', 0)}",
         f"IcMemReqCount: {summary.get('IcMemReqCount', 0)}",
         f"IcMemRespCount: {summary.get('IcMemRespCount', 0)}",
         f"IcCpuRespCount: {summary.get('IcCpuRespCount', 0)}",
+        f"InstrRetiredCount: {summary.get('InstrRetiredCount', 0)}",
+        f"RobCommit0SeenCount: {summary.get('RobCommit0SeenCount', 0)}",
+        f"RobCommit1SeenCount: {summary.get('RobCommit1SeenCount', 0)}",
+        f"LastRobCommit0OrderId: {summary.get('LastRobCommit0OrderId', 0)}",
+        f"LastRobCommit1OrderId: {summary.get('LastRobCommit1OrderId', 0)}",
+        f"LastRobCountT0: {summary.get('LastRobCountT0', 0)}",
+        f"LastRobCountT1: {summary.get('LastRobCountT1', 0)}",
         f"UartStatusLoadCount: {summary.get('UartStatusLoadCount', 0)}",
         f"UartTxStoreCount: {summary.get('UartTxStoreCount', 0)}",
         f"UartTxByteSeenCount: {summary.get('UartTxByteSeenCount', 0)}",
@@ -271,12 +364,30 @@ def format_summary(summary: dict[str, object], *, benchmark: str, mode: str, run
         f"MockMemRangeErrorCount: {summary.get('MockMemRangeErrorCount', 0)}",
         f"MockMemLastRangeErrorAddr: 0x{int(summary.get('MockMemLastRangeErrorAddr', 0)):08X}",
         f"MockMemUninitReadCount: {summary.get('MockMemUninitReadCount', 0)}",
+        f"LsuReqSeenCount: {summary.get('LsuReqSeenCount', 0)}",
+        f"LsuReqAcceptCount: {summary.get('LsuReqAcceptCount', 0)}",
+        f"LsuRespSeenCount: {summary.get('LsuRespSeenCount', 0)}",
+        f"StoreBufferEmptyLast: {summary.get('StoreBufferEmptyLast', False)}",
+        f"StoreCountT0Last: {summary.get('StoreCountT0Last', 0)}",
+        f"StoreCountT1Last: {summary.get('StoreCountT1Last', 0)}",
+        f"M1ReqSeenCount: {summary.get('M1ReqSeenCount', 0)}",
+        f"M1ReqHandshakeCount: {summary.get('M1ReqHandshakeCount', 0)}",
+        f"LastM1ReqAddr: 0x{int(summary.get('LastM1ReqAddr', 0)):08X}",
+        f"LastM1ReqWrite: {summary.get('LastM1ReqWrite', False)}",
+        f"LastInstretProgressCycle: {summary.get('LastInstretProgressCycle', 0)}",
+        f"LastCommitProgressCycle: {summary.get('LastCommitProgressCycle', 0)}",
+        f"LastLsuReqAcceptCycle: {summary.get('LastLsuReqAcceptCycle', 0)}",
+        f"LastM1ReqHandshakeCycle: {summary.get('LastM1ReqHandshakeCycle', 0)}",
+        f"TraceStartCycle: {summary.get('TraceStartCycle', 0)}",
+        f"TraceStopCycle: {summary.get('TraceStopCycle', 0)}",
         f"Ddr3ReqSeenCount: {summary.get('Ddr3ReqSeenCount', 0)}",
         f"Ddr3ReqHandshakeCount: {summary.get('Ddr3ReqHandshakeCount', 0)}",
         f"Ddr3RespSeenCount: {summary.get('Ddr3RespSeenCount', 0)}",
         f"M0ReqSeenCount: {summary.get('M0ReqSeenCount', 0)}",
         f"M0ReqHandshakeCount: {summary.get('M0ReqHandshakeCount', 0)}",
         f"M0RespSeenCount: {summary.get('M0RespSeenCount', 0)}",
+        f"LastM0ReqHandshakeCycle: {summary.get('LastM0ReqHandshakeCycle', 0)}",
+        f"LastM0RespCycle: {summary.get('LastM0RespCycle', 0)}",
         f"LastDdr3ReqAddr: 0x{int(summary.get('LastDdr3ReqAddr', 0)):08X}",
         f"LastDdr3ReqWdata: 0x{int(summary.get('LastDdr3ReqWdata', 0)):08X}",
         f"LastDdr3RespData: 0x{int(summary.get('LastDdr3RespData', 0)):08X}",
@@ -290,6 +401,30 @@ def format_summary(summary: dict[str, object], *, benchmark: str, mode: str, run
         f"LastMemsubsysM0Ddr3RespLast: {summary.get('LastMemsubsysM0Ddr3RespLast', False)}",
         f"LastMemsubsysDdr3ArbState: {summary.get('LastMemsubsysDdr3ArbState', 0)}",
         f"LastMemsubsysDdr3M0WordIdx: {summary.get('LastMemsubsysDdr3M0WordIdx', 0)}",
+        f"StuckPcSeen: {summary.get('StuckPcSeen', False)}",
+        f"StuckPcValue: 0x{int(summary.get('StuckPcValue', 0)):08X}",
+        f"StuckPcRepeatCount: {summary.get('StuckPcRepeatCount', 0)}",
+        f"RetireStallSeen: {summary.get('RetireStallSeen', False)}",
+        f"RetireStallCycles: {summary.get('RetireStallCycles', 0)}",
+        f"DangerWindowSeen: {summary.get('DangerWindowSeen', False)}",
+        f"DangerWindowEntryPc: 0x{int(summary.get('DangerWindowEntryPc', 0)):08X}",
+        f"DangerEntryCycle: {summary.get('DangerEntryCycle', 0)}",
+        f"DangerEntryInstRet: {summary.get('DangerEntryInstRet', 0)}",
+        f"DangerLsuReqSeenDelta: {summary.get('DangerLsuReqSeenDelta', 0)}",
+        f"DangerLsuReqAcceptDelta: {summary.get('DangerLsuReqAcceptDelta', 0)}",
+        f"DangerLsuRespSeenDelta: {summary.get('DangerLsuRespSeenDelta', 0)}",
+        f"DangerM1ReqSeenDelta: {summary.get('DangerM1ReqSeenDelta', 0)}",
+        f"DangerM1ReqHandshakeDelta: {summary.get('DangerM1ReqHandshakeDelta', 0)}",
+        f"DangerM0ReqSeenDelta: {summary.get('DangerM0ReqSeenDelta', 0)}",
+        f"DangerM0ReqHandshakeDelta: {summary.get('DangerM0ReqHandshakeDelta', 0)}",
+        f"DangerM0RespSeenDelta: {summary.get('DangerM0RespSeenDelta', 0)}",
+        f"DangerMockMemWritesDelta: {summary.get('DangerMockMemWritesDelta', 0)}",
+        f"LastM1ReqAddrAfterDanger: 0x{int(summary.get('LastM1ReqAddrAfterDanger', 0)):08X}",
+        f"LastM1ReqWriteAfterDanger: {summary.get('LastM1ReqWriteAfterDanger', False)}",
+        f"LastM0ReqAddrAfterDanger: 0x{int(summary.get('LastM0ReqAddrAfterDanger', 0)):08X}",
+        f"LastPcDecodedAvailable: {summary.get('LastPcDecodedAvailable', False)}",
+        f"LastPcDecodedInstruction: {summary.get('LastPcDecodedInstruction', '')}",
+        f"LastPcDecodedContextPath: {summary.get('LastPcDecodedContextPath', '')}",
         f"LoaderBytesInjected: {summary.get('LoaderBytesInjected', 0)}",
     ]
     return "\n".join(lines) + "\n"
@@ -305,6 +440,14 @@ def main() -> int:
     parser.add_argument("--max-cycles", type=int, default=20_000_000)
     parser.add_argument("--header-gap-cycles", type=int, default=16)
     parser.add_argument("--payload-gap-cycles", type=int, default=2)
+    parser.add_argument("--stuck-pc-threshold", type=int, default=256)
+    parser.add_argument("--stall-cycle-threshold", type=int, default=200_000)
+    parser.add_argument("--danger-window-instret-threshold", type=int, default=1024)
+    parser.add_argument("--trace", action="store_true")
+    parser.add_argument("--trace-on-stuck", action="store_true")
+    parser.add_argument("--trace-start-cycle", type=int, default=0)
+    parser.add_argument("--trace-stop-cycle", type=int, default=0)
+    parser.add_argument("--trace-after-stuck-cycles", type=int, default=4096)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--print-wsl-cmd", action="store_true")
     args = parser.parse_args()
@@ -313,7 +456,7 @@ def main() -> int:
     which_required_wsl("verilator", "make", "g++")
 
     run_dir = BUILD_ROOT / args.mode / f"{args.benchmark}_runs{args.runs}"
-    obj_dir = run_dir / "obj_dir"
+    obj_dir = run_dir / ("obj_dir_trace" if (args.trace or args.trace_on_stuck) else "obj_dir")
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
 
@@ -324,6 +467,9 @@ def main() -> int:
     summary_txt = run_dir / "summary.txt"
     uart_log = run_dir / "uart.log"
     preload_hex = run_dir / "payload_preload.hex"
+    trace_path = run_dir / ("trace.fst" if (args.trace or args.trace_on_stuck) else "trace.fst")
+    if (args.trace or args.trace_on_stuck) and trace_path.exists():
+        trace_path.unlink()
 
     if args.mode == "preload":
         write_preload_hex(Path(str(manifest["bin"])), preload_hex)
@@ -343,6 +489,7 @@ def main() -> int:
         top_sv=top_sv,
         mock_sv=mock_sv,
         preload_direct_boot=(args.mode == "preload"),
+        enable_trace=(args.trace or args.trace_on_stuck),
     )
     if args.print_wsl_cmd:
         print(build_cmd)
@@ -382,8 +529,31 @@ def main() -> int:
         shlex.quote(str(args.header_gap_cycles)),
         "--payload-gap-cycles",
         shlex.quote(str(args.payload_gap_cycles)),
+        "--stuck-pc-threshold",
+        shlex.quote(str(args.stuck_pc_threshold)),
+        "--stall-cycle-threshold",
+        shlex.quote(str(args.stall_cycle_threshold)),
+        "--danger-window-instret-threshold",
+        shlex.quote(str(args.danger_window_instret_threshold)),
         f"+MOCK_DDR3_FORCE_LATENCY={args.mock_latency}",
     ]
+    if args.trace or args.trace_on_stuck:
+        sim_args.extend(
+            [
+                "--trace-file",
+                quote_wsl(to_wsl_path(trace_path)),
+            ]
+        )
+    if args.trace:
+        sim_args.append("--trace")
+    if args.trace_on_stuck:
+        sim_args.append("--trace-on-stuck")
+    if args.trace_start_cycle:
+        sim_args.extend(["--trace-start-cycle", shlex.quote(str(args.trace_start_cycle))])
+    if args.trace_stop_cycle:
+        sim_args.extend(["--trace-stop-cycle", shlex.quote(str(args.trace_stop_cycle))])
+    if args.trace_after_stuck_cycles:
+        sim_args.extend(["--trace-after-stuck-cycles", shlex.quote(str(args.trace_after_stuck_cycles))])
     if args.mode == "preload":
         sim_args.append(f"+MOCK_DDR3_PRELOAD_HEX={quote_wsl(preload_hex_wsl)}")
     sim_cmd = " ".join(sim_args)
@@ -398,8 +568,32 @@ def main() -> int:
         return sim_proc.returncode
 
     summary = parse_summary_json(summary_json)
+    effective_runs = args.runs
+    verilator_fixed_runs = False
+    if args.benchmark == "dhrystone":
+        effective_runs = 10
+        verilator_fixed_runs = True
+    summary["ConfiguredRuns"] = args.runs
+    summary["EffectiveRuns"] = effective_runs
+    summary["VerilatorFixedRuns"] = verilator_fixed_runs
+    summary["TraceStartCycle"] = int(args.trace_start_cycle or 0)
+    summary["TraceStopCycle"] = int(args.trace_stop_cycle or 0)
+    summary.update(
+        maybe_decode_pc_window(
+            summary=summary,
+            elf_path=Path(str(manifest["elf"])),
+            run_dir=run_dir,
+        )
+    )
+    summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
     summary_txt.write_text(
-        format_summary(summary, benchmark=args.benchmark, mode=args.mode, runs=args.runs),
+        format_summary(
+            summary,
+            benchmark=args.benchmark,
+            mode=args.mode,
+            runs=args.runs,
+            budget_cycles=args.max_cycles,
+        ),
         encoding="utf-8",
     )
     print(summary_txt)

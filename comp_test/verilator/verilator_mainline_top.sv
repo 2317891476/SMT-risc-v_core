@@ -7,6 +7,7 @@ module verilator_mainline_top (
     input  wire [7:0]  fast_uart_rx_byte,
     output wire [7:0]  tube_status,
     output wire        debug_core_ready,
+    output wire        debug_core_clk,
     output wire        debug_retire_seen,
     output wire        debug_uart_tx_byte_valid,
     output wire [7:0]  debug_uart_tx_byte,
@@ -23,10 +24,75 @@ module verilator_mainline_top (
     output wire [7:0]  debug_ic_mem_req_count,
     output wire [7:0]  debug_ic_mem_resp_count,
     output wire [7:0]  debug_ic_cpu_resp_count,
+    output wire [1:0]  debug_instr_retired_count,
+    output wire        debug_rob_commit0_valid,
+    output wire        debug_rob_commit1_valid,
+    output wire [15:0] debug_rob_commit0_order_id,
+    output wire [15:0] debug_rob_commit1_order_id,
+    output wire [3:0]  debug_rob_head_idx_t0,
+    output wire [3:0]  debug_rob_head_idx_t1,
+    output wire        debug_rob_head_valid_t0,
+    output wire        debug_rob_head_valid_t1,
+    output wire        debug_rob_head_complete_t0,
+    output wire        debug_rob_head_complete_t1,
+    output wire [31:0] debug_rob_head_pc_t0,
+    output wire [31:0] debug_rob_head_pc_t1,
+    output wire [15:0] debug_rob_head_order_id_t0,
+    output wire [15:0] debug_rob_head_order_id_t1,
+    output wire [4:0]  debug_rob_head_tag_t0,
+    output wire [4:0]  debug_rob_head_tag_t1,
+    output wire        debug_rob_head_is_store_t0,
+    output wire        debug_rob_head_is_store_t1,
+    output wire [4:0]  debug_rob_count_t0,
+    output wire [4:0]  debug_rob_count_t1,
     output wire        debug_trap_seen,
     output wire [31:0] debug_trap_cause,
     output wire [63:0] debug_mcycle,
     output wire [63:0] debug_minstret,
+    output wire        debug_mem_iss_valid,
+    output wire [31:0] debug_mem_iss_pc,
+    output wire [15:0] debug_mem_iss_order_id,
+    output wire [4:0]  debug_mem_iss_tag,
+    output wire        debug_mem_iss_tid,
+    output wire        debug_mem_iss_mem_read,
+    output wire        debug_mem_iss_mem_write,
+    output wire        debug_lsu_req_valid,
+    output wire        debug_lsu_req_accept,
+    output wire [15:0] debug_lsu_req_order_id,
+    output wire [4:0]  debug_lsu_req_tag,
+    output wire        debug_lsu_req_tid,
+    output wire [31:0] debug_lsu_req_addr,
+    output wire        debug_lsu_req_wen,
+    output wire        debug_lsu_resp_valid,
+    output wire [1:0]  debug_lsu_state,
+    output wire        debug_lsu_pending_valid,
+    output wire [15:0] debug_lsu_pending_order_id,
+    output wire [4:0]  debug_lsu_pending_tag,
+    output wire [31:0] debug_lsu_pending_addr,
+    output wire        debug_lsu_pending_wen,
+    output wire        debug_lsu_pending_tid,
+    output wire        debug_lsu_m1_txn_is_drain,
+    output wire        debug_lsu_sb_forward_valid,
+    output wire        debug_lsu_sb_load_hazard,
+    output wire        debug_store_buffer_empty,
+    output wire [2:0]  debug_store_buffer_count_t0,
+    output wire [2:0]  debug_store_buffer_count_t1,
+    output wire [1:0]  debug_sb_head_idx_t0,
+    output wire [1:0]  debug_sb_head_idx_t1,
+    output wire        debug_sb_head_valid_t0,
+    output wire        debug_sb_head_valid_t1,
+    output wire        debug_sb_head_committed_t0,
+    output wire        debug_sb_head_committed_t1,
+    output wire [15:0] debug_sb_head_order_id_t0,
+    output wire [15:0] debug_sb_head_order_id_t1,
+    output wire [31:0] debug_sb_head_addr_t0,
+    output wire [31:0] debug_sb_head_addr_t1,
+    output wire        debug_m1_req_valid,
+    output wire        debug_m1_req_ready,
+    output wire [31:0] debug_m1_req_addr,
+    output wire        debug_m1_req_write,
+    output wire        debug_m1_resp_valid,
+    output wire [31:0] debug_m1_resp_data,
     output wire        debug_ddr3_req_valid,
     output wire        debug_ddr3_req_ready,
     output wire [31:0] debug_ddr3_req_addr,
@@ -41,6 +107,7 @@ module verilator_mainline_top (
     output wire        debug_m0_resp_valid,
     output wire [31:0] debug_m0_resp_data,
     output wire        debug_m0_resp_last,
+    output wire [7:0]  debug_ic_state_flags,
     output wire        debug_memsubsys_m0_ddr3_resp_valid,
     output wire [31:0] debug_memsubsys_m0_ddr3_resp_data,
     output wire        debug_memsubsys_m0_ddr3_resp_last,
@@ -98,6 +165,10 @@ module verilator_mainline_top (
     wire [31:0] debug_rs_seq_lo_flat_unused;
     wire [7:0]  debug_branch_issue_count_unused;
     wire [7:0]  debug_branch_complete_count_unused;
+    wire [3:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
+    wire [3:0]  rob_head_idx_t1 = u_dut.u_rob.rob_head[1];
+    wire [1:0]  sb_head_idx_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_head[0];
+    wire [1:0]  sb_head_idx_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_head[1];
 
     adam_riscv u_dut (
         .sys_clk(sys_clk),
@@ -182,6 +253,7 @@ module verilator_mainline_top (
 
     assign debug_pc_t0 = u_dut.u_stage_if.u_pc_mt.pc[0];
     assign debug_pc_t1 = u_dut.u_stage_if.u_pc_mt.pc[1];
+    assign debug_core_clk = u_dut.debug_core_clk;
     assign debug_fetch_pc_pending = u_dut.u_stage_if.fetch_pc_pending;
     assign debug_fetch_pc_out = u_dut.debug_fetch_pc_out;
     assign debug_fetch_if_inst = u_dut.debug_fetch_if_inst;
@@ -190,10 +262,75 @@ module verilator_mainline_top (
     assign debug_ic_mem_req_count = u_dut.debug_ic_mem_req_count;
     assign debug_ic_mem_resp_count = u_dut.debug_ic_mem_resp_count;
     assign debug_ic_cpu_resp_count = u_dut.debug_ic_cpu_resp_count;
+    assign debug_instr_retired_count = u_dut.rob_instr_retired;
+    assign debug_rob_commit0_valid = u_dut.rob_commit0_valid;
+    assign debug_rob_commit1_valid = u_dut.rob_commit1_valid;
+    assign debug_rob_commit0_order_id = u_dut.rob_commit0_order_id;
+    assign debug_rob_commit1_order_id = u_dut.rob_commit1_order_id;
+    assign debug_rob_head_idx_t0 = rob_head_idx_t0;
+    assign debug_rob_head_idx_t1 = rob_head_idx_t1;
+    assign debug_rob_head_valid_t0 = u_dut.u_rob.rob_valid[0][rob_head_idx_t0];
+    assign debug_rob_head_valid_t1 = u_dut.u_rob.rob_valid[1][rob_head_idx_t1];
+    assign debug_rob_head_complete_t0 = u_dut.u_rob.rob_complete[0][rob_head_idx_t0];
+    assign debug_rob_head_complete_t1 = u_dut.u_rob.rob_complete[1][rob_head_idx_t1];
+    assign debug_rob_head_pc_t0 = u_dut.u_rob.rob_pc[0][rob_head_idx_t0];
+    assign debug_rob_head_pc_t1 = u_dut.u_rob.rob_pc[1][rob_head_idx_t1];
+    assign debug_rob_head_order_id_t0 = u_dut.u_rob.rob_order_id[0][rob_head_idx_t0];
+    assign debug_rob_head_order_id_t1 = u_dut.u_rob.rob_order_id[1][rob_head_idx_t1];
+    assign debug_rob_head_tag_t0 = u_dut.u_rob.rob_tag[0][rob_head_idx_t0];
+    assign debug_rob_head_tag_t1 = u_dut.u_rob.rob_tag[1][rob_head_idx_t1];
+    assign debug_rob_head_is_store_t0 = u_dut.u_rob.rob_is_store[0][rob_head_idx_t0];
+    assign debug_rob_head_is_store_t1 = u_dut.u_rob.rob_is_store[1][rob_head_idx_t1];
+    assign debug_rob_count_t0 = u_dut.u_rob.rob_count[0];
+    assign debug_rob_count_t1 = u_dut.u_rob.rob_count[1];
     assign debug_trap_seen = u_dut.trap_enter;
     assign debug_trap_cause = u_dut.u_csr_unit.mcause;
     assign debug_mcycle = u_dut.u_csr_unit.mcycle;
     assign debug_minstret = u_dut.u_csr_unit.minstret;
+    assign debug_mem_iss_valid = u_dut.u_dispatch_unit.mem_iss_valid;
+    assign debug_mem_iss_pc = u_dut.u_dispatch_unit.mem_iss_pc;
+    assign debug_mem_iss_order_id = u_dut.u_dispatch_unit.mem_iss_order_id;
+    assign debug_mem_iss_tag = u_dut.u_dispatch_unit.mem_iss_tag;
+    assign debug_mem_iss_tid = u_dut.u_dispatch_unit.mem_iss_tid;
+    assign debug_mem_iss_mem_read = u_dut.u_dispatch_unit.mem_iss_mem_read;
+    assign debug_mem_iss_mem_write = u_dut.u_dispatch_unit.mem_iss_mem_write;
+    assign debug_lsu_req_valid = u_dut.p1_mem_req_valid;
+    assign debug_lsu_req_accept = u_dut.lsu_req_accept;
+    assign debug_lsu_req_order_id = u_dut.p1_mem_req_order_id;
+    assign debug_lsu_req_tag = u_dut.p1_mem_req_tag;
+    assign debug_lsu_req_tid = u_dut.p1_mem_req_tid;
+    assign debug_lsu_req_addr = u_dut.p1_mem_req_addr;
+    assign debug_lsu_req_wen = u_dut.p1_mem_req_wen;
+    assign debug_lsu_resp_valid = u_dut.lsu_resp_valid;
+    assign debug_lsu_state = u_dut.u_lsu_shell.lsu_state;
+    assign debug_lsu_pending_valid = u_dut.u_lsu_shell.pending_valid;
+    assign debug_lsu_pending_order_id = u_dut.u_lsu_shell.pending_order_id;
+    assign debug_lsu_pending_tag = u_dut.u_lsu_shell.pending_tag;
+    assign debug_lsu_pending_addr = u_dut.u_lsu_shell.pending_addr;
+    assign debug_lsu_pending_wen = u_dut.u_lsu_shell.pending_wen;
+    assign debug_lsu_pending_tid = u_dut.u_lsu_shell.pending_tid;
+    assign debug_lsu_m1_txn_is_drain = u_dut.u_lsu_shell.m1_txn_is_drain;
+    assign debug_lsu_sb_forward_valid = u_dut.u_lsu_shell.sb_forward_valid;
+    assign debug_lsu_sb_load_hazard = u_dut.u_lsu_shell.sb_load_hazard;
+    assign debug_store_buffer_empty = u_dut.lsu_debug_store_buffer_empty;
+    assign debug_store_buffer_count_t0 = u_dut.lsu_debug_store_buffer_count_t0;
+    assign debug_store_buffer_count_t1 = u_dut.lsu_debug_store_buffer_count_t1;
+    assign debug_sb_head_idx_t0 = sb_head_idx_t0;
+    assign debug_sb_head_idx_t1 = sb_head_idx_t1;
+    assign debug_sb_head_valid_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_valid[0][sb_head_idx_t0];
+    assign debug_sb_head_valid_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_valid[1][sb_head_idx_t1];
+    assign debug_sb_head_committed_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_committed[0][sb_head_idx_t0];
+    assign debug_sb_head_committed_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_committed[1][sb_head_idx_t1];
+    assign debug_sb_head_order_id_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_order_id[0][sb_head_idx_t0];
+    assign debug_sb_head_order_id_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_order_id[1][sb_head_idx_t1];
+    assign debug_sb_head_addr_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_addr[0][sb_head_idx_t0];
+    assign debug_sb_head_addr_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_addr[1][sb_head_idx_t1];
+    assign debug_m1_req_valid = u_dut.m1_req_valid;
+    assign debug_m1_req_ready = u_dut.m1_req_ready;
+    assign debug_m1_req_addr = u_dut.m1_req_addr;
+    assign debug_m1_req_write = u_dut.m1_req_write;
+    assign debug_m1_resp_valid = u_dut.m1_resp_valid;
+    assign debug_m1_resp_data = u_dut.m1_resp_data;
     assign debug_ddr3_req_valid = ddr3_req_valid;
     assign debug_ddr3_req_ready = ddr3_req_ready;
     assign debug_ddr3_req_addr = ddr3_req_addr;
@@ -208,6 +345,7 @@ module verilator_mainline_top (
     assign debug_m0_resp_valid = u_dut.m0_resp_valid;
     assign debug_m0_resp_data = u_dut.m0_resp_data;
     assign debug_m0_resp_last = u_dut.m0_resp_last;
+    assign debug_ic_state_flags = u_dut.debug_ic_state_flags;
     assign debug_memsubsys_m0_ddr3_resp_valid = u_dut.gen_mem_subsys.u_mem_subsys.m0_ddr3_resp_valid_r;
     assign debug_memsubsys_m0_ddr3_resp_data = u_dut.gen_mem_subsys.u_mem_subsys.m0_ddr3_resp_data_r;
     assign debug_memsubsys_m0_ddr3_resp_last = u_dut.gen_mem_subsys.u_mem_subsys.m0_ddr3_resp_last_r;

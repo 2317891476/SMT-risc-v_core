@@ -35,6 +35,10 @@ unsigned long long Bench_Start_Instret, Bench_Stop_Instret;
 unsigned long long Bench_Total_Cycles, Bench_Total_Instret;
 unsigned long Bench_Ipc_X1000;
 
+#ifdef VERILATOR_MAINLINE
+#define VERILATOR_DHRYSTONE_FIXED_RUNS 10
+#endif
+
 int main (int argc, char **argv)
 {
   One_Fifty Int_1_Loc;
@@ -58,6 +62,9 @@ int main (int argc, char **argv)
   board_uart_putc('\n');
 
   Number_Of_Runs = NUMBER_OF_RUNS;
+#ifdef VERILATOR_MAINLINE
+  Number_Of_Runs = VERILATOR_DHRYSTONE_FIXED_RUNS;
+#endif
 
   Next_Ptr_Glob = (Rec_Pointer)alloca(sizeof(Rec_Type));
   Ptr_Glob = (Rec_Pointer)alloca(sizeof(Rec_Type));
@@ -137,14 +144,19 @@ int main (int argc, char **argv)
     Bench_Total_Instret = Bench_Stop_Instret - Bench_Start_Instret;
 
     if (User_Time < Too_Small_Time) {
+#ifdef VERILATOR_MAINLINE
+      Done = true;
+#else
       printf("Measured time too small to obtain meaningful results\n");
       Number_Of_Runs = Number_Of_Runs * 10;
       printf("\n");
+#endif
     } else {
       Done = true;
     }
   }
 
+#ifndef VERILATOR_MAINLINE
   debug_printf("Final values of the variables used in the benchmark:\n");
   debug_printf("\n");
   debug_printf("Int_Glob:            %d\n", Int_Glob);
@@ -194,10 +206,16 @@ int main (int argc, char **argv)
   debug_printf("Str_2_Loc:           %s\n", Str_2_Loc);
   debug_printf("        should be:   DHRYSTONE PROGRAM, 2'ND STRING\n");
   debug_printf("\n");
+#endif
 
+  instret_delta = Bench_Total_Instret;
+#ifdef VERILATOR_MAINLINE
+  Microseconds = 0;
+  Dhrystones_Per_Second = 0;
+#else
   Microseconds = ((User_Time / Number_Of_Runs) * Mic_secs_Per_Second) / HZ;
   Dhrystones_Per_Second = (HZ * Number_Of_Runs) / User_Time;
-  instret_delta = Bench_Total_Instret;
+#endif
   if (Bench_Total_Cycles != 0ULL) {
     Bench_Ipc_X1000 = (unsigned long)((instret_delta * 1000ULL) / Bench_Total_Cycles);
   } else {
@@ -207,9 +225,14 @@ int main (int argc, char **argv)
   printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
   printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
   printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
+#ifndef VERILATOR_MAINLINE
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
+#endif
   printf("DHRYSTONE DONE\n");
+#ifdef VERILATOR_MAINLINE
+  return 0;
+#else
   for (;;) {
     board_delay_ms(250);
     printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
@@ -219,6 +242,7 @@ int main (int argc, char **argv)
     printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
     printf("DHRYSTONE DONE\n");
   }
+#endif
 }
 
 Proc_1 (Ptr_Val_Par)

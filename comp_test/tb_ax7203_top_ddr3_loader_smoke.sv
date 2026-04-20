@@ -26,6 +26,8 @@ module tb_ax7203_top_ddr3_loader_smoke;
 
 `ifdef TB_UART_BIT_NS
     localparam integer UART_BIT_NS = `TB_UART_BIT_NS;
+`elsif FULL_GATE_FAST_UART
+    localparam integer UART_BIT_NS = 160;
 `else
     localparam integer UART_BIT_NS = 8680;
 `endif
@@ -64,6 +66,21 @@ module tb_ax7203_top_ddr3_loader_smoke;
     localparam [7:0] LOADER_SUM_LOAD_OK = 8'h08;
     localparam [7:0] LOADER_SUM_JUMP = 8'h10;
     localparam [7:0] LOADER_SUM_ANY_BAD = 8'h80;
+`ifdef FULL_GATE_FAST_UART
+    localparam integer DEFAULT_FAST_UART_INJECT = 0;
+    localparam integer DEFAULT_INITIAL_HEADER_WAIT_BITS = 8;
+    localparam integer DEFAULT_INITIAL_PAYLOAD_WAIT_BITS = 8;
+    localparam integer DEFAULT_INTER_U32_GAP_BITS = 2;
+    localparam integer DEFAULT_CHUNK_ACK_GAP_BITS = 1;
+    localparam integer DEFAULT_BLOCK_DONE_GAP_BITS = 1;
+`else
+    localparam integer DEFAULT_FAST_UART_INJECT = 0;
+    localparam integer DEFAULT_INITIAL_HEADER_WAIT_BITS = 80;
+    localparam integer DEFAULT_INITIAL_PAYLOAD_WAIT_BITS = 80;
+    localparam integer DEFAULT_INTER_U32_GAP_BITS = 64;
+    localparam integer DEFAULT_CHUNK_ACK_GAP_BITS = 4;
+    localparam integer DEFAULT_BLOCK_DONE_GAP_BITS = 8;
+`endif
 
     reg [7:0] payload [0:MAX_PAYLOAD_BYTES-1];
     integer payload_size;
@@ -348,12 +365,12 @@ module tb_ax7203_top_ddr3_loader_smoke;
         if (!$value$plusargs("PAYLOAD_SIZE=%d", payload_size)) payload_size = 0;
         if (!$value$plusargs("PAYLOAD_CHECKSUM=%d", payload_checksum)) payload_checksum = 0;
         if (!$value$plusargs("EXPECT_EXEC_PASS=%d", expect_exec_pass)) expect_exec_pass = 1;
-        if (!$value$plusargs("FAST_UART_INJECT=%d", fast_uart_inject)) fast_uart_inject = 0;
-        if (!$value$plusargs("INITIAL_HEADER_WAIT_BITS=%d", initial_header_wait_bits)) initial_header_wait_bits = 80;
-        if (!$value$plusargs("INITIAL_PAYLOAD_WAIT_BITS=%d", initial_payload_wait_bits)) initial_payload_wait_bits = 80;
-        if (!$value$plusargs("INTER_U32_GAP_BITS=%d", inter_u32_gap_bits)) inter_u32_gap_bits = 64;
-        if (!$value$plusargs("CHUNK_ACK_GAP_BITS=%d", chunk_ack_gap_bits)) chunk_ack_gap_bits = 4;
-        if (!$value$plusargs("BLOCK_DONE_GAP_BITS=%d", block_done_gap_bits)) block_done_gap_bits = 8;
+        if (!$value$plusargs("FAST_UART_INJECT=%d", fast_uart_inject)) fast_uart_inject = DEFAULT_FAST_UART_INJECT;
+        if (!$value$plusargs("INITIAL_HEADER_WAIT_BITS=%d", initial_header_wait_bits)) initial_header_wait_bits = DEFAULT_INITIAL_HEADER_WAIT_BITS;
+        if (!$value$plusargs("INITIAL_PAYLOAD_WAIT_BITS=%d", initial_payload_wait_bits)) initial_payload_wait_bits = DEFAULT_INITIAL_PAYLOAD_WAIT_BITS;
+        if (!$value$plusargs("INTER_U32_GAP_BITS=%d", inter_u32_gap_bits)) inter_u32_gap_bits = DEFAULT_INTER_U32_GAP_BITS;
+        if (!$value$plusargs("CHUNK_ACK_GAP_BITS=%d", chunk_ack_gap_bits)) chunk_ack_gap_bits = DEFAULT_CHUNK_ACK_GAP_BITS;
+        if (!$value$plusargs("BLOCK_DONE_GAP_BITS=%d", block_done_gap_bits)) block_done_gap_bits = DEFAULT_BLOCK_DONE_GAP_BITS;
         if (!$value$plusargs("FULL_GATE_PREFIX_ENABLE=%d", full_gate_prefix_enable)) full_gate_prefix_enable = 0;
         if (!$value$plusargs("FULL_GATE_PREFIX_BLOCK_ACK_TARGET=%d", full_gate_prefix_block_ack_target)) full_gate_prefix_block_ack_target = 16;
         if (payload_size <= 0 || payload_size > MAX_PAYLOAD_BYTES) begin

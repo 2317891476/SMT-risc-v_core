@@ -203,7 +203,7 @@ wire       flush_any;
 wire       pipe0_br_ctrl;
 wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
-wire [15:0] pipe0_br_order_id;
+wire [`METADATA_ORDER_ID_W-1:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
 reg        pipe0_br_complete_hold_r;
 wire       scoreboard_br_complete;
@@ -304,9 +304,9 @@ wire [7:0] flush_new_epoch_t1 = epoch_t1 + 8'd1;
 
 // Order ID counters: increment on dispatch accept per thread, 16-bit wide
 // These will be updated in the always block after scoreboard signals are defined
-reg [15:0] order_id_t0, order_id_t1;
+reg [`METADATA_ORDER_ID_W-1:0] order_id_t0, order_id_t1;
 reg        mret_pending_t0, mret_pending_t1;
-reg [15:0] mret_pending_order_t0, mret_pending_order_t1;
+reg [`METADATA_ORDER_ID_W-1:0] mret_pending_order_t0, mret_pending_order_t1;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -350,7 +350,7 @@ wire [4:0]  rob_commit0_rd, rob_commit1_rd;
 wire [4:0]  rob_commit0_tag, rob_commit1_tag;
 wire        rob_commit0_has_result, rob_commit1_has_result;
 wire [31:0] rob_commit0_data, rob_commit1_data;
-wire [15:0] rob_commit0_order_id, rob_commit1_order_id;
+wire [`METADATA_ORDER_ID_W-1:0] rob_commit0_order_id, rob_commit1_order_id;
 wire        rob_commit0_is_store, rob_commit1_is_store;
 wire        rob_commit0_is_mret,  rob_commit1_is_mret;
 wire [1:0]  rob_instr_retired;
@@ -612,11 +612,11 @@ wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall && !fl_disp_stal
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
 // disp0 gets current order_id for its thread
-wire [15:0] disp0_order_id = (dec0_tid == 1'b0) ? order_id_t0 : order_id_t1;
+wire [`METADATA_ORDER_ID_W-1:0] disp0_order_id = (dec0_tid == 1'b0) ? order_id_t0 : order_id_t1;
 // disp1 gets current+1 if same thread as disp0, otherwise current for its thread
-wire [15:0] disp1_order_id = (dec1_tid == 1'b0) ? 
-    ((dec0_tid == 1'b0 && disp0_accepted) ? order_id_t0 + 16'd1 : order_id_t0) :
-    ((dec0_tid == 1'b1 && disp0_accepted) ? order_id_t1 + 16'd1 : order_id_t1);
+wire [`METADATA_ORDER_ID_W-1:0] disp1_order_id = (dec1_tid == 1'b0) ? 
+    ((dec0_tid == 1'b0 && disp0_accepted) ? order_id_t0 + 1'b1 : order_id_t0) :
+    ((dec0_tid == 1'b1 && disp0_accepted) ? order_id_t1 + 1'b1 : order_id_t1);
 wire [7:0] disp0_epoch = (dec0_tid == 1'b0) ? epoch_t0 : epoch_t1;
 wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
 
@@ -1454,8 +1454,8 @@ always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         mret_pending_t0       <= 1'b0;
         mret_pending_t1       <= 1'b0;
-        mret_pending_order_t0 <= 16'd0;
-        mret_pending_order_t1 <= 16'd0;
+        mret_pending_order_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+        mret_pending_order_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         if (combined_flush_any) begin
             if (!flush_is_order_based) begin
@@ -1582,23 +1582,23 @@ assign iss0_rocc_funct7 = iss0_tag_hits_disp0 ? dec0_rocc_funct7 :
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        order_id_t0 <= 16'd0;
-        order_id_t1 <= 16'd0;
+        order_id_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+        order_id_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         // Increment order_id on dispatch accept per thread
         // When dual-dispatch to same thread, increment by 2; otherwise by 1
         
         // Thread 0: count accepts from disp0 and disp1
         if ((disp0_accepted && dec0_tid == 1'b0) && (disp1_accepted && dec1_tid == 1'b0))
-            order_id_t0 <= order_id_t0 + 16'd2;  // Dual-dispatch to T0
+            order_id_t0 <= order_id_t0 + 2'd2;  // Dual-dispatch to T0
         else if ((disp0_accepted && dec0_tid == 1'b0) || (disp1_accepted && dec1_tid == 1'b0))
-            order_id_t0 <= order_id_t0 + 16'd1;  // Single dispatch to T0
+            order_id_t0 <= order_id_t0 + 1'b1;  // Single dispatch to T0
             
         // Thread 1: count accepts from disp0 and disp1
         if ((disp0_accepted && dec0_tid == 1'b1) && (disp1_accepted && dec1_tid == 1'b1))
-            order_id_t1 <= order_id_t1 + 16'd2;  // Dual-dispatch to T1
+            order_id_t1 <= order_id_t1 + 2'd2;  // Dual-dispatch to T1
         else if ((disp0_accepted && dec0_tid == 1'b1) || (disp1_accepted && dec1_tid == 1'b1))
-            order_id_t1 <= order_id_t1 + 16'd1;  // Single dispatch to T1
+            order_id_t1 <= order_id_t1 + 1'b1;  // Single dispatch to T1
     end
 end
 
@@ -1833,7 +1833,7 @@ wire        p1_mem_req_regs_write;
 wire [2:0]  p1_mem_req_fu;
 wire        p1_mem_req_mem2reg;
 wire [0:0]  p1_mem_req_tid;
-wire [15:0] p1_mem_req_order_id;
+wire [`METADATA_ORDER_ID_W-1:0] p1_mem_req_order_id;
 wire [7:0]  p1_mem_req_epoch;
 
 wire        p1_mul_valid;
@@ -2003,7 +2003,7 @@ wire [7:0]  legacy_debug_uart_tx_byte;
 // LSU Shell - integrates Store Buffer with forwarding
 lsu_shell #(
     .TAG_W        (5),
-    .ORDER_ID_W   (16),
+    .ORDER_ID_W   (`METADATA_ORDER_ID_W),
     .EPOCH_W      (8)
 ) u_lsu_shell (
     .clk                (clk),

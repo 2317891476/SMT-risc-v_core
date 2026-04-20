@@ -175,6 +175,9 @@ class TestRunner:
         """Compile the basic testbench using explicit file arguments."""
         out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
         out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"tb_{test_name}.out"
+        if out_path.exists():
+            out_path.unlink()
 
         rtl_files = sorted((PROJECT_ROOT / "rtl").glob("*.v"))
         test_id = BASIC_TEST_IDS.get(test_name, 0)
@@ -195,7 +198,7 @@ class TestRunner:
             "-s",
             "tb",
             "-o",
-            str(out_dir / "tb_test.out"),
+            str(out_path),
             "-I",
             str(PROJECT_ROOT / "rtl"),
             *[str(path) for path in rtl_files],
@@ -331,7 +334,7 @@ class TestRunner:
                 continue
             
             # Run simulation
-            run_cmd = ["vvp", str(COMP_TEST_DIR / "out_iverilog" / "bin" / "tb_test.out")]
+            run_cmd = ["vvp", str(COMP_TEST_DIR / "out_iverilog" / "bin" / f"tb_{test_name}.out")]
             ret, out, err = self.run_command(run_cmd, cwd=COMP_TEST_DIR, timeout=60)
 
             result, detail = self.evaluate_basic_result(out, err, ret)

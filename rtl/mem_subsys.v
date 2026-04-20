@@ -221,8 +221,13 @@ wire        m0_l2_resp_last;
 // M1 ready: MMIO is immediate except for UART TX backpressure and the optional
 // Step2-only beacon event mailbox.
 wire       debug_beacon_evt_ready_w;
+`ifdef VERILATOR_MAINLINE
+wire       uart_tx_ready_w = uart_tx_enable_r;
+`else
+wire       uart_tx_ready_w = uart_tx_enable_r && !uart_pending_valid_r;
+`endif
 wire m1_mmio_ready = addr_is_uart_tx_m1 && m1_req_write
-                   ? (uart_tx_enable_r && !uart_pending_valid_r)
+                   ? uart_tx_ready_w
                    : (addr_is_debug_beacon_evt_m1 && m1_req_write
                       ? debug_beacon_evt_ready_w
                       : 1'b1);
@@ -402,10 +407,14 @@ assign ext_external_irq = plic_ext_irq;
 // ═════════════════════════════════════════════════════════════════════════════
 
 `ifdef FPGA_MODE
-    `ifndef FPGA_UART_CLK_DIV
-        `define FPGA_UART_CLK_DIV 174
-    `endif
+    `ifdef FULL_GATE_FAST_UART
+localparam integer UART_CLK_DIV = 4;
+    `else
+        `ifndef FPGA_UART_CLK_DIV
+            `define FPGA_UART_CLK_DIV 174
+        `endif
 localparam integer UART_CLK_DIV = `FPGA_UART_CLK_DIV;
+    `endif
 `else
 localparam integer UART_CLK_DIV = 4;
 `endif
@@ -433,6 +442,10 @@ reg [7:0]  debug_uart_status_load_count_r;
 reg [7:0]  debug_uart_tx_store_count_r;
 reg [7:0]  debug_uart_tx_write_count_r;
 reg        debug_uart_tx_write_seen_r;
+`ifdef VERILATOR_MAINLINE
+reg        verilator_uart_tx_fire_r;
+reg [7:0]  verilator_uart_tx_byte_r;
+`endif
 wire       uart_busy;
 wire       uart_status_busy;
 wire       uart_rx_byte_valid;
@@ -456,11 +469,16 @@ reg        uart_rx_mmio_resp_valid_r;
 reg [31:0] uart_rx_mmio_resp_data_r;
 `endif
 
-assign uart_status_busy = uart_busy || uart_pending_valid_r || uart_tx_launch_valid_r || uart_tx_start_r
+assign uart_status_busy =
+`ifdef VERILATOR_MAINLINE
+                        1'b0
+`else
+                        uart_busy || uart_pending_valid_r || uart_tx_launch_valid_r || uart_tx_start_r
 `ifdef AX7203_STEP2_BEACON_DEBUG
                         || debug_beacon_byte_valid_w
 `elsif AX7203_DDR3_LOADER_BEACON_DEBUG
                         || debug_beacon_byte_valid_w
+`endif
 `endif
                         ;
 wire       uart_rx_valid_w = (uart_rx_count_r != 0);
@@ -505,7 +523,7 @@ assign debug_beacon_evt_arg_w = m1_req_wdata[15:8];
 wire uart_rx_fifo_clear = uart_ctrl_write && (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4]);
 wire uart_rx_read_fire = uart_rx_read && uart_rx_valid_w;
 wire uart_rx_push_fire = uart_rx_byte_valid && (!uart_rx_fifo_full_w || uart_rx_read_fire);
-wire uart_store_accept = uart_tx_write && uart_tx_enable_r && !uart_pending_valid_r;
+wire uart_store_accept = uart_tx_write && uart_tx_ready_w;
 assign debug_beacon_evt_fire = debug_beacon_evt_write && m1_req_ready;
 assign debug_beacon_byte_ready_w = uart_tx_enable_r && !uart_busy && !uart_pending_valid_r && !uart_tx_launch_valid_r && !uart_store_accept;
 assign uart_stage_pending_byte = uart_pending_valid_r && !uart_busy && !uart_tx_launch_valid_r;
@@ -521,8 +539,13 @@ wire [7:0] debug_uart_flags = {
     m1_req_valid,
     m1_req_ready
 };
+`ifdef VERILATOR_MAINLINE
+assign debug_uart_tx_byte_valid = verilator_uart_tx_fire_r || uart_tx_start_r;
+assign debug_uart_tx_byte = verilator_uart_tx_fire_r ? verilator_uart_tx_byte_r : uart_tx_data_r;
+`else
 assign debug_uart_tx_byte_valid = uart_tx_start_r;
 assign debug_uart_tx_byte = uart_tx_data_r;
+`endif
 assign debug_uart_status_load_count = debug_uart_status_load_count_r;
 assign debug_uart_tx_store_count = debug_uart_tx_store_count_r;
 
@@ -608,6 +631,10 @@ always @(posedge clk or negedge rstn) begin
         debug_uart_tx_store_count_r <= 8'd0;
         debug_uart_tx_write_count_r <= 8'd0;
         debug_uart_tx_write_seen_r <= 1'b0;
+`ifdef VERILATOR_MAINLINE
+        verilator_uart_tx_fire_r <= 1'b0;
+        verilator_uart_tx_byte_r <= 8'd0;
+`endif
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
         uart_rx_mmio_resp_valid_r <= 1'b0;
         uart_rx_mmio_resp_data_r <= 32'd0;
@@ -615,14 +642,22 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         uart_tx_start_r <= 1'b0;
         debug_uart_tx_write_seen_r <= uart_tx_write;
+`ifdef VERILATOR_MAINLINE
+        verilator_uart_tx_fire_r <= 1'b0;
+`endif
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
         uart_rx_mmio_resp_valid_r <= 1'b0;
 `endif
 
         // TX: accept store into pending register
         if (uart_store_accept) begin
+`ifdef VERILATOR_MAINLINE
+            verilator_uart_tx_fire_r <= 1'b1;
+            verilator_uart_tx_byte_r <= uart_write_byte;
+`else
             uart_pending_byte_r  <= uart_write_byte;
             uart_pending_valid_r <= 1'b1;
+`endif
             debug_uart_tx_store_count_r <= debug_uart_tx_store_count_r + 8'd1;
         end
 

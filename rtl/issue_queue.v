@@ -336,8 +336,15 @@ module issue_queue #(
                                  (e_tid[ci] == 1'b1 && issue_inhibit_t1);
                 wire is_load_no_store = CHECK_LOAD_STORE_ORDER &&
                                         e_mem_read[ci] && !e_mem_write[ci];
+                wire is_store_ordered = CHECK_LOAD_STORE_ORDER &&
+                                        e_mem_write[ci];
                 wire older_store_blocks =
                     is_load_no_store && (
+                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_ord_t0 < e_order_id[ci])) :
+                                              (any_store_t1 && (oldest_store_ord_t1 < e_order_id[ci]))
+                    );
+                wire older_store_blocks_store =
+                    is_store_ordered && (
                         (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_ord_t0 < e_order_id[ci])) :
                                               (any_store_t1 && (oldest_store_ord_t1 < e_order_id[ci]))
                     );
@@ -349,6 +356,7 @@ module issue_queue #(
                 wire eligible = e_valid[ci] && !e_issued[ci] && e_ready[ci]
                                 && !e_just_woke[ci] && !inhibited
                                 && !older_store_blocks
+                                && !older_store_blocks_store
                                 && !older_store_blocks_mret;
                 assign cand[ci] = {eligible, e_seq[ci], ci[IQ_IDX_W-1:0]};
             end else begin : pad_entry

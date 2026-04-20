@@ -940,23 +940,25 @@ python fpga/scripts/run_verilator_mainline.py --mode loader-semantic --benchmark
 - `comp_test/verilator/verilator_main.cpp`
 - `rom/test_verilator_ddr3_preload.s`
 
-**当前状态（2026-04-19）**
+**当前状态（2026-04-20）**
 
 | 项目 | 当前结果 | 证据 |
 |------|------|------|
 | `preload --build-only` | ✅ 通过 | `build/verilator/mainline/preload/dhrystone_runs1/` |
 | `loader-semantic --build-only` | ✅ 通过 | `build/verilator/mainline/loader-semantic/dhrystone_runs1/` |
-| `preload --runs 1` | ⚠️ 环境已跑通，但停在 benchmark 早期路径 | `build/verilator/mainline/preload/dhrystone_runs1/summary.txt` |
+| `preload --runs 1` | ✅ 通过，`ExitReason=done` | `build/verilator/mainline/preload/dhrystone_runs1/summary.txt` |
+| `preload --runs 5000` | ✅ 通过，Verilator 下固定 `EffectiveRuns=10` | `build/verilator/mainline/preload/dhrystone_runs5000/summary.txt` |
 | `loader-semantic --runs 1` | ⚠️ byte-level 注入骨架已接通，但尚未完成 jump | `build/verilator/mainline/loader-semantic/dhrystone_runs1/summary.txt` |
 
 **当前 `preload` 主线结论**
 
 - 已确认 `direct preload` 能进入 DDR3 payload，`EntryReached=True`
-- 当前一次 smoke 已退休 `63,000` 条指令，`Cycles=313,496`，`IPCx1000=200`
+- `runs=1` 与 `runs=5000` 当前都稳定结束于 `ExitReason=done`
+- 当前 Verilator 下固定采用 `EffectiveRuns=10`，目标是让第二环境稳定走完 benchmark 完成路径，而不是在 Verilator 中复刻板级自校准跑分
+- 当前一组典型结果为：`Cycles=218,406`、`InstRetired=41,880`、`IPCx1000=191`
+- `BenchmarkStartSeen=True`、`BenchmarkDoneSeen=True`
 - `thread1` 已按 Verilator preload 专用路径固定 parked 到 `0x00000800`
-- 当前 UART 仅输出 `0\n1\n`，尚未到 `DHRYSTONE START`
-- 当前停滞点落在 `thread0` 的 benchmark 早期执行路径，最近 PC 为 `0x80000D64`
-- 因此当前 Verilator 环境的主要阻塞已经不是“环境起不来”或“高地址 fetch 不通”，而是**benchmark 进入 `main` 早期后的运行期停滞**
+- 因此当前 Verilator 第二环境的主路径已经从“复现停滞”推进到“稳定执行并走完 Dhrystone 完成路径”
 
 **当前 `loader-semantic` 结论**
 
@@ -971,7 +973,7 @@ python fpga/scripts/run_verilator_mainline.py --mode loader-semantic --benchmark
 - `build/verilator/mainline/preload/dhrystone_runs1/uart.log`
 - `build/verilator/mainline/loader-semantic/dhrystone_runs1/summary.txt`
 
-> **说明**: 这套 Verilator 环境当前已经足够承担“高速复现 benchmark 主线停滞”的任务，但它**不是** §13.3 板级主基线的签核依据，也不代表 Dhrystone 已经重新上板通过。
+> **说明**: 这套 Verilator 环境当前已经足够承担“高速验证 benchmark 主线路径、稳定输出 `DHRYSTONE DONE`”的任务，但它**不是** §13.3 板级主基线的签核依据，也不代表 DDR3 loader / FPGA 板测主线已经重新通过。
 
 ### 13.6 历史/辅助自动板测入口（归档）
 
@@ -1209,7 +1211,7 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 > **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前 `--bridge-audit-step2-only` 辅助支线已经通过 beacon 化稳定住自动板测，最新 25MHz 辅助 bitstream `BuildID=0x69E39477` 的综合/实现/JTAG/10 秒板测都通过。但这仍然只是 DDR3 bridge 的辅助定位支线，不等价于 Dhrystone 主线已经重新上板通过。
 
-> **补充（2026-04-19）**: 当前已新增一套 WSL Verilator + mock memory 高速环境，见 §13.5.1。它已经能在 `preload` 模式下把 Dhrystone 主线推进到 payload 内部并稳定复现停滞，但当前只输出 `0\n1\n`，尚未到 `DHRYSTONE START`；因此它说明“主线问题已压缩到 benchmark 早期运行期 bug”，但同样**不等价于板级 Dhrystone 主线已恢复通过**。
+> **补充（2026-04-20）**: 当前 WSL Verilator + mock memory 高速环境（见 §13.5.1）已经能在 `preload` 模式下稳定跑完 Dhrystone，并看到 `DHRYSTONE DONE`；Verilator 主线 gate 已恢复为绿色。但这只说明“benchmark 主线在第二环境下可稳定完成”，**不等价于 DDR3 loader / FPGA 板测主线已恢复通过**。
 
 **最新相关状态（2026-04-18）**
 
@@ -1220,12 +1222,35 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 | Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E39477`, `WNS=+0.522ns`, `WHS=+0.030ns` |
 | Step2-only 脚本化板测 | ✅ | Beacon 抓包稳定通过，`summary_mask=0x1F`, `any_bad=0` |
 
+**当前 DDR3 loader 主线最新状态（2026-04-20）**
+
+| 项目 | 当前状态 | 说明 |
+|------|------|------|
+| Verilator preload smoke | ✅ | `runs=1/5000` 都已 `ExitReason=done`，并看到 `DHRYSTONE DONE` |
+| `loader_quick_sim` | ✅ | tiny exec gate 通过 |
+| `loader_full_payload_prefix1_sim` | ❌ | 当前默认阻塞 gate 仍未通过；已到 `READY + LOAD_START`，但还没拿到首个 `64B` block ACK |
+| Vivado synth / impl / bitstream / board smoke | ⛔ 未继续 | 当前仍被 `loader_full_payload_prefix1_sim` 阻塞，未越过 gate |
+
 **当前 DDR3 loader 主线仿真 gate 语义**
 
 - `loader_quick_sim`：完整 tiny exec gate，仍要求 `READY + LOAD_START + READ_OK + LOAD_OK + JUMP + SUMMARY(mask ok) + DDR3 EXEC PASS`
-- `loader_full_payload_sim`：真实 Dhrystone payload 的 **prefix16 仿真 gate**
-- `prefix16` 固定只要求跨过前 `16` 个 `64B` block，覆盖历史第 `13` 个 block 的故障窗口；不再要求完整 payload、readback、`LOAD_OK/JUMP` 或 benchmark 执行
-- synth / impl / bitstream / board smoke 仍在 `quick + full-prefix` 两个仿真 gate 之后执行，这不代表板级验收放宽
+- `loader_full_payload_prefix1_sim`：真实 Dhrystone payload 的 **prefix1** 默认阻塞 gate，只要求拿到首个 `64B` block ACK
+- `loader_full_payload_prefix4_sim`：真实 Dhrystone payload 的 **prefix4** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行
+- `loader_full_payload_long_sim`：真实 Dhrystone payload 的 **prefix16** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行，用于长会话检查
+- full-payload sim 在 `FULL_GATE_FAST_UART` profile 下压缩 UART 物理时序，但保持 UART/loader 协议语义；不再依赖层次 `force`
+- synth / impl / bitstream / board smoke 现在只在 `quick + prefix1` 两个阻塞 gate 之后执行；prefix4/prefix16 只作为可选长会话检查
+
+**当前 `loader_full_payload_prefix1_sim` 卡点**
+
+- 当前不是 `RX_OVERRUN`，也不是 header 阶段协议损坏
+- 最新失败日志显示：
+  - `ready=1`
+  - `load_start=1`
+  - `payload_idx=44`
+  - `block_ack=0`
+  - `beacon_block_ack=0`
+  - `tube=0x22`
+- 这说明当前 Icarus full-payload gate 的真实阻塞点在**首个 block ACK 之前的 chunk 级推进成本**，而不是 `prefix2/prefix4` 目标数本身
 
 **板测基础设施**
 

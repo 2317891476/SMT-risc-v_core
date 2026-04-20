@@ -31,7 +31,7 @@
 
 module lsu_shell #(
     parameter TAG_W = 5,
-    parameter ORDER_ID_W = 16,
+    parameter ORDER_ID_W = `METADATA_ORDER_ID_W,
     parameter EPOCH_W = 8
 )(
     input  wire               clk,

@@ -22,7 +22,7 @@
 module store_buffer #(
     parameter SB_DEPTH      = 4,        // Entries per thread (power of 2)
     parameter SB_IDX_W      = 2,        // log2(SB_DEPTH)
-    parameter ORDER_ID_W    = 16,       // Match METADATA_ORDER_ID_W
+    parameter ORDER_ID_W    = `METADATA_ORDER_ID_W, // Match METADATA_ORDER_ID_W
     parameter EPOCH_W       = 8,        // Match METADATA_EPOCH_W
     parameter NUM_THREAD    = 2
 )(
@@ -116,10 +116,16 @@ wire sb_full_t1  = (sb_count[1] >= SB_DEPTH);
 wire sb_empty_t0 = (sb_count[0] == 0);
 wire sb_empty_t1 = (sb_count[1] == 0);
 
-// Accept new stores if not full for that thread
+// Accept new stores only while one slot remains reserved for the oldest
+// not-yet-issued store. This buffer drains in FIFO issue order but only grants
+// drain permission at ROB commit time; letting younger stores fill every slot
+// can strand an older ROB-head store outside the buffer forever.
+wire sb_issue_full_t0 = (sb_count[0] >= (SB_DEPTH - 1));
+wire sb_issue_full_t1 = (sb_count[1] >= (SB_DEPTH - 1));
+
 // Note: We always indicate capacity status regardless of store_req_valid
-// to avoid combinational loops with the LSU shell
-assign store_req_accept = store_tid ? !sb_full_t1 : !sb_full_t0;
+// to avoid combinational loops with the LSU shell.
+assign store_req_accept = store_tid ? !sb_issue_full_t1 : !sb_issue_full_t0;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Drain Logic - Write oldest committed store to memory

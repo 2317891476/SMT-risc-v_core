@@ -156,7 +156,7 @@
 
 // ─── ROB Lite Metadata Constants ────────────────────────────────────────────
 `define METADATA_EPOCH_W   8
-`define METADATA_ORDER_ID_W 16
+`define METADATA_ORDER_ID_W 24
 
 // ════════════════════════════════════════════════════════════════════════════
 // MMIO Address Map Constants

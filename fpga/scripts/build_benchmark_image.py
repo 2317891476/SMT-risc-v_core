@@ -226,6 +226,11 @@ def main() -> int:
     parser.add_argument("--coremark-total-data-size", type=int, default=1200)
     parser.add_argument("--startup-delay-ms", type=int, default=0)
     parser.add_argument(
+        "--verilator-mainline",
+        action="store_true",
+        help="Build the benchmark image with Verilator-only runtime fast paths enabled.",
+    )
+    parser.add_argument(
         "--ddr3-xip",
         action="store_true",
         help="Link the benchmark for execution from DDR3 at 0x80000000.",
@@ -268,6 +273,8 @@ def main() -> int:
     if args.startup_delay_ms < 0:
         raise SystemExit(f"startup delay must be non-negative, got {args.startup_delay_ms}")
     cflags.append(f"-DAX7203_BENCH_STARTUP_DELAY_MS={args.startup_delay_ms}")
+    if args.verilator_mainline:
+        cflags.append("-DVERILATOR_MAINLINE=1")
     if args.ddr3_xip:
         cflags.append("-DAX7203_CLEAR_BSS=1")
 

@@ -88,7 +88,10 @@ UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
 UART_MAINLINE_BLOCK_GAP_S = 0.080
 UART_MAINLINE_BLOCK_RETRY_GAP_S = 1.000
 UART_MAINLINE_BLOCK_RETRY_LIMIT = 10
-LOADER_FULL_GATE_PREFIX_BLOCKS = 16
+FULL_GATE_FAST_UART_CLK_DIV = 4
+LOADER_FULL_PREFIX1_BLOCKS = 1
+LOADER_FULL_PREFIX4_BLOCKS = 4
+LOADER_FULL_PREFIX16_BLOCKS = 16
 USE_REGISTERED_UART_RXDATA = True
 BLOCK_CHECKSUM_BYTES = 64
 TRANSPORT_CASE_SIZES = [16, 64, 256, 1024]
@@ -354,6 +357,23 @@ def write_payload_hex(binary: Path) -> None:
     write_hex_bytes(PAYLOAD_HEX, binary.read_bytes())
 
 
+def loader_full_gate_profile(block_target: int, core_clk_mhz: float) -> dict[str, int]:
+    prefix_payload_size = block_target * UART_BLOCK_CHECKSUM_BYTES
+    tb_uart_bit_ns = max(1, round(FULL_GATE_FAST_UART_CLK_DIV * (1000.0 / core_clk_mhz)))
+    return {
+        "uart_clk_div": FULL_GATE_FAST_UART_CLK_DIV,
+        "fast_uart_profile": 1,
+        "fast_uart_inject": 0,
+        "initial_header_wait_bits": 384,
+        "initial_payload_wait_bits": 128,
+        "inter_u32_gap_bits": 96,
+        "chunk_ack_gap_bits": 16,
+        "block_done_gap_bits": 16,
+        "tb_timeout_ns": max(24_000_000, min(int((prefix_payload_size + 512) * 14 * tb_uart_bit_ns * 8), 120_000_000)),
+        "sim_timeout_s": 840,
+    }
+
+
 def run_loader_top_sim(
     logs_dir: Path,
     manifest: dict[str, object],
@@ -363,10 +383,19 @@ def run_loader_top_sim(
     core_clk_mhz: float,
     expect_exec_pass: bool,
     full_gate_prefix_enable: bool = False,
-    full_gate_prefix_block_ack_target: int = LOADER_FULL_GATE_PREFIX_BLOCKS,
+    full_gate_prefix_block_ack_target: int = LOADER_FULL_PREFIX1_BLOCKS,
     fetch_debug: bool = False,
     uart_baud: int = 115200,
     log_name: str = "05_run_loader_top_sim.log",
+    fast_uart_profile: bool = False,
+    fast_uart_inject: int | None = None,
+    initial_header_wait_bits: int | None = None,
+    initial_payload_wait_bits: int | None = None,
+    inter_u32_gap_bits: int | None = None,
+    chunk_ack_gap_bits: int | None = None,
+    block_done_gap_bits: int | None = None,
+    tb_timeout_ns: int | None = None,
+    sim_timeout_s: int | None = None,
 ) -> Path:
     write_payload_hex(Path(str(manifest["bin"])))
     run_logged(
@@ -392,35 +421,41 @@ def run_loader_top_sim(
     debug_defines = ["-DDDR3_FETCH_DEBUG=1", "-DDDR3_FETCH_PROBE_FAST=1"] if fetch_debug else []
     if fetch_debug or expect_exec_pass:
         sim_uart_clk_div = 4
-        fast_uart_inject = 0
-        initial_header_wait_bits = 80
-        initial_payload_wait_bits = 80
-        inter_u32_gap_bits = 64
-        chunk_ack_gap_bits = 4
-        block_done_gap_bits = 8
+        fast_uart_inject = 0 if fast_uart_inject is None else fast_uart_inject
+        initial_header_wait_bits = 80 if initial_header_wait_bits is None else initial_header_wait_bits
+        initial_payload_wait_bits = 80 if initial_payload_wait_bits is None else initial_payload_wait_bits
+        inter_u32_gap_bits = 64 if inter_u32_gap_bits is None else inter_u32_gap_bits
+        chunk_ack_gap_bits = 4 if chunk_ack_gap_bits is None else chunk_ack_gap_bits
+        block_done_gap_bits = 8 if block_done_gap_bits is None else block_done_gap_bits
     else:
-        sim_uart_clk_div = 4
-        fast_uart_inject = 1
-        initial_header_wait_bits = 8
-        initial_payload_wait_bits = 8
-        inter_u32_gap_bits = 2
-        chunk_ack_gap_bits = 1
-        block_done_gap_bits = 1
+        sim_uart_clk_div = FULL_GATE_FAST_UART_CLK_DIV if fast_uart_profile else 4
+        fast_uart_inject = 0 if fast_uart_inject is None else fast_uart_inject
+        initial_header_wait_bits = 8 if initial_header_wait_bits is None else initial_header_wait_bits
+        initial_payload_wait_bits = 8 if initial_payload_wait_bits is None else initial_payload_wait_bits
+        inter_u32_gap_bits = 2 if inter_u32_gap_bits is None else inter_u32_gap_bits
+        chunk_ack_gap_bits = 1 if chunk_ack_gap_bits is None else chunk_ack_gap_bits
+        block_done_gap_bits = 1 if block_done_gap_bits is None else block_done_gap_bits
     tb_uart_bit_ns = max(1, round(sim_uart_clk_div * (1000.0 / core_clk_mhz)))
     payload_size = int(manifest["size_bytes"])
     if expect_exec_pass:
-        tb_timeout_ns = max(5_000_000, int((payload_size + 512) * 14 * tb_uart_bit_ns * 6))
-        tb_timeout_ns = min(tb_timeout_ns, 20_000_000)
-        sim_timeout_s = 1200
+        if tb_timeout_ns is None:
+            tb_timeout_ns = max(5_000_000, int((payload_size + 512) * 14 * tb_uart_bit_ns * 6))
+            tb_timeout_ns = min(tb_timeout_ns, 20_000_000)
+        if sim_timeout_s is None:
+            sim_timeout_s = 1200
     elif full_gate_prefix_enable:
-        prefix_payload_size = min(payload_size, full_gate_prefix_block_ack_target * UART_BLOCK_CHECKSUM_BYTES)
-        tb_timeout_ns = max(12_000_000, int((prefix_payload_size + 512) * 14 * tb_uart_bit_ns * 4))
-        tb_timeout_ns = min(tb_timeout_ns, 60_000_000)
-        sim_timeout_s = 300
+        if tb_timeout_ns is None:
+            prefix_payload_size = min(payload_size, full_gate_prefix_block_ack_target * UART_BLOCK_CHECKSUM_BYTES)
+            tb_timeout_ns = max(12_000_000, int((prefix_payload_size + 512) * 14 * tb_uart_bit_ns * 4))
+            tb_timeout_ns = min(tb_timeout_ns, 60_000_000)
+        if sim_timeout_s is None:
+            sim_timeout_s = 300
     else:
-        tb_timeout_ns = max(40_000_000, int((payload_size + 1024) * 14 * tb_uart_bit_ns * 3))
-        tb_timeout_ns = min(tb_timeout_ns, 200_000_000)
-        sim_timeout_s = 1200
+        if tb_timeout_ns is None:
+            tb_timeout_ns = max(40_000_000, int((payload_size + 1024) * 14 * tb_uart_bit_ns * 3))
+            tb_timeout_ns = min(tb_timeout_ns, 200_000_000)
+        if sim_timeout_s is None:
+            sim_timeout_s = 1200
     compile_cmd = [
         which_required("iverilog"),
         "-g2012",
@@ -430,6 +465,7 @@ def run_loader_top_sim(
         "-DAX7203_DDR3_LOADER_BEACON_DEBUG=1",
         "-DL2_PASSTHROUGH=1",
         "-DTRANSPORT_UART_RXDATA_REG_TEST=1",
+        *(["-DFULL_GATE_FAST_UART=1"] if fast_uart_profile else []),
         *debug_defines,
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=1",
@@ -2297,6 +2333,7 @@ def main() -> int:
     parser.add_argument("--transport-byte-gap", type=int, default=6, help="Maximum extra idle bit-times inserted between bytes in the transport TB.")
     parser.add_argument("--transport-ack-mode", choices=("tight", "loose"), default="loose", help="ACK pacing style for transport-only disturbance cases.")
     parser.add_argument("--transport-seeds", type=int, default=3, help="Number of combo disturbance seeds to run for 1KB transport TB coverage.")
+    parser.add_argument("--run-loader-long-sim", action="store_true", help="Also run the non-blocking prefix16 loader full-payload simulation.")
     parser.add_argument("--skip-vivado", action="store_true", help="Stop after RTL/top simulation and payload build.")
     args = parser.parse_args()
 
@@ -2324,7 +2361,11 @@ def main() -> int:
     build_id = "N/A"
     sim_log = logs_dir / "not_run.log"
     loader_quick_sim_log = logs_dir / "not_run.log"
-    loader_full_sim_log = logs_dir / "not_run.log"
+    loader_full_prefix1_sim_log = logs_dir / "not_run.log"
+    loader_full_prefix4_sim_log = logs_dir / "not_run.log"
+    loader_full_long_sim_log = logs_dir / "not_run.log"
+    loader_full_prefix4_failure_detail = ""
+    loader_full_long_failure_detail = ""
     capture_file = (
         STEP2_ONLY_CAPTURE_FILE
         if args.bridge_audit_step2_only
@@ -2465,6 +2506,8 @@ def main() -> int:
                     "checksum32": int(quick_payload["checksum32"]),
                 }
                 current_stage = "loader_quick_sim"
+                loader_quick_sim_log = logs_dir / "loader_quick" / "05_run_loader_quick_sim.log"
+                sim_log = loader_quick_sim_log
                 loader_quick_sim_log = run_loader_top_sim(
                     logs_dir / "loader_quick",
                     quick_manifest,
@@ -2483,20 +2526,91 @@ def main() -> int:
                     runs=1,
                     stem="dhrystone_smoke",
                 )
-                current_stage = "loader_full_payload_sim"
-                loader_full_sim_log = run_loader_top_sim(
-                    logs_dir / "loader_full",
+                current_stage = "loader_full_payload_prefix1_sim"
+                prefix1_profile = loader_full_gate_profile(LOADER_FULL_PREFIX1_BLOCKS, args.core_clk_mhz)
+                loader_full_prefix1_sim_log = logs_dir / "loader_full_prefix1" / "06_run_loader_full_payload_prefix1_sim.log"
+                sim_log = loader_full_prefix1_sim_log
+                loader_full_prefix1_sim_log = run_loader_top_sim(
+                    logs_dir / "loader_full_prefix1",
                     smoke_manifest,
                     rs_depth=args.rs_depth,
                     fetch_buffer_depth=args.fetch_buffer_depth,
                     core_clk_mhz=args.core_clk_mhz,
                     expect_exec_pass=False,
                     full_gate_prefix_enable=True,
-                    full_gate_prefix_block_ack_target=LOADER_FULL_GATE_PREFIX_BLOCKS,
+                    full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX1_BLOCKS,
                     uart_baud=args.uart_baud,
-                    log_name="06_run_loader_full_payload_sim.log",
+                    log_name="06_run_loader_full_payload_prefix1_sim.log",
+                    fast_uart_profile=bool(prefix1_profile["fast_uart_profile"]),
+                    fast_uart_inject=prefix1_profile["fast_uart_inject"],
+                    initial_header_wait_bits=prefix1_profile["initial_header_wait_bits"],
+                    initial_payload_wait_bits=prefix1_profile["initial_payload_wait_bits"],
+                    inter_u32_gap_bits=prefix1_profile["inter_u32_gap_bits"],
+                    chunk_ack_gap_bits=prefix1_profile["chunk_ack_gap_bits"],
+                    block_done_gap_bits=prefix1_profile["block_done_gap_bits"],
+                    tb_timeout_ns=prefix1_profile["tb_timeout_ns"],
+                    sim_timeout_s=prefix1_profile["sim_timeout_s"],
                 )
-                sim_log = loader_full_sim_log
+                if args.run_loader_long_sim:
+                    prefix16_profile = loader_full_gate_profile(LOADER_FULL_PREFIX16_BLOCKS, args.core_clk_mhz)
+                    prefix4_profile = loader_full_gate_profile(LOADER_FULL_PREFIX4_BLOCKS, args.core_clk_mhz)
+                    loader_full_prefix4_sim_log = logs_dir / "loader_full_prefix4" / "07_run_loader_full_payload_prefix4_sim.log"
+                    current_stage = "loader_full_payload_prefix4_sim"
+                    loader_full_long_sim_log = logs_dir / "loader_full_long" / "08_run_loader_full_payload_long_sim.log"
+                    try:
+                        sim_log = loader_full_prefix4_sim_log
+                        loader_full_prefix4_sim_log = run_loader_top_sim(
+                            logs_dir / "loader_full_prefix4",
+                            smoke_manifest,
+                            rs_depth=args.rs_depth,
+                            fetch_buffer_depth=args.fetch_buffer_depth,
+                            core_clk_mhz=args.core_clk_mhz,
+                            expect_exec_pass=False,
+                            full_gate_prefix_enable=True,
+                            full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX4_BLOCKS,
+                            uart_baud=args.uart_baud,
+                            log_name="07_run_loader_full_payload_prefix4_sim.log",
+                            fast_uart_profile=bool(prefix4_profile["fast_uart_profile"]),
+                            fast_uart_inject=prefix4_profile["fast_uart_inject"],
+                            initial_header_wait_bits=prefix4_profile["initial_header_wait_bits"],
+                            initial_payload_wait_bits=prefix4_profile["initial_payload_wait_bits"],
+                            inter_u32_gap_bits=prefix4_profile["inter_u32_gap_bits"],
+                            chunk_ack_gap_bits=prefix4_profile["chunk_ack_gap_bits"],
+                            block_done_gap_bits=prefix4_profile["block_done_gap_bits"],
+                            tb_timeout_ns=prefix4_profile["tb_timeout_ns"],
+                            sim_timeout_s=prefix4_profile["sim_timeout_s"],
+                        )
+                    except Exception as prefix4_exc:  # noqa: BLE001
+                        loader_full_prefix4_failure_detail = str(prefix4_exc)
+                    try:
+                        current_stage = "loader_full_payload_long_sim"
+                        sim_log = loader_full_long_sim_log
+                        loader_full_long_sim_log = run_loader_top_sim(
+                            logs_dir / "loader_full_long",
+                            smoke_manifest,
+                            rs_depth=args.rs_depth,
+                            fetch_buffer_depth=args.fetch_buffer_depth,
+                            core_clk_mhz=args.core_clk_mhz,
+                            expect_exec_pass=False,
+                            full_gate_prefix_enable=True,
+                            full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX16_BLOCKS,
+                            uart_baud=args.uart_baud,
+                            log_name="08_run_loader_full_payload_long_sim.log",
+                            fast_uart_profile=bool(prefix16_profile["fast_uart_profile"]),
+                            fast_uart_inject=prefix16_profile["fast_uart_inject"],
+                            initial_header_wait_bits=prefix16_profile["initial_header_wait_bits"],
+                            initial_payload_wait_bits=prefix16_profile["initial_payload_wait_bits"],
+                            inter_u32_gap_bits=prefix16_profile["inter_u32_gap_bits"],
+                            chunk_ack_gap_bits=prefix16_profile["chunk_ack_gap_bits"],
+                            block_done_gap_bits=prefix16_profile["block_done_gap_bits"],
+                            tb_timeout_ns=prefix16_profile["tb_timeout_ns"],
+                            sim_timeout_s=prefix16_profile["sim_timeout_s"],
+                        )
+                    except Exception as long_exc:  # noqa: BLE001
+                        loader_full_long_failure_detail = str(long_exc)
+                    finally:
+                        current_stage = "loader_full_payload_prefix1_sim"
+                        sim_log = loader_full_prefix1_sim_log
                 current_stage = "build_dhrystone_baseline_payload"
                 baseline_manifest = (
                     smoke_manifest
@@ -2510,9 +2624,9 @@ def main() -> int:
                 )
                 manifest = baseline_manifest
                 if args.skip_vivado:
-                    uart_result = analyze_loader_sim_log(read_text(loader_full_sim_log))
-                    uart_result["decoded_log_path"] = str(loader_full_sim_log)
-                    capture_file = loader_full_sim_log
+                    uart_result = analyze_loader_sim_log(read_text(loader_full_prefix1_sim_log))
+                    uart_result["decoded_log_path"] = str(loader_full_prefix1_sim_log)
+                    capture_file = loader_full_prefix1_sim_log
 
         if not args.skip_vivado:
             vivado = which_required("vivado.bat", "vivado")
@@ -2700,9 +2814,19 @@ def main() -> int:
         if loader_quick_sim_log and loader_quick_sim_log.exists()
         else {}
     )
-    loader_full_sim_result = (
-        analyze_loader_sim_log(read_text(loader_full_sim_log))
-        if loader_full_sim_log and loader_full_sim_log.exists()
+    loader_full_prefix1_sim_result = (
+        analyze_loader_sim_log(read_text(loader_full_prefix1_sim_log))
+        if loader_full_prefix1_sim_log and loader_full_prefix1_sim_log.exists()
+        else {}
+    )
+    loader_full_prefix4_sim_result = (
+        analyze_loader_sim_log(read_text(loader_full_prefix4_sim_log))
+        if loader_full_prefix4_sim_log and loader_full_prefix4_sim_log.exists()
+        else {}
+    )
+    loader_full_long_sim_result = (
+        analyze_loader_sim_log(read_text(loader_full_long_sim_log))
+        if loader_full_long_sim_log and loader_full_long_sim_log.exists()
         else {}
     )
     fetch_probe = uart_result.get("fetch_probe", {}) if isinstance(uart_result.get("fetch_probe", {}), dict) else {}
@@ -2740,9 +2864,12 @@ def main() -> int:
         f"BuildID: {build_id}",
         f"TopSimLog: {sim_log}",
         f"LoaderQuickSimLog: {loader_quick_sim_log}",
-        f"LoaderFullPayloadSimLog: {loader_full_sim_log}",
-        "LoaderFullGateMode: prefix16",
-        f"LoaderFullGateTargetBlocks: {LOADER_FULL_GATE_PREFIX_BLOCKS}",
+        f"LoaderFullPrefix1SimLog: {loader_full_prefix1_sim_log}",
+        f"LoaderFullPrefix4SimLog: {loader_full_prefix4_sim_log}",
+        f"LoaderFullPayloadSimLog: {loader_full_prefix4_sim_log}",
+        f"LoaderFullLongSimLog: {loader_full_long_sim_log}",
+        "LoaderFullGateMode: prefix1",
+        f"LoaderFullGateTargetBlocks: {LOADER_FULL_PREFIX1_BLOCKS}",
         f"BenchmarkManifest: {manifest.get('bin', 'N/A')}",
         f"SmokeManifest: {smoke_manifest.get('bin', 'N/A')}",
         f"BaselineManifest: {baseline_manifest.get('bin', 'N/A')}",
@@ -2800,14 +2927,31 @@ def main() -> int:
         f"LoaderDroppedDuplicateFrames: {uart_result.get('loader_dropped_duplicate_frames', 0)}",
         f"LoaderBlockAckEvents: {uart_result.get('loader_block_ack_events', 0)}",
         f"LoaderBlockNackEvents: {uart_result.get('loader_block_nack_events', 0)}",
-        f"LoaderFullGateAckEvents: {loader_full_sim_result.get('block_ack_events', 0)}",
-        f"LoaderFullGateMaxAckBlock: {loader_full_sim_result.get('max_block_ack_arg', 'N/A')}",
-        f"LoaderFullGateNackEvents: {loader_full_sim_result.get('block_nack_events', 0)}",
-        f"LoaderFullGatePass: {loader_prefix_target_ok(loader_full_sim_result, LOADER_FULL_GATE_PREFIX_BLOCKS)}",
-        f"LoaderFullGateBadSeen: {loader_full_sim_result.get('bad_seen', False)}",
-        f"LoaderFullGateBadCode: {fmt_optional_hex(loader_full_sim_result.get('bad_code', 'N/A'))}",
-        f"LoaderFullGateBadBlock: {loader_full_sim_result.get('bad_block', 'N/A')}",
-        f"LoaderFullGateFirstBadEventOffset: {loader_full_sim_result.get('first_bad_event_offset', 'N/A')}",
+        f"LoaderFullPrefix1Pass: {loader_prefix_target_ok(loader_full_prefix1_sim_result, LOADER_FULL_PREFIX1_BLOCKS)}",
+        f"LoaderFullPrefix1AckEvents: {loader_full_prefix1_sim_result.get('block_ack_events', 0)}",
+        f"LoaderFullPrefix1MaxAckBlock: {loader_full_prefix1_sim_result.get('max_block_ack_arg', 'N/A')}",
+        f"LoaderFullPrefix1NackEvents: {loader_full_prefix1_sim_result.get('block_nack_events', 0)}",
+        f"LoaderFullGateAckEvents: {loader_full_prefix1_sim_result.get('block_ack_events', 0)}",
+        f"LoaderFullGateMaxAckBlock: {loader_full_prefix1_sim_result.get('max_block_ack_arg', 'N/A')}",
+        f"LoaderFullGateNackEvents: {loader_full_prefix1_sim_result.get('block_nack_events', 0)}",
+        f"LoaderFullGatePass: {loader_prefix_target_ok(loader_full_prefix1_sim_result, LOADER_FULL_PREFIX1_BLOCKS)}",
+        f"LoaderFullGateBadSeen: {loader_full_prefix1_sim_result.get('bad_seen', False)}",
+        f"LoaderFullGateBadCode: {fmt_optional_hex(loader_full_prefix1_sim_result.get('bad_code', 'N/A'))}",
+        f"LoaderFullGateBadBlock: {loader_full_prefix1_sim_result.get('bad_block', 'N/A')}",
+        f"LoaderFullGateFirstBadEventOffset: {loader_full_prefix1_sim_result.get('first_bad_event_offset', 'N/A')}",
+        f"LoaderFullPrefix4Pass: {loader_prefix_target_ok(loader_full_prefix4_sim_result, LOADER_FULL_PREFIX4_BLOCKS) if args.run_loader_long_sim else False}",
+        f"LoaderFullPrefix4AckEvents: {loader_full_prefix4_sim_result.get('block_ack_events', 0)}",
+        f"LoaderFullPrefix4MaxAckBlock: {loader_full_prefix4_sim_result.get('max_block_ack_arg', 'N/A')}",
+        f"LoaderFullPrefix4NackEvents: {loader_full_prefix4_sim_result.get('block_nack_events', 0)}",
+        f"LoaderFullLongRequested: {args.run_loader_long_sim}",
+        f"LoaderFullLongPass: {loader_prefix_target_ok(loader_full_long_sim_result, LOADER_FULL_PREFIX16_BLOCKS) if args.run_loader_long_sim else False}",
+        f"LoaderFullLongTargetBlocks: {LOADER_FULL_PREFIX16_BLOCKS}",
+        f"LoaderFullLongAckEvents: {loader_full_long_sim_result.get('block_ack_events', 0)}",
+        f"LoaderFullLongMaxAckBlock: {loader_full_long_sim_result.get('max_block_ack_arg', 'N/A')}",
+        f"LoaderFullLongNackEvents: {loader_full_long_sim_result.get('block_nack_events', 0)}",
+        f"LoaderFullPrefix4FailureDetail: {loader_full_prefix4_failure_detail or 'none'}",
+        f"LoaderFullLongFailureDetail: {loader_full_long_failure_detail or 'none'}",
+        f"LoaderFullLongLog: {loader_full_long_sim_log}",
         f"LoaderQuickGateExecPassSeen: {loader_quick_sim_result.get('saw_exec_pass', False)}",
         f"UartSawFetchProbe: {uart_result.get('saw_probe', False)}",
         f"FetchProbeClassification: {fetch_probe.get('classification', 'N/A')}",
