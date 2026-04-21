@@ -1211,7 +1211,7 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 > **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前 `--bridge-audit-step2-only` 辅助支线已经通过 beacon 化稳定住自动板测，最新 25MHz 辅助 bitstream `BuildID=0x69E39477` 的综合/实现/JTAG/10 秒板测都通过。但这仍然只是 DDR3 bridge 的辅助定位支线，不等价于 Dhrystone 主线已经重新上板通过。
 
-> **补充（2026-04-20）**: 当前 WSL Verilator + mock memory 高速环境（见 §13.5.1）已经能在 `preload` 模式下稳定跑完 Dhrystone，并看到 `DHRYSTONE DONE`；Verilator 主线 gate 已恢复为绿色。但这只说明“benchmark 主线在第二环境下可稳定完成”，**不等价于 DDR3 loader / FPGA 板测主线已恢复通过**。
+> **补充（2026-04-21）**: 当前 WSL Verilator + mock memory 高速环境（见 §13.5.1）已经能在 `preload` 模式下稳定跑完 Dhrystone，并看到 `DHRYSTONE DONE`；Verilator 主线 gate 保持绿色。DDR3 loader/FPGA 主线这边，`loader_quick_sim` 与 `loader_full_payload_prefix1_sim` 已恢复为绿色，beacon/UART 观测链也已通过独立 `loader-beacon-selftest` 自检；当前唯一剩余 blocker 已收敛为**板级 smoke 里 benchmark 完成路径未看到 `DHRYSTONE DONE`**。
 
 **最新相关状态（2026-04-18）**
 
@@ -1222,14 +1222,17 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 | Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E39477`, `WNS=+0.522ns`, `WHS=+0.030ns` |
 | Step2-only 脚本化板测 | ✅ | Beacon 抓包稳定通过，`summary_mask=0x1F`, `any_bad=0` |
 
-**当前 DDR3 loader 主线最新状态（2026-04-20）**
+**当前 DDR3 loader / board smoke 主线最新状态（2026-04-21）**
 
 | 项目 | 当前状态 | 说明 |
 |------|------|------|
 | Verilator preload smoke | ✅ | `runs=1/5000` 都已 `ExitReason=done`，并看到 `DHRYSTONE DONE` |
 | `loader_quick_sim` | ✅ | tiny exec gate 通过 |
-| `loader_full_payload_prefix1_sim` | ❌ | 当前默认阻塞 gate 仍未通过；已到 `READY + LOAD_START`，但还没拿到首个 `64B` block ACK |
-| Vivado synth / impl / bitstream / board smoke | ⛔ 未继续 | 当前仍被 `loader_full_payload_prefix1_sim` 阻塞，未越过 gate |
+| `loader-beacon-selftest` top sim/board | ✅ | Beacon/UART 观测链自检已通过，板级 `BuildID=0x69E736E2`，固定事件序列完整且无乱序 |
+| `loader_full_payload_prefix1_sim` | ✅ | 默认阻塞 gate 已通过，已拿到首个 `64B` block ACK |
+| Vivado synth / impl / bitstream / JTAG | ✅ | 主线 25MHz 构建继续通过；当前 smoke 构建 `BuildID=0x69E75043`，`WNS=+0.284ns`、`WHS=+0.054ns` |
+| board loader smoke（loader 会话） | ✅ | 板级已稳定看到 `READ_OK`、`LOAD_OK`、`JUMP`、`SUMMARY(0x1F)`，说明 loader 会话本身已打通 |
+| board smoke（benchmark 完成） | ❌ | 当前仍只看到 `DHRYSTONE START`，未在捕获窗口内看到 `DHRYSTONE DONE`；这是当前唯一剩余 blocker |
 
 **当前 DDR3 loader 主线仿真 gate 语义**
 
@@ -1237,20 +1240,77 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 - `loader_full_payload_prefix1_sim`：真实 Dhrystone payload 的 **prefix1** 默认阻塞 gate，只要求拿到首个 `64B` block ACK
 - `loader_full_payload_prefix4_sim`：真实 Dhrystone payload 的 **prefix4** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行
 - `loader_full_payload_long_sim`：真实 Dhrystone payload 的 **prefix16** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行，用于长会话检查
+- `--loader-early-audit`：header / first-block only 的最小调试支线；ROM 会逐字节回显 `BMK1` magic 的前 4 个字节，并在首个 `64B` block 后立刻停机；当前该支线只在 early-audit 内额外发送 `16x0x55` 训练序列
 - full-payload sim 在 `FULL_GATE_FAST_UART` profile 下压缩 UART 物理时序，但保持 UART/loader 协议语义；不再依赖层次 `force`
 - synth / impl / bitstream / board smoke 现在只在 `quick + prefix1` 两个阻塞 gate 之后执行；prefix4/prefix16 只作为可选长会话检查
 
-**当前 `loader_full_payload_prefix1_sim` 卡点**
+**辅助收敛支线的当前结论**
 
-- 当前不是 `RX_OVERRUN`，也不是 header 阶段协议损坏
-- 最新失败日志显示：
-  - `ready=1`
-  - `load_start=1`
-  - `payload_idx=44`
-  - `block_ack=0`
-  - `beacon_block_ack=0`
-  - `tube=0x22`
-- 这说明当前 Icarus full-payload gate 的真实阻塞点在**首个 block ACK 之前的 chunk 级推进成本**，而不是 `prefix2/prefix4` 目标数本身
+- `loader-beacon-selftest` 已验证当前板级 beacon/UART 观测链**可以保真**，不再存在早前那种“事件顺序与 ROM 状态机不相容”的主矛盾：
+  - 当前板级自检通过 summary 位于 `build/fpga_loader_beacon_selftest/summary.txt`
+  - 典型通过特征为：
+    - `Result: PASS`
+    - `BuildID: 0x69E736E2`
+    - `LoaderBeaconSelftestPass: True`
+    - `LoaderBeaconSelftestChosenSessionMatchedPrefixLen: 14`
+    - `LoaderBeaconSelftestChosenSessionFirstEvents: READY,IDLE_OK,TRAIN_START,TRAIN_DONE,FLUSH_DONE,HEADER_ENTER,HDR_B0_RX,HDR_B1_RX`
+- `loader-early-audit` 曾用于把问题从 `BAD_MAGIC`/首字节错位逐步压缩到 UART RX / host parser / 会话边界层面；其改动（训练序列、parser 选“最远推进 session”、`uart_rx.v` 的 16x 路径和 idle qualify）已被吸收到当前主线修复中。
+- 因此，**当前主线已不再以 early-audit 为 blocker**；剩余问题已经后移到“loader 成功跳转后，benchmark 何时以及为何没有在捕获窗口内走到 `DHRYSTONE DONE`”。
+
+**`loader_full_payload_prefix1_sim` 恢复情况**
+
+- 该 gate 已经恢复为绿色，不再是当前 blocker。
+- 当前通过日志位于：
+  - `build/fpga_benchmark_ddr3/loader_quick/05_run_loader_quick_sim.log`
+  - `build/fpga_benchmark_ddr3/loader_full_prefix1/06_run_loader_full_payload_prefix1_sim.log`
+- 典型通过特征为：
+  - `loader_quick_sim`: `PASS prefix=0 ... read_ok=1 load_ok=1 jump=1 summary=1 mask=1f ... exec_pass=1`
+  - `loader_full_payload_prefix1_sim`: `PASS prefix=1 ... block_ack=1 ... target=1 ... bad=0`
+
+**当前唯一剩余 blocker：board smoke 缺 `DHRYSTONE DONE`**
+
+- 当前主线 summary 位于 `build/fpga_benchmark_ddr3/summary.txt`
+- 当前关键信息如下：
+  - `FailedStage: uart_load_and_capture_smoke`
+  - `FailureDetail: Smoke board run missing DHRYSTONE DONE`
+  - `BuildID: 0x69E75043`
+  - `LoaderFullGatePass: True`
+  - `SmokeLoaderSummaryMask: 0x0000001F`
+  - `SmokeSawDhrystoneStart: True`
+  - `SmokeSawDhrystoneDone: False`
+- `build/dhrystone_ddr3_smoke_uart_capture.loader.decoded.txt` 已证明 loader 会话完整通过到：
+  - `READ_OK`
+  - `LOAD_OK`
+  - `JUMP`
+  - `SUMMARY arg=0x1F`
+- `build/dhrystone_ddr3_smoke_uart_capture.txt` 已证明 benchmark 已进入 payload 并打印：
+  - `DHRYSTONE START`
+  - banner
+  - 多次 `Measured time too small to obtain meaningful results`
+  - 但在当前 capture 窗口内没有 `DHRYSTONE DONE`
+- 因此当前最可信的剩余根因已经从 loader/UART 同步问题收敛到 **Dhrystone board smoke 使用的运行次数/自校准路径仍未被完全固定，导致板级 smoke 在 capture 窗口内没有收敛到 DONE**。
+
+**交接摘要（供下一步交给 Opus 4.6）**
+
+- 已确认绿色的部分：
+  - Verilator preload 主线：`runs=1/5000` 都已 `ExitReason=done`，并看到 `DHRYSTONE DONE`
+  - `loader-beacon-selftest`：top sim 和 board 都已通过
+  - `loader_quick_sim`：通过
+  - `loader_full_payload_prefix1_sim`：通过
+  - Vivado synth / impl / JTAG：通过
+  - board loader smoke：已到 `READ_OK/LOAD_OK/JUMP/SUMMARY(0x1F)`
+- 当前唯一红点：
+  - board smoke benchmark 完成路径没有在当前 capture 内走到 `DHRYSTONE DONE`
+- 下一步最值的检查点：
+  - 确认 board smoke payload 是否真的用上了固定 `EffectiveRuns=10` 的 Dhrystone 镜像
+  - 优先检查：
+    - `benchmarks/dhrystone/dhrystone_main.c`
+    - `fpga/scripts/build_benchmark_image.py`
+    - `fpga/scripts/run_fpga_benchmark_ddr3.py`
+  - 核心验证点：
+    - `build/fpga_benchmark_ddr3/payload_manifests/dhrystone_smoke.bin` 是不是由带 `AX7203_FIXED_DHRYSTONE_RUNS` 的构建产生
+    - board smoke capture 中是否还继续出现 `Measured time too small...`
+    - fixed-runs 宏是否真正进入了 board smoke 使用的 payload，而不只是 Verilator 路径
 
 **板测基础设施**
 

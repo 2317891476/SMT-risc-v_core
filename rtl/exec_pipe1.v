@@ -159,6 +159,7 @@ reg        mem_req_mem2reg_r;
 reg [0:0]  mem_req_tid_r;
 reg [`METADATA_ORDER_ID_W-1:0] mem_req_order_id_r;
 reg [7:0]  mem_req_epoch_r;
+reg        dbg_beacon_wait_reported_r;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -184,6 +185,7 @@ always @(posedge clk or negedge rstn) begin
         mem_req_tid_r        <= 1'b0;
         mem_req_order_id_r   <= {`METADATA_ORDER_ID_W{1'b0}};
         mem_req_epoch_r      <= 8'd0;
+        dbg_beacon_wait_reported_r <= 1'b0;
     end else begin
         alu_out_valid_r      <= is_alu_op;
         alu_out_tag_r        <= in_tag;
@@ -197,9 +199,16 @@ always @(posedge clk or negedge rstn) begin
 
         if (mem_req_valid_r && mem_req_accept) begin
             mem_req_valid_r <= 1'b0;
+            dbg_beacon_wait_reported_r <= 1'b0;
         end
 
         if (in_valid && is_mem_op) begin
+`ifndef SYNTHESIS
+            if (in_mem_write && (eff_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                $display("[DBG_EP1_STORE] t=%0t pc=%h order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                         $time, in_pc, in_order_id, in_tag, eff_addr, in_op_b, in_func3, in_tid);
+            end
+`endif
             mem_req_valid_r      <= 1'b1;
             mem_req_wen_r        <= in_mem_write;
             mem_req_addr_r       <= eff_addr;
@@ -213,6 +222,16 @@ always @(posedge clk or negedge rstn) begin
             mem_req_tid_r        <= in_tid;
             mem_req_order_id_r   <= in_order_id;
             mem_req_epoch_r      <= in_epoch;
+            dbg_beacon_wait_reported_r <= 1'b0;
+        end else if (mem_req_valid_r && !mem_req_accept &&
+                     mem_req_wen_r && (mem_req_addr_r == `DEBUG_BEACON_EVT_ADDR) &&
+                     !dbg_beacon_wait_reported_r) begin
+`ifndef SYNTHESIS
+            $display("[DBG_EP1_WAIT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                     $time, mem_req_order_id_r, mem_req_tag_r, mem_req_addr_r,
+                     mem_req_wdata_r, mem_req_func3_r, mem_req_tid_r);
+`endif
+            dbg_beacon_wait_reported_r <= 1'b1;
         end
     end
 end

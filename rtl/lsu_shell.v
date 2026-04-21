@@ -305,6 +305,7 @@ reg [31:0]        pending_forward_data;   // Forwarded data
 // Raw memory data register (for mem_subsys mode)
 reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
+reg               dbg_beacon_block_reported_r;
 wire              flush_hits_pending =
                     pending_valid && (pending_tid == flush_tid);
 // Only kill when there IS a pending speculative request to kill.
@@ -328,7 +329,11 @@ always @(posedge clk or negedge rstn) begin
         m1_req_valid      <= 1'b0;
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
+        dbg_beacon_block_reported_r <= 1'b0;
     end else begin
+        if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
+            dbg_beacon_block_reported_r <= 1'b0;
+        end
         if (flush && !m1_txn_is_drain && flush_kills_pending) begin
             // On flush, abort speculative load requests, but never discard a
             // committed store-buffer drain that has already been handed off.
@@ -360,6 +365,12 @@ always @(posedge clk or negedge rstn) begin
             LSU_IDLE: begin
                 // Ready to accept new request
                 if (req_valid && req_accept) begin
+`ifndef SYNTHESIS
+                    if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                        $display("[DBG_LSU_ACCEPT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                                 $time, req_order_id, req_tag, req_addr, req_wdata, req_func3, req_tid);
+                    end
+`endif
                     `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU ACCEPT] kind=%s tid=%0d order=%0d tag=%0d func3=%0d addr=%h wdata=%h rd=%0d",
                              req_wen ? "STORE" : "LOAD ", req_tid, req_order_id, req_tag,
@@ -401,8 +412,22 @@ always @(posedge clk or negedge rstn) begin
                         // Load with forwarding or legacy mode: single cycle
                         lsu_state     <= LSU_RESP;
                     end
+                end else if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                             !dbg_beacon_block_reported_r) begin
+`ifndef SYNTHESIS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
                 end else if (use_mem_subsys && sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
                     // Drain one committed store-buffer entry through mem_subsys M1.
+`ifndef SYNTHESIS
+                    if (sb_mem_write_addr_int == `DEBUG_BEACON_EVT_ADDR) begin
+                        $display("[DBG_LSU_DRAIN] t=%0t addr=%h wdata=%h wen=%b",
+                                 $time, sb_mem_write_addr_int, sb_mem_write_data_int, sb_mem_write_wen_int);
+                    end
+`endif
                     pending_valid       <= 1'b0;
                     m1_txn_is_drain     <= 1'b1;
                     lsu_state           <= LSU_REQ;
@@ -415,9 +440,24 @@ always @(posedge clk or negedge rstn) begin
             end
 
             LSU_REQ: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifndef SYNTHESIS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 if (use_mem_subsys) begin
                     // Waiting for mem_subsys to accept request
                     if (m1_req_ready) begin
+`ifndef SYNTHESIS
+                        if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                            $display("[DBG_LSU_REQ_GNT] t=%0t addr=%h wdata=%h wen=%b",
+                                     $time, m1_req_addr, m1_req_wdata, m1_req_wen);
+                        end
+`endif
                         m1_req_valid <= 1'b0;
                         lsu_state    <= LSU_WAIT_RESP;
                     end
@@ -431,8 +471,23 @@ always @(posedge clk or negedge rstn) begin
             end
 
             LSU_WAIT_RESP: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifndef SYNTHESIS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
+`ifndef SYNTHESIS
+                    if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                        $display("[DBG_LSU_RESP_SEEN] t=%0t drain=%0d addr=%h data=%h",
+                                 $time, m1_txn_is_drain, m1_req_addr, m1_resp_data);
+                    end
+`endif
                     `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU RESP] drain=%0d addr=%h raw=%h shaped=%h",
                              m1_txn_is_drain, pending_addr, m1_resp_data, mem_data_shaped);
@@ -448,6 +503,15 @@ always @(posedge clk or negedge rstn) begin
             end
 
             LSU_RESP: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifndef SYNTHESIS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 // Response ready, will be consumed by writeback
                 lsu_state       <= LSU_IDLE;
                 pending_valid   <= 1'b0;

@@ -79,6 +79,16 @@ PROFILES = {
         "uart_expect_text": "Z",
         "uart_send_delay_ms": 800,
     },
+    "uart_echo_raw": {
+        "top": "adam_riscv_ax7203_uart_echo_raw_top",
+        "tb": "tb_ax7203_uart_echo_raw_smoke",
+        "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_raw_smoke.sv",
+        "rom": None,
+        "expect_token": "[AX7203_UART_ECHO_RAW] PASS",
+        "uart_send_text": "Z",
+        "uart_expect_text": "Z",
+        "uart_send_delay_ms": 800,
+    },
 }
 
 

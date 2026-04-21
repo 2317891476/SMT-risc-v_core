@@ -35,8 +35,10 @@ unsigned long long Bench_Start_Instret, Bench_Stop_Instret;
 unsigned long long Bench_Total_Cycles, Bench_Total_Instret;
 unsigned long Bench_Ipc_X1000;
 
-#ifdef VERILATOR_MAINLINE
-#define VERILATOR_DHRYSTONE_FIXED_RUNS 10
+#if defined(AX7203_FIXED_DHRYSTONE_RUNS)
+#define AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS AX7203_FIXED_DHRYSTONE_RUNS
+#elif defined(VERILATOR_MAINLINE)
+#define AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS 10
 #endif
 
 int main (int argc, char **argv)
@@ -62,8 +64,8 @@ int main (int argc, char **argv)
   board_uart_putc('\n');
 
   Number_Of_Runs = NUMBER_OF_RUNS;
-#ifdef VERILATOR_MAINLINE
-  Number_Of_Runs = VERILATOR_DHRYSTONE_FIXED_RUNS;
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
+  Number_Of_Runs = AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS;
 #endif
 
   Next_Ptr_Glob = (Rec_Pointer)alloca(sizeof(Rec_Type));
@@ -144,7 +146,7 @@ int main (int argc, char **argv)
     Bench_Total_Instret = Bench_Stop_Instret - Bench_Start_Instret;
 
     if (User_Time < Too_Small_Time) {
-#ifdef VERILATOR_MAINLINE
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
       Done = true;
 #else
       printf("Measured time too small to obtain meaningful results\n");
@@ -156,7 +158,7 @@ int main (int argc, char **argv)
     }
   }
 
-#ifndef VERILATOR_MAINLINE
+#ifndef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   debug_printf("Final values of the variables used in the benchmark:\n");
   debug_printf("\n");
   debug_printf("Int_Glob:            %d\n", Int_Glob);
@@ -209,7 +211,7 @@ int main (int argc, char **argv)
 #endif
 
   instret_delta = Bench_Total_Instret;
-#ifdef VERILATOR_MAINLINE
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   Microseconds = 0;
   Dhrystones_Per_Second = 0;
 #else
@@ -225,12 +227,12 @@ int main (int argc, char **argv)
   printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
   printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
   printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
-#ifndef VERILATOR_MAINLINE
+#ifndef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
 #endif
   printf("DHRYSTONE DONE\n");
-#ifdef VERILATOR_MAINLINE
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   return 0;
 #else
   for (;;) {

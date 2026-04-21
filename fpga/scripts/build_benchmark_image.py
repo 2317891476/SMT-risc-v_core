@@ -222,6 +222,7 @@ def main() -> int:
     parser.add_argument("--benchmark", choices=("dhrystone", "coremark"), required=True)
     parser.add_argument("--cpu-hz", type=int, default=10_000_000)
     parser.add_argument("--dhrystone-runs", type=int, default=5000)
+    parser.add_argument("--fixed-dhrystone-runs", type=int, default=None)
     parser.add_argument("--coremark-iterations", type=int, default=10)
     parser.add_argument("--coremark-total-data-size", type=int, default=1200)
     parser.add_argument("--startup-delay-ms", type=int, default=0)
@@ -261,6 +262,8 @@ def main() -> int:
     data_hex = ROM_DIR / "data.hex"
 
     if args.benchmark == "dhrystone":
+        if args.fixed_dhrystone_runs is not None and args.fixed_dhrystone_runs <= 0:
+            raise SystemExit(f"fixed dhrystone runs must be positive, got {args.fixed_dhrystone_runs}")
         sources, cflags = build_dhrystone_sources(args.cpu_hz, args.dhrystone_runs, build_dir)
     else:
         sources, cflags = build_coremark_sources(
@@ -273,6 +276,8 @@ def main() -> int:
     if args.startup_delay_ms < 0:
         raise SystemExit(f"startup delay must be non-negative, got {args.startup_delay_ms}")
     cflags.append(f"-DAX7203_BENCH_STARTUP_DELAY_MS={args.startup_delay_ms}")
+    if args.fixed_dhrystone_runs is not None:
+        cflags.append(f"-DAX7203_FIXED_DHRYSTONE_RUNS={args.fixed_dhrystone_runs}")
     if args.verilator_mainline:
         cflags.append("-DVERILATOR_MAINLINE=1")
     if args.ddr3_xip:

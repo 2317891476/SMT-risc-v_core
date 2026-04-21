@@ -1368,6 +1368,14 @@ always @(posedge clk or negedge rstn) begin
         p1_pre_ro_valid <= p1_winner_valid;
         if (p1_winner_valid) begin
             if (p1_issue_is_mem) begin
+`ifndef SYNTHESIS
+                if (p1_mem_cand_mem_write) begin
+                    $display("[DBG_P1_WIN] t=%0t tag=%0d pc=%h order=%0d tid=%0d rs2=%0d src2_tag=%0d prs2=%0d memw=%0b",
+                             $time, p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_order_id,
+                             p1_mem_cand_tid, p1_mem_cand_rs2, p1_mem_cand_src2_tag,
+                             tag_prs2_map[p1_mem_cand_tag], p1_mem_cand_mem_write);
+                end
+`endif
                 p1_pre_ro_tag          <= p1_mem_cand_tag;
                 p1_pre_ro_pc           <= p1_mem_cand_pc;
                 p1_pre_ro_imm          <= p1_mem_cand_imm;
@@ -1873,6 +1881,13 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         ro1_valid <= p1_pre_ro_valid;
         if (p1_pre_ro_valid) begin
+`ifndef SYNTHESIS
+            if (p1_pre_ro_mem_write) begin
+                $display("[DBG_RO1_CAP] t=%0t tag=%0d pc=%h order=%0d tid=%0d rs2=%0d prs2=%0d opb=%h",
+                         $time, p1_pre_ro_tag, p1_pre_ro_pc, p1_pre_ro_order_id, p1_pre_ro_tid,
+                         p1_pre_ro_rs2, p1_pre_ro_prs2, byp1_op_b);
+            end
+`endif
             ro1_tag        <= p1_pre_ro_tag;
             ro1_pc         <= p1_pre_ro_pc;
             ro1_imm        <= p1_pre_ro_imm;

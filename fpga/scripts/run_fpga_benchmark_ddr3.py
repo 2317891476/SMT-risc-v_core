@@ -12,6 +12,7 @@ import struct
 import subprocess
 import sys
 import time
+import threading
 from pathlib import Path
 
 
@@ -24,6 +25,8 @@ COMP_TEST_DIR = REPO_ROOT / "comp_test"
 LIB_RAM_BFM = REPO_ROOT / "libs" / "REG_ARRAY" / "SRAM" / "ram_bfm.v"
 PROJECT_DIR = BUILD_DIR / "ax7203"
 LOADER_ROM = ROM_DIR / "test_fpga_ddr3_loader.s"
+EARLY_AUDIT_ROM = ROM_DIR / "test_fpga_ddr3_loader_early_audit.s"
+BEACON_SELFTEST_ROM = ROM_DIR / "test_fpga_ddr3_loader_beacon_selftest.s"
 TRANSPORT_ROM = ROM_DIR / "test_fpga_uart_loader_transport.s"
 BRIDGE_STRESS_ROM = ROM_DIR / "test_fpga_ddr3_bridge_stress.s"
 BRIDGE_STEPS_ROM = ROM_DIR / "test_fpga_ddr3_bridge_steps.s"
@@ -31,6 +34,8 @@ STEP2_ONLY_ROM = ROM_DIR / "test_fpga_ddr3_bridge_step2_only.s"
 TINY_PAYLOAD_ROM = ROM_DIR / "test_fpga_ddr3_exec_payload.s"
 LOADER_TB = COMP_TEST_DIR / "tb_ax7203_top_ddr3_loader_smoke.sv"
 LOADER_TB_TOP = "tb_ax7203_top_ddr3_loader_smoke"
+BEACON_SELFTEST_TB = COMP_TEST_DIR / "tb_ax7203_top_loader_beacon_selftest.sv"
+BEACON_SELFTEST_TB_TOP = "tb_ax7203_top_loader_beacon_selftest"
 TRANSPORT_TB = COMP_TEST_DIR / "tb_uart_loader_transport.sv"
 TRANSPORT_TB_TOP = "tb_uart_loader_transport"
 TRANSPORT_TOP_SMOKE_TB = COMP_TEST_DIR / "tb_ax7203_top_uart_loader_transport_smoke.sv"
@@ -55,6 +60,15 @@ BUILD_ID_FILE = PROJECT_DIR / "adam_riscv_ax7203_bitstream_id.txt"
 UART_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.txt"
 UART_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.bin"
 UART_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.loader.decoded.txt"
+UART_EARLY_AUDIT_CAPTURE_FILE = BUILD_DIR / "loader_early_audit_uart_capture.txt"
+UART_EARLY_AUDIT_CAPTURE_RAW_FILE = BUILD_DIR / "loader_early_audit_uart_capture.bin"
+UART_EARLY_AUDIT_CAPTURE_DECODED_FILE = BUILD_DIR / "loader_early_audit_uart_capture.loader.decoded.txt"
+UART_EARLY_AUDIT_CAPTURE_SESSIONS_FILE = BUILD_DIR / "loader_early_audit_sessions.json"
+EARLY_AUDIT_SWEEP_DIR = BUILD_DIR / "fpga_loader_early_audit_sweep"
+UART_BEACON_SELFTEST_CAPTURE_FILE = BUILD_DIR / "loader_beacon_selftest_uart_capture.txt"
+UART_BEACON_SELFTEST_CAPTURE_RAW_FILE = BUILD_DIR / "loader_beacon_selftest_uart_capture.bin"
+UART_BEACON_SELFTEST_CAPTURE_DECODED_FILE = BUILD_DIR / "loader_beacon_selftest_uart_capture.loader.decoded.txt"
+UART_BEACON_SELFTEST_CAPTURE_SESSIONS_FILE = BUILD_DIR / "loader_beacon_selftest_sessions.json"
 UART_SMOKE_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.txt"
 UART_SMOKE_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.bin"
 UART_SMOKE_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_smoke_uart_capture.loader.decoded.txt"
@@ -88,6 +102,9 @@ UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
 UART_MAINLINE_BLOCK_GAP_S = 0.080
 UART_MAINLINE_BLOCK_RETRY_GAP_S = 1.000
 UART_MAINLINE_BLOCK_RETRY_LIMIT = 10
+EARLY_AUDIT_TRAINING_BYTE = 0x55
+EARLY_AUDIT_TRAINING_COUNT_SIM = 16
+EARLY_AUDIT_TRAINING_COUNT_BOARD = 32
 FULL_GATE_FAST_UART_CLK_DIV = 4
 LOADER_FULL_PREFIX1_BLOCKS = 1
 LOADER_FULL_PREFIX4_BLOCKS = 4
@@ -125,6 +142,16 @@ LOADER_EVT_READY = 0x01
 LOADER_EVT_LOAD_START = 0x02
 LOADER_EVT_BLOCK_ACK = 0x11
 LOADER_EVT_BLOCK_NACK = 0x12
+LOADER_EA_EVT_HDR_B0_RX = 0x31
+LOADER_EA_EVT_HDR_B1_RX = 0x32
+LOADER_EA_EVT_HDR_B2_RX = 0x33
+LOADER_EA_EVT_HDR_B3_RX = 0x34
+LOADER_EA_EVT_HDR_MAGIC_OK = 0x35
+LOADER_EA_EVT_IDLE_OK = 0x36
+LOADER_EA_EVT_TRAIN_START = 0x37
+LOADER_EA_EVT_TRAIN_DONE = 0x38
+LOADER_EA_EVT_FLUSH_DONE = 0x39
+LOADER_EA_EVT_HEADER_ENTER = 0x3A
 LOADER_EVT_READ_OK = 0x21
 LOADER_EVT_LOAD_OK = 0x22
 LOADER_EVT_JUMP = 0x23
@@ -137,6 +164,9 @@ LOADER_EVT_RX_OVERRUN = 0xE5
 LOADER_EVT_RX_FRAME_ERR = 0xE6
 LOADER_EVT_DRAIN_TIMEOUT = 0xE7
 LOADER_EVT_SIZE_TOO_BIG = 0xE8
+LOADER_EA_EVT_TRAIN_TIMEOUT = 0xE9
+LOADER_EA_EVT_FLUSH_TIMEOUT = 0xEA
+LOADER_EVT_TRAP = 0xEF
 LOADER_EVT_SUMMARY = 0xF0
 LOADER_SUM_READY = 0x01
 LOADER_SUM_LOAD_START = 0x02
@@ -144,6 +174,33 @@ LOADER_SUM_READ_OK = 0x04
 LOADER_SUM_LOAD_OK = 0x08
 LOADER_SUM_JUMP = 0x10
 LOADER_SUM_ANY_BAD = 0x80
+LOADER_EA_SUM_READY = 0x01
+LOADER_EA_SUM_HDR_MAGIC_OK = 0x02
+LOADER_EA_SUM_LOAD_START = 0x04
+LOADER_EA_SUM_FIRST_BLOCK_ACK = 0x08
+EARLY_AUDIT_SWEEP_TRIALS = (
+    ("Q100_H0", 100, 0),
+    ("Q200_H0", 200, 0),
+    ("Q100_H10", 100, 10),
+)
+BEACON_SELFTEST_TOP_SIM_TB_TIMEOUT_NS = 120_000_000
+BEACON_SELFTEST_TOP_SIM_TIMEOUT_S = 600
+BEACON_SELFTEST_EXPECTED_SEQUENCE = (
+    (LOADER_EVT_READY, 0xA1),
+    (LOADER_EA_EVT_IDLE_OK, 0xB2),
+    (LOADER_EA_EVT_TRAIN_START, 0xC3),
+    (LOADER_EA_EVT_TRAIN_DONE, 0x14),
+    (LOADER_EA_EVT_FLUSH_DONE, 0x05),
+    (LOADER_EA_EVT_HEADER_ENTER, 0xD6),
+    (LOADER_EA_EVT_HDR_B0_RX, 0x42),
+    (LOADER_EA_EVT_HDR_B1_RX, 0x4D),
+    (LOADER_EA_EVT_HDR_B2_RX, 0x4B),
+    (LOADER_EA_EVT_HDR_B3_RX, 0x31),
+    (LOADER_EA_EVT_HDR_MAGIC_OK, 0xE7),
+    (LOADER_EVT_LOAD_START, 0xF8),
+    (LOADER_EVT_BLOCK_ACK, 0x00),
+    (LOADER_EVT_SUMMARY, 0x0F),
+)
 
 
 def which_required(*names: str) -> str:
@@ -244,6 +301,7 @@ def build_env(
     fetch_buffer_depth: int,
     core_clk_mhz: float,
     *,
+    smt_mode: int = 1,
     fetch_debug: bool = False,
     bridge_audit: bool = False,
     step2_beacon_debug: bool = False,
@@ -259,7 +317,7 @@ def build_env(
             "AX7203_ENABLE_MEM_SUBSYS": "1",
             "AX7203_ENABLE_DDR3": "1",
             "AX7203_ENABLE_ROCC": "0",
-            "AX7203_SMT_MODE": "1",
+            "AX7203_SMT_MODE": str(smt_mode),
             "AX7203_RS_DEPTH": str(rs_depth),
             "AX7203_RS_IDX_W": str(derive_idx_width(rs_depth)),
             "AX7203_FETCH_BUFFER_DEPTH": str(fetch_buffer_depth),
@@ -386,6 +444,7 @@ def run_loader_top_sim(
     full_gate_prefix_block_ack_target: int = LOADER_FULL_PREFIX1_BLOCKS,
     fetch_debug: bool = False,
     uart_baud: int = 115200,
+    smt_mode: int = 1,
     log_name: str = "05_run_loader_top_sim.log",
     fast_uart_profile: bool = False,
     fast_uart_inject: int | None = None,
@@ -396,14 +455,19 @@ def run_loader_top_sim(
     block_done_gap_bits: int | None = None,
     tb_timeout_ns: int | None = None,
     sim_timeout_s: int | None = None,
+    rom_asm: Path | None = None,
+    early_audit_enable: bool = False,
+    early_audit_bad_magic_byte: int = -1,
+    beacon_selftest_enable: bool = False,
 ) -> Path:
     write_payload_hex(Path(str(manifest["bin"])))
+    rom_to_build = rom_asm if rom_asm is not None else LOADER_ROM
     run_logged(
         [
             sys.executable,
             str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
             "--asm",
-            str(LOADER_ROM),
+            str(rom_to_build),
             "--define",
             "SIM_FAST_STORE_DRAIN=1",
             "--merge-mem-subsys",
@@ -419,7 +483,23 @@ def run_loader_top_sim(
     tb_file = FETCH_PROBE_TB if fetch_debug else LOADER_TB
     out_file = out_dir / f"{tb_top}.out"
     debug_defines = ["-DDDR3_FETCH_DEBUG=1", "-DDDR3_FETCH_PROBE_FAST=1"] if fetch_debug else []
-    if fetch_debug or expect_exec_pass:
+    if beacon_selftest_enable:
+        sim_uart_clk_div = 4
+        fast_uart_inject = 0 if fast_uart_inject is None else fast_uart_inject
+        initial_header_wait_bits = 4 if initial_header_wait_bits is None else initial_header_wait_bits
+        initial_payload_wait_bits = 4 if initial_payload_wait_bits is None else initial_payload_wait_bits
+        inter_u32_gap_bits = 1 if inter_u32_gap_bits is None else inter_u32_gap_bits
+        chunk_ack_gap_bits = 1 if chunk_ack_gap_bits is None else chunk_ack_gap_bits
+        block_done_gap_bits = 1 if block_done_gap_bits is None else block_done_gap_bits
+    elif early_audit_enable:
+        sim_uart_clk_div = 4
+        fast_uart_inject = 1 if fast_uart_inject is None else fast_uart_inject
+        initial_header_wait_bits = 4 if initial_header_wait_bits is None else initial_header_wait_bits
+        initial_payload_wait_bits = 4 if initial_payload_wait_bits is None else initial_payload_wait_bits
+        inter_u32_gap_bits = 1 if inter_u32_gap_bits is None else inter_u32_gap_bits
+        chunk_ack_gap_bits = 1 if chunk_ack_gap_bits is None else chunk_ack_gap_bits
+        block_done_gap_bits = 1 if block_done_gap_bits is None else block_done_gap_bits
+    elif fetch_debug or expect_exec_pass:
         sim_uart_clk_div = 4
         fast_uart_inject = 0 if fast_uart_inject is None else fast_uart_inject
         initial_header_wait_bits = 80 if initial_header_wait_bits is None else initial_header_wait_bits
@@ -437,7 +517,17 @@ def run_loader_top_sim(
         block_done_gap_bits = 1 if block_done_gap_bits is None else block_done_gap_bits
     tb_uart_bit_ns = max(1, round(sim_uart_clk_div * (1000.0 / core_clk_mhz)))
     payload_size = int(manifest["size_bytes"])
-    if expect_exec_pass:
+    if beacon_selftest_enable:
+        if tb_timeout_ns is None:
+            tb_timeout_ns = 1_000_000
+        if sim_timeout_s is None:
+            sim_timeout_s = 180
+    elif early_audit_enable:
+        if tb_timeout_ns is None:
+            tb_timeout_ns = 3_000_000
+        if sim_timeout_s is None:
+            sim_timeout_s = 180
+    elif expect_exec_pass:
         if tb_timeout_ns is None:
             tb_timeout_ns = max(5_000_000, int((payload_size + 512) * 14 * tb_uart_bit_ns * 6))
             tb_timeout_ns = min(tb_timeout_ns, 20_000_000)
@@ -468,7 +558,7 @@ def run_loader_top_sim(
         *(["-DFULL_GATE_FAST_UART=1"] if fast_uart_profile else []),
         *debug_defines,
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        f"-DSMT_MODE={int(smt_mode)}",
         f"-DTB_SHORT_TIMEOUT_NS={tb_timeout_ns}",
         f"-DTB_UART_BIT_NS={tb_uart_bit_ns}",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
@@ -509,6 +599,9 @@ def run_loader_top_sim(
             f"+INTER_U32_GAP_BITS={inter_u32_gap_bits}",
             f"+CHUNK_ACK_GAP_BITS={chunk_ack_gap_bits}",
             f"+BLOCK_DONE_GAP_BITS={block_done_gap_bits}",
+            f"+EARLY_AUDIT_ENABLE={1 if early_audit_enable else 0}",
+            f"+EARLY_AUDIT_BAD_MAGIC_BYTE={early_audit_bad_magic_byte}",
+            f"+BEACON_SELFTEST_ENABLE={1 if beacon_selftest_enable else 0}",
         ],
         cwd=ROM_DIR,
         log_path=sim_log,
@@ -519,14 +612,128 @@ def run_loader_top_sim(
     if expect_token not in sim_text:
         raise RuntimeError(f"DDR3 loader top simulation did not pass; see {sim_log}")
     if not fetch_debug:
-        sim_result = analyze_loader_sim_log(sim_text)
-        if full_gate_prefix_enable:
-            if not loader_prefix_target_ok(sim_result, full_gate_prefix_block_ack_target):
-                raise RuntimeError(
-                    f"DDR3 loader full-prefix gate did not reach target {full_gate_prefix_block_ack_target}; see {sim_log}"
-                )
-        elif expect_exec_pass and not sim_result.get("saw_exec_pass", False):
-            raise RuntimeError(f"DDR3 loader quick gate missing EXEC_PASS; see {sim_log}")
+        if beacon_selftest_enable:
+            sim_result = analyze_loader_beacon_selftest_sim_log(sim_text)
+            if not bool(sim_result.get("pass", False)):
+                raise RuntimeError(f"DDR3 loader beacon selftest sim did not produce the exact fixed sequence; see {sim_log}")
+        elif early_audit_enable:
+            sim_result = analyze_loader_early_audit_sim_log(sim_text)
+            if early_audit_bad_magic_byte >= 0:
+                if not (
+                    sim_result.get("ready_seen", False)
+                    and sim_result.get("bad_magic_seen", False)
+                    and sim_result.get("bad_magic_byte_index") == early_audit_bad_magic_byte
+                    and sim_result.get("summary_seen", False)
+                    and isinstance(sim_result.get("summary_mask"), int)
+                    and (int(sim_result["summary_mask"]) & LOADER_SUM_ANY_BAD) != 0
+                ):
+                    raise RuntimeError(
+                        f"DDR3 loader early-audit sim did not report BAD_MAGIC byte {early_audit_bad_magic_byte}; see {sim_log}"
+                    )
+            else:
+                if not (
+                    sim_result.get("ready_seen", False)
+                    and sim_result.get("header_magic_ok", False)
+                    and sim_result.get("load_start_seen", False)
+                    and sim_result.get("first_block_ack_seen", False)
+                    and sim_result.get("summary_ok_seen", False)
+                ):
+                    raise RuntimeError(f"DDR3 loader early-audit sim did not complete header/first-block path; see {sim_log}")
+        else:
+            sim_result = analyze_loader_sim_log(sim_text)
+            if full_gate_prefix_enable:
+                if not loader_prefix_target_ok(sim_result, full_gate_prefix_block_ack_target):
+                    raise RuntimeError(
+                        f"DDR3 loader full-prefix gate did not reach target {full_gate_prefix_block_ack_target}; see {sim_log}"
+                    )
+            elif expect_exec_pass and not sim_result.get("saw_exec_pass", False):
+                raise RuntimeError(f"DDR3 loader quick gate missing EXEC_PASS; see {sim_log}")
+    return sim_log
+
+
+def run_loader_beacon_selftest_top_sim(
+    logs_dir: Path,
+    *,
+    rs_depth: int,
+    fetch_buffer_depth: int,
+    core_clk_mhz: float,
+    uart_baud: int,
+    smt_mode: int = 1,
+    log_name: str = "05_run_loader_beacon_selftest_top_sim.log",
+    rom_asm: Path | None = None,
+    tb_timeout_ns: int | None = None,
+    sim_timeout_s: int | None = None,
+) -> Path:
+    rom_to_build = rom_asm if rom_asm is not None else BEACON_SELFTEST_ROM
+    run_logged(
+        [
+            sys.executable,
+            str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
+            "--asm",
+            str(rom_to_build),
+            "--define",
+            "SIM_FAST_STORE_DRAIN=1",
+            "--merge-mem-subsys",
+        ],
+        cwd=REPO_ROOT,
+        log_path=logs_dir / "03_build_loader_rom.log",
+        timeout=300,
+    )
+    out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_file = out_dir / f"{BEACON_SELFTEST_TB_TOP}.out"
+    if tb_timeout_ns is None:
+        tb_timeout_ns = BEACON_SELFTEST_TOP_SIM_TB_TIMEOUT_NS
+    if sim_timeout_s is None:
+        sim_timeout_s = BEACON_SELFTEST_TOP_SIM_TIMEOUT_S
+    sim_uart_clk_div = FULL_GATE_FAST_UART_CLK_DIV
+    compile_cmd = [
+        which_required("iverilog"),
+        "-g2012",
+        "-DFPGA_MODE=1",
+        "-DENABLE_MEM_SUBSYS=1",
+        "-DENABLE_DDR3=1",
+        "-DAX7203_DDR3_LOADER_BEACON_DEBUG=1",
+        "-DL2_PASSTHROUGH=1",
+        "-DTRANSPORT_UART_RXDATA_REG_TEST=1",
+        "-DENABLE_ROCC_ACCEL=0",
+        f"-DSMT_MODE={int(smt_mode)}",
+        f"-DTB_SHORT_TIMEOUT_NS={tb_timeout_ns}",
+        f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
+        f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
+        f"-DFPGA_FETCH_BUFFER_DEPTH={fetch_buffer_depth}",
+        f"-DFPGA_CLK_WIZ_HALF_DIV={derive_clk_wiz_half_div(core_clk_mhz)}",
+        f"-DFPGA_UART_CLK_DIV={sim_uart_clk_div}",
+        "-s",
+        BEACON_SELFTEST_TB_TOP,
+        "-o",
+        str(out_file),
+        "-I",
+        str(RTL_DIR),
+        "-I",
+        str(FPGA_RTL_DIR),
+        *collect_verilog(RTL_DIR),
+        *collect_verilog(FPGA_RTL_DIR),
+        str(LIB_RAM_BFM),
+        str(COMP_TEST_DIR / "clk_wiz_0_stub.v"),
+        str(COMP_TEST_DIR / "ibufgds_stub.v"),
+        str(MIG_STUB),
+        str(BEACON_SELFTEST_TB),
+    ]
+    run_logged(compile_cmd, cwd=REPO_ROOT, log_path=logs_dir / "04_compile_loader_beacon_selftest_top_sim.log", timeout=300)
+    sim_log = logs_dir / log_name
+    run_logged(
+        [which_required("vvp"), str(out_file)],
+        cwd=ROM_DIR,
+        log_path=sim_log,
+        timeout=sim_timeout_s,
+    )
+    sim_text = read_text(sim_log)
+    if "[AX7203_LOADER_BEACON_SELFTEST] PASS" not in sim_text:
+        raise RuntimeError(f"DDR3 loader beacon selftest top simulation did not pass; see {sim_log}")
+    sim_result = analyze_loader_beacon_selftest_sim_log(sim_text)
+    if not bool(sim_result.get("pass", False)):
+        raise RuntimeError(f"DDR3 loader beacon selftest sim did not produce the exact fixed sequence; see {sim_log}")
     return sim_log
 
 
@@ -975,21 +1182,31 @@ def run_transport_top_sim(
     return sim_log, manifest
 
 
-def build_dhrystone_payload(logs_dir: Path, *, cpu_hz: int, runs: int, stem: str) -> dict[str, object]:
+def build_dhrystone_payload(
+    logs_dir: Path,
+    *,
+    cpu_hz: int,
+    runs: int,
+    stem: str,
+    fixed_runs: int | None = None,
+) -> dict[str, object]:
+    cmd = [
+        sys.executable,
+        str(REPO_ROOT / "fpga" / "scripts" / "build_benchmark_image.py"),
+        "--benchmark",
+        "dhrystone",
+        "--cpu-hz",
+        str(cpu_hz),
+        "--dhrystone-runs",
+        str(runs),
+        "--ddr3-xip",
+        "--emit-bin",
+        "--manifest",
+    ]
+    if fixed_runs is not None:
+        cmd.extend(["--fixed-dhrystone-runs", str(fixed_runs)])
     run_logged(
-        [
-            sys.executable,
-            str(REPO_ROOT / "fpga" / "scripts" / "build_benchmark_image.py"),
-            "--benchmark",
-            "dhrystone",
-            "--cpu-hz",
-            str(cpu_hz),
-            "--dhrystone-runs",
-            str(runs),
-            "--ddr3-xip",
-            "--emit-bin",
-            "--manifest",
-        ],
+        cmd,
         cwd=REPO_ROOT,
         log_path=logs_dir / "06_build_dhrystone_payload.log",
         timeout=600,
@@ -997,6 +1214,358 @@ def build_dhrystone_payload(logs_dir: Path, *, cpu_hz: int, runs: int, stem: str
     manifest_path = BUILD_DIR / "benchmark_images" / "dhrystone" / "dhrystone_ddr3.json"
     manifest = json.loads(manifest_path.read_text(encoding="ascii"))
     return clone_manifest_outputs(manifest, logs_dir / "payload_manifests", stem)
+
+
+def build_early_audit_manifest(logs_dir: Path, full_manifest: dict[str, object], *, stem: str) -> dict[str, object]:
+    payload = Path(str(full_manifest["bin"])).read_bytes()[:UART_BLOCK_CHECKSUM_BYTES]
+    out_dir = logs_dir / "payload_manifests"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    bin_path = out_dir / f"{stem}.bin"
+    bin_path.write_bytes(payload)
+    manifest = dict(full_manifest)
+    manifest["bin"] = str(bin_path)
+    manifest["size_bytes"] = len(payload)
+    manifest["checksum32"] = sum(payload) & 0xFFFFFFFF
+    return manifest
+
+
+def load_existing_early_audit_manifest(logs_dir: Path, *, stem: str = "dhrystone_loader_early_audit") -> dict[str, object]:
+    full_manifest_path = BUILD_DIR / "benchmark_images" / "dhrystone" / "dhrystone_ddr3.json"
+    if not full_manifest_path.exists():
+        raise RuntimeError(
+            f"Existing benchmark manifest not found: {full_manifest_path}. Run --loader-early-audit once first."
+        )
+    bin_path = logs_dir / "payload_manifests" / f"{stem}.bin"
+    if not bin_path.exists():
+        raise RuntimeError(
+            f"Existing early-audit payload not found: {bin_path}. Run --loader-early-audit once first."
+        )
+    full_manifest = json.loads(full_manifest_path.read_text(encoding="ascii"))
+    payload = bin_path.read_bytes()
+    manifest = dict(full_manifest)
+    manifest["bin"] = str(bin_path)
+    manifest["size_bytes"] = len(payload)
+    manifest["checksum32"] = sum(payload) & 0xFFFFFFFF
+    return manifest
+
+
+def early_audit_passed(result: dict[str, object]) -> bool:
+    return bool(
+        result.get("loader_ready_seen")
+        and result.get("loader_header_magic_ok")
+        and result.get("loader_load_start_seen")
+        and result.get("loader_first_block_ack_seen")
+        and result.get("loader_summary_seen")
+        and result.get("loader_summary_ok")
+        and not result.get("loader_bad_seen")
+        and not result.get("loader_bad_magic_seen")
+        and not result.get("loader_session_start_not_found")
+    )
+
+
+def write_json(path: Path, payload: object) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
+def write_beacon_selftest_summary(path: Path, result: dict[str, object], *, build_id: str, failure_stage: str, failure_detail: str, jtag_log: Path) -> None:
+    lines = [
+        "Flow: AX7203 Loader Beacon Selftest",
+        f"Pass: {bool(result.get('loader_beacon_selftest_pass', False)) and failure_stage == 'none'}",
+        f"BuildID: {build_id}",
+        f"FailureStage: {failure_stage}",
+        f"FailureDetail: {failure_detail or 'none'}",
+        f"SessionCount: {result.get('loader_session_count', 0)}",
+        f"PassSessionCount: {result.get('loader_pass_session_count', 0)}",
+        f"GoodFrames: {result.get('loader_good_frames', 0)}",
+        f"BadFrames: {result.get('loader_bad_frames', 0)}",
+        f"SessionClassification: {result.get('loader_session_classification', 'N/A')}",
+        f"ChosenSessionIndex: {result.get('loader_chosen_session_index', 'N/A')}",
+        f"ChosenSessionOffset: {fmt_optional_hex(result.get('loader_chosen_session_start_offset', 'N/A'))}",
+        f"ChosenSessionReadyArg: {fmt_optional_hex(result.get('loader_chosen_session_ready_arg', 'N/A'))}",
+        f"ChosenSessionFirstEvents: {','.join(result.get('loader_chosen_session_first_events', []))}",
+        f"ChosenSessionMatchedPrefixLen: {result.get('loader_chosen_session_matched_prefix_len', 0)}",
+        f"ChosenSessionEventCount: {result.get('loader_chosen_session_event_count', 0)}",
+        f"ChosenSessionOrderValid: {result.get('loader_chosen_session_order_valid', False)}",
+        f"ChosenSessionOrderError: {result.get('loader_chosen_session_order_error', '')}",
+        f"CaptureFile: {result.get('uart_capture_text_file', 'N/A')}",
+        f"CaptureRawFile: {result.get('uart_capture_raw_file', 'N/A')}",
+        f"DecodedFile: {result.get('loader_decoded_log_path', 'N/A')}",
+        f"SessionsFile: {result.get('loader_sessions_json_path', 'N/A')}",
+        f"JtagLog: {jtag_log}",
+    ]
+    write_summary(path, lines)
+
+
+def run_loader_beacon_selftest_board(
+    logs_dir: Path,
+    *,
+    port: str,
+    uart_baud: int,
+    capture_seconds: int,
+    vivado: str,
+    env: dict[str, str],
+) -> tuple[dict[str, object], str, str, str, Path]:
+    capture_file = UART_BEACON_SELFTEST_CAPTURE_FILE
+    capture_raw_file = UART_BEACON_SELFTEST_CAPTURE_RAW_FILE
+    decoded_file = UART_BEACON_SELFTEST_CAPTURE_DECODED_FILE
+    sessions_file = UART_BEACON_SELFTEST_CAPTURE_SESSIONS_FILE
+    jtag_log = logs_dir / "10_program_jtag.log"
+    result: dict[str, object] = {}
+    build_id = "N/A"
+    failure_stage = "none"
+    failure_detail = ""
+    try:
+        import serial  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on local environment
+        raise RuntimeError("pyserial is required for board beacon selftest capture") from exc
+    try:
+        with serial.Serial(port, uart_baud, timeout=0.05) as ser:
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+            raw_bytes = bytearray()
+            capture_stop = threading.Event()
+            capture_error: list[str] = []
+
+            def capture_worker() -> None:
+                try:
+                    while not capture_stop.is_set():
+                        chunk = ser.read(4096)
+                        if chunk:
+                            raw_bytes.extend(chunk)
+                        else:
+                            time.sleep(0.001)
+                except Exception as exc:  # noqa: BLE001
+                    capture_error.append(str(exc))
+
+            worker = threading.Thread(target=capture_worker, name="beacon-selftest-uart-capture", daemon=True)
+            worker.start()
+            run_logged(
+                [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
+                cwd=REPO_ROOT,
+                env=env,
+                log_path=jtag_log,
+                timeout=1800,
+            )
+            build_id = parse_build_id(BUILD_ID_FILE)
+            deadline = time.monotonic() + capture_seconds
+            analysis = analyze_loader_beacon_selftest_beacon(bytes(raw_bytes))
+            while time.monotonic() < deadline:
+                if capture_error:
+                    raise RuntimeError(f"Beacon selftest UART capture failed: {capture_error[-1]}")
+                analysis = analyze_loader_beacon_selftest_beacon(bytes(raw_bytes))
+                if analysis.get("pass") or analysis.get("summary_seen"):
+                    break
+                time.sleep(0.010)
+            capture_stop.set()
+            worker.join(timeout=1.0)
+            result = finalize_loader_beacon_selftest_capture(
+                raw_bytes,
+                capture_file,
+                raw_log_path=capture_raw_file,
+                loader_decoded_path=decoded_file,
+                sessions_json_path=sessions_file,
+            )
+            if not bool(result.get("loader_beacon_selftest_pass", False)):
+                raise RuntimeError(
+                    f"Beacon selftest capture mismatch ({result.get('loader_session_classification', 'unknown')}); see {decoded_file}"
+                )
+    except Exception as exc:  # noqa: BLE001
+        failure_stage = "uart_capture_beacon_selftest" if Path(jtag_log).exists() else "program_jtag"
+        failure_detail = str(exc)
+    write_beacon_selftest_summary(logs_dir / "summary.txt", result, build_id=build_id, failure_stage=failure_stage, failure_detail=failure_detail, jtag_log=jtag_log)
+    return result, build_id, failure_stage, failure_detail, jtag_log
+
+
+def write_early_audit_trial_summary(path: Path, trial: dict[str, object]) -> None:
+    lines = [
+        "Flow: AX7203 Loader Early Audit Board-Only Trial",
+        f"TrialName: {trial['trial_name']}",
+        f"PostJtagQuietMs: {trial['post_jtag_quiet_ms']}",
+        f"HeaderSendDelayMs: {trial['header_send_delay_ms']}",
+        f"BuildID: {trial.get('build_id', 'N/A')}",
+        f"Pass: {trial['pass']}",
+        f"FailureStage: {trial.get('failure_stage', 'none')}",
+        f"FailureDetail: {trial.get('failure_detail', 'none')}",
+        f"SessionStartNotFound: {trial.get('session_start_not_found', False)}",
+        f"SessionClassification: {trial.get('session_classification', 'N/A')}",
+        f"ChosenSessionReadyArg: {trial.get('chosen_session_ready_arg', 'N/A')}",
+        f"ChosenSessionFirstEvents: {','.join(trial.get('chosen_session_first_events', []))}",
+        f"HeaderByte0: {fmt_optional_hex(trial.get('header_byte0', 'N/A'))}",
+        f"HeaderByte1: {fmt_optional_hex(trial.get('header_byte1', 'N/A'))}",
+        f"BadMagicSeen: {trial.get('bad_magic_seen', False)}",
+        f"BadMagicByteIndex: {trial.get('bad_magic_byte_index', 'N/A')}",
+        f"BadReason: {trial.get('bad_reason', 'none')}",
+        f"SummaryMask: {fmt_optional_hex(trial.get('summary_mask', 'N/A'))}",
+        f"CaptureFile: {trial.get('capture_file', 'N/A')}",
+        f"CaptureRawFile: {trial.get('capture_raw_file', 'N/A')}",
+        f"DecodedFile: {trial.get('decoded_file', 'N/A')}",
+        f"SessionsFile: {trial.get('sessions_file', 'N/A')}",
+        f"JtagLog: {trial.get('jtag_log', 'N/A')}",
+    ]
+    write_summary(path, lines)
+
+
+def run_loader_early_audit_board_trial(
+    trial_dir: Path,
+    *,
+    trial_name: str,
+    manifest: dict[str, object],
+    port: str,
+    uart_baud: int,
+    capture_seconds: int,
+    post_jtag_quiet_ms: int,
+    header_send_delay_ms: int,
+    vivado: str,
+    env: dict[str, str],
+) -> dict[str, object]:
+    capture_file = trial_dir / "capture.txt"
+    capture_raw_file = trial_dir / "capture.bin"
+    decoded_file = trial_dir / "capture.loader.decoded.txt"
+    sessions_file = trial_dir / "sessions.json"
+    jtag_log = trial_dir / "program_jtag.log"
+    trial_dir.mkdir(parents=True, exist_ok=True)
+    trial: dict[str, object] = {
+        "trial_name": trial_name,
+        "post_jtag_quiet_ms": post_jtag_quiet_ms,
+        "header_send_delay_ms": header_send_delay_ms,
+        "build_id": "N/A",
+        "pass": False,
+        "failure_stage": "none",
+        "failure_detail": "none",
+        "session_start_not_found": False,
+        "session_classification": "N/A",
+        "chosen_session_ready_arg": "N/A",
+        "chosen_session_first_events": [],
+        "header_byte0": "N/A",
+        "header_byte1": "N/A",
+        "bad_magic_seen": False,
+        "bad_magic_byte_index": "N/A",
+        "bad_reason": "none",
+        "summary_mask": "N/A",
+        "capture_file": str(capture_file),
+        "capture_raw_file": str(capture_raw_file),
+        "decoded_file": str(decoded_file),
+        "sessions_file": str(sessions_file),
+        "jtag_log": str(jtag_log),
+    }
+    try:
+        import serial  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on local environment
+        raise RuntimeError("pyserial is required for board early-audit sweep") from exc
+    try:
+        with serial.Serial(port, uart_baud, timeout=0.05) as ser:
+            ser.reset_input_buffer()
+            ser.reset_output_buffer()
+            run_logged(
+                [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
+                cwd=REPO_ROOT,
+                env=env,
+                log_path=jtag_log,
+                timeout=1800,
+            )
+            trial["build_id"] = parse_build_id(BUILD_ID_FILE)
+            result = run_uart_loader_early_audit_capture(
+                None,
+                manifest,
+                capture_seconds,
+                capture_file,
+                uart_baud=uart_baud,
+                raw_log_path=capture_raw_file,
+                loader_decoded_path=decoded_file,
+                sessions_json_path=sessions_file,
+                ser=ser,
+                wait_for_fresh_ready_only=True,
+                allow_blind_header_fallback=False,
+                post_jtag_quiet_ms=post_jtag_quiet_ms,
+                header_send_delay_ms=header_send_delay_ms,
+                training_count=EARLY_AUDIT_TRAINING_COUNT_BOARD,
+            )
+        trial["session_start_not_found"] = bool(result.get("loader_session_start_not_found", False))
+        trial["session_classification"] = result.get("loader_session_classification", "N/A")
+        trial["chosen_session_ready_arg"] = result.get("loader_chosen_session_ready_arg", "N/A")
+        trial["chosen_session_first_events"] = list(result.get("loader_chosen_session_first_events", []))
+        trial["header_byte0"] = result.get("loader_header_byte0", "N/A")
+        trial["header_byte1"] = result.get("loader_header_byte1", "N/A")
+        trial["bad_magic_seen"] = bool(result.get("loader_bad_magic_seen", False))
+        trial["bad_magic_byte_index"] = result.get("loader_bad_magic_byte_index", "N/A")
+        trial["bad_reason"] = result.get("bad_reason", "none")
+        trial["summary_mask"] = result.get("loader_summary_mask", "N/A")
+        trial["pass"] = early_audit_passed(result)
+    except Exception as exc:  # noqa: BLE001
+        trial["failure_stage"] = "program_jtag" if not Path(jtag_log).exists() else "uart_load_and_capture_early_audit"
+        trial["failure_detail"] = str(exc)
+    write_early_audit_trial_summary(trial_dir / "summary.txt", trial)
+    return trial
+
+
+def run_loader_early_audit_board_sweep(
+    logs_dir: Path,
+    *,
+    manifest: dict[str, object],
+    port: str,
+    uart_baud: int,
+    capture_seconds: int,
+    vivado: str,
+    env: dict[str, str],
+) -> int:
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    results: list[dict[str, object]] = []
+    winning_trial = "none"
+    for trial_name, post_jtag_quiet_ms, header_send_delay_ms in EARLY_AUDIT_SWEEP_TRIALS:
+        trial_dir = logs_dir / trial_name
+        trial = run_loader_early_audit_board_trial(
+            trial_dir,
+            trial_name=trial_name,
+            manifest=manifest,
+            port=port,
+            uart_baud=uart_baud,
+            capture_seconds=capture_seconds,
+            post_jtag_quiet_ms=post_jtag_quiet_ms,
+            header_send_delay_ms=header_send_delay_ms,
+            vivado=vivado,
+            env=env,
+        )
+        results.append(trial)
+        if trial["pass"]:
+            winning_trial = trial_name
+            break
+    sweep_summary = {
+        "EarlyStopOnPass": True,
+        "WinningTrial": winning_trial,
+        "Trials": results,
+    }
+    write_json(logs_dir / "sweep_summary.json", sweep_summary)
+    lines = [
+        "Flow: AX7203 Loader Early Audit Board-Only 3-Point Sweep",
+        f"WinningTrial: {winning_trial}",
+        "EarlyStopOnPass: True",
+    ]
+    for trial in results:
+        lines.extend(
+            [
+                "",
+                f"TrialName: {trial['trial_name']}",
+                f"PostJtagQuietMs: {trial['post_jtag_quiet_ms']}",
+                f"HeaderSendDelayMs: {trial['header_send_delay_ms']}",
+                f"BuildID: {trial.get('build_id', 'N/A')}",
+                f"Pass: {trial['pass']}",
+                f"FailureStage: {trial.get('failure_stage', 'none')}",
+                f"FailureDetail: {trial.get('failure_detail', 'none')}",
+                f"SessionStartNotFound: {trial.get('session_start_not_found', False)}",
+                f"SessionClassification: {trial.get('session_classification', 'N/A')}",
+                f"ChosenSessionFirstEvents: {','.join(trial.get('chosen_session_first_events', []))}",
+                f"HeaderByte0: {fmt_optional_hex(trial.get('header_byte0', 'N/A'))}",
+                f"HeaderByte1: {fmt_optional_hex(trial.get('header_byte1', 'N/A'))}",
+                f"BadMagicSeen: {trial.get('bad_magic_seen', False)}",
+                f"BadMagicByteIndex: {trial.get('bad_magic_byte_index', 'N/A')}",
+                f"BadReason: {trial.get('bad_reason', 'none')}",
+                f"SummaryMask: {fmt_optional_hex(trial.get('summary_mask', 'N/A'))}",
+                f"TrialSummary: {logs_dir / trial['trial_name'] / 'summary.txt'}",
+            ]
+        )
+    write_summary(logs_dir / "sweep_summary.txt", lines)
+    return 0 if winning_trial != "none" else 1
 
 
 def parse_fetch_probe(text: str) -> dict[str, object]:
@@ -1398,6 +1967,16 @@ def loader_event_name(evt_type: int) -> str:
         LOADER_EVT_LOAD_START: "LOAD_START",
         LOADER_EVT_BLOCK_ACK: "BLOCK_ACK",
         LOADER_EVT_BLOCK_NACK: "BLOCK_NACK",
+        LOADER_EA_EVT_HDR_B0_RX: "HDR_B0_RX",
+        LOADER_EA_EVT_HDR_B1_RX: "HDR_B1_RX",
+        LOADER_EA_EVT_HDR_B2_RX: "HDR_B2_RX",
+        LOADER_EA_EVT_HDR_B3_RX: "HDR_B3_RX",
+        LOADER_EA_EVT_HDR_MAGIC_OK: "HDR_MAGIC_OK",
+        LOADER_EA_EVT_IDLE_OK: "IDLE_OK",
+        LOADER_EA_EVT_TRAIN_START: "TRAIN_START",
+        LOADER_EA_EVT_TRAIN_DONE: "TRAIN_DONE",
+        LOADER_EA_EVT_FLUSH_DONE: "FLUSH_DONE",
+        LOADER_EA_EVT_HEADER_ENTER: "HEADER_ENTER",
         LOADER_EVT_READ_OK: "READ_OK",
         LOADER_EVT_LOAD_OK: "LOAD_OK",
         LOADER_EVT_JUMP: "JUMP",
@@ -1410,6 +1989,9 @@ def loader_event_name(evt_type: int) -> str:
         LOADER_EVT_RX_FRAME_ERR: "RX_FRAME_ERR",
         LOADER_EVT_DRAIN_TIMEOUT: "DRAIN_TIMEOUT",
         LOADER_EVT_SIZE_TOO_BIG: "SIZE_TOO_BIG",
+        LOADER_EA_EVT_TRAIN_TIMEOUT: "TRAIN_TIMEOUT",
+        LOADER_EA_EVT_FLUSH_TIMEOUT: "FLUSH_TIMEOUT",
+        LOADER_EVT_TRAP: "TRAP",
         LOADER_EVT_SUMMARY: "SUMMARY",
     }
     return names.get(evt_type, f"TYPE_{evt_type:02X}")
@@ -1417,6 +1999,10 @@ def loader_event_name(evt_type: int) -> str:
 
 def loader_summary_ok(summary_mask: object) -> bool:
     return isinstance(summary_mask, int) and (summary_mask & 0x1F) == 0x1F and (summary_mask & LOADER_SUM_ANY_BAD) == 0
+
+
+def loader_early_audit_summary_ok(summary_mask: object) -> bool:
+    return isinstance(summary_mask, int) and (summary_mask & 0x0F) == 0x0F and (summary_mask & LOADER_SUM_ANY_BAD) == 0
 
 
 def loader_prefix_target_ok(loader_result: dict[str, object], target: int) -> bool:
@@ -1432,9 +2018,87 @@ def loader_prefix_target_ok(loader_result: dict[str, object], target: int) -> bo
     )
 
 
-def reduce_loader_events(
-    events: list[tuple[int, int, int]],
+def split_loader_session(
+    events: list[tuple[int, int, int, int]],
     *,
+    require_ready_seq0: bool,
+) -> dict[str, object]:
+    session_start_idx = -1
+    session_ready_seq: int | None = None
+    session_start_offset: int | None = None
+    for idx, (offset, seq, evt_type, _evt_arg) in enumerate(events):
+        if evt_type == LOADER_EVT_READY and seq == 0:
+            session_start_idx = idx
+            session_ready_seq = seq
+            session_start_offset = offset
+    if session_start_idx < 0 and not require_ready_seq0:
+        for idx, (offset, seq, evt_type, _evt_arg) in enumerate(events):
+            if evt_type == LOADER_EVT_READY:
+                session_start_idx = idx
+                session_ready_seq = seq
+                session_start_offset = offset
+    if session_start_idx < 0:
+        return {
+            "session_events": [],
+            "pre_session_frame_count": len(events),
+            "session_start_offset": None,
+            "session_ready_seq": None,
+            "session_start_not_found": True,
+        }
+    return {
+        "session_events": events[session_start_idx:],
+        "pre_session_frame_count": session_start_idx,
+        "session_start_offset": session_start_offset,
+        "session_ready_seq": session_ready_seq,
+        "session_start_not_found": False,
+    }
+
+
+def decode_loader_beacon_frames(raw_bytes: bytes) -> dict[str, object]:
+    events: list[tuple[int, int, int, int]] = []
+    decoded_lines: list[str] = []
+    passthrough = bytearray()
+    bad_frames = 0
+    idx = 0
+    while idx < len(raw_bytes):
+        if raw_bytes[idx] != STEP2_BEACON_SOF:
+            passthrough.append(raw_bytes[idx])
+            idx += 1
+            continue
+        if idx + 4 >= len(raw_bytes):
+            break
+        seq = raw_bytes[idx + 1]
+        evt_type = raw_bytes[idx + 2]
+        evt_arg = raw_bytes[idx + 3]
+        evt_chk = raw_bytes[idx + 4]
+        exp_chk = STEP2_BEACON_SOF ^ seq ^ evt_type ^ evt_arg
+        if evt_chk != exp_chk:
+            bad_frames += 1
+            decoded_lines.append(
+                f"BAD_FRAME off=0x{idx:04X} seq=0x{seq:02X} type=0x{evt_type:02X} "
+                f"arg=0x{evt_arg:02X} chk=0x{evt_chk:02X} exp=0x{exp_chk:02X}"
+            )
+            passthrough.append(raw_bytes[idx])
+            idx += 1
+            continue
+        decoded_lines.append(f"EVT off=0x{idx:04X} seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
+        events.append((idx, seq, evt_type, evt_arg))
+        idx += 5
+    return {
+        "events": events,
+        "decoded_lines": decoded_lines,
+        "passthrough_bytes": bytes(passthrough),
+        "bad_frames": bad_frames,
+    }
+
+
+def reduce_loader_events(
+    events: list[tuple[int, int, int, int]],
+    *,
+    pre_session_frame_count: int,
+    session_start_offset: int | None,
+    session_ready_seq: int | None,
+    session_start_not_found: bool,
     decoded_lines: list[str] | None = None,
     bad_frames: int = 0,
 ) -> dict[str, object]:
@@ -1454,32 +2118,12 @@ def reduce_loader_events(
     max_block_ack_arg: int | None = None
     good_frames = 0
     dropped_duplicates = 0
-    session_active = False
     seen_seq: set[int] = set()
 
-    for event_idx, (seq, evt_type, evt_arg) in enumerate(events):
+    for event_idx, (_offset, seq, evt_type, evt_arg) in enumerate(events):
         if evt_type == LOADER_EVT_READY:
             ready_seen = True
-            load_start_seen = False
-            read_ok_seen = False
-            load_ok_seen = False
-            jump_seen = False
-            summary_seen = False
-            summary_mask = None
-            bad_seen = False
-            bad_code = None
-            bad_block = None
-            first_bad_event_offset = None
-            block_ack_events = 0
-            block_nack_events = 0
-            max_block_ack_arg = None
-            good_frames = 1
-            dropped_duplicates = 0
-            session_active = True
-            seen_seq = {seq}
-            continue
-
-        if not session_active:
+        if session_start_not_found:
             continue
         if seq in seen_seq:
             dropped_duplicates += 1
@@ -1487,7 +2131,9 @@ def reduce_loader_events(
         seen_seq.add(seq)
         good_frames += 1
 
-        if evt_type == LOADER_EVT_LOAD_START:
+        if evt_type == LOADER_EVT_READY:
+            pass
+        elif evt_type == LOADER_EVT_LOAD_START:
             load_start_seen = True
         elif evt_type == LOADER_EVT_BLOCK_ACK:
             block_ack_events += 1
@@ -1532,61 +2178,778 @@ def reduce_loader_events(
         "good_frames": good_frames,
         "bad_frames": bad_frames,
         "dropped_duplicate_frames": dropped_duplicates,
+        "pre_session_frame_count": pre_session_frame_count,
+        "session_start_offset": session_start_offset,
+        "session_ready_seq": session_ready_seq,
+        "session_start_not_found": session_start_not_found,
         "decoded_text": "\n".join(decoded_lines or []) + ("\n" if decoded_lines else ""),
     }
 
 
 def analyze_loader_beacon(raw_bytes: bytes) -> dict[str, object]:
-    events: list[tuple[int, int, int]] = []
-    decoded_lines: list[str] = []
-    passthrough = bytearray()
-    bad_frames = 0
-    idx = 0
-    while idx < len(raw_bytes):
-        if raw_bytes[idx] != STEP2_BEACON_SOF:
-            passthrough.append(raw_bytes[idx])
-            idx += 1
-            continue
-        if idx + 4 >= len(raw_bytes):
-            break
-        seq = raw_bytes[idx + 1]
-        evt_type = raw_bytes[idx + 2]
-        evt_arg = raw_bytes[idx + 3]
-        evt_chk = raw_bytes[idx + 4]
-        exp_chk = STEP2_BEACON_SOF ^ seq ^ evt_type ^ evt_arg
-        if evt_chk != exp_chk:
-            bad_frames += 1
-            decoded_lines.append(
-                f"BAD_FRAME off=0x{idx:04X} seq=0x{seq:02X} type=0x{evt_type:02X} "
-                f"arg=0x{evt_arg:02X} chk=0x{evt_chk:02X} exp=0x{exp_chk:02X}"
-            )
-            passthrough.append(raw_bytes[idx])
-            idx += 1
-            continue
-        decoded_lines.append(f"EVT off=0x{idx:04X} seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
-        events.append((seq, evt_type, evt_arg))
-        idx += 5
-    result = reduce_loader_events(events, decoded_lines=decoded_lines, bad_frames=bad_frames)
-    result["passthrough_bytes"] = bytes(passthrough)
+    decoded = decode_loader_beacon_frames(raw_bytes)
+    session = split_loader_session(decoded["events"], require_ready_seq0=False)
+    if bool(session["session_start_not_found"]) and decoded["events"]:
+        session = {
+            "session_events": decoded["events"],
+            "pre_session_frame_count": 0,
+            "session_start_offset": decoded["events"][0][0],
+            "session_ready_seq": None,
+            "session_start_not_found": False,
+        }
+    result = reduce_loader_events(
+        session["session_events"],
+        pre_session_frame_count=int(session["pre_session_frame_count"]),
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+        session_start_not_found=bool(session["session_start_not_found"]),
+        decoded_lines=list(decoded["decoded_lines"]),
+        bad_frames=int(decoded["bad_frames"]),
+    )
+    result["passthrough_bytes"] = decoded["passthrough_bytes"]
     return result
 
 
 def analyze_loader_sim_log(text: str) -> dict[str, object]:
-    events: list[tuple[int, int, int]] = []
+    events: list[tuple[int, int, int, int]] = []
     decoded_lines: list[str] = []
-    for seq_s, type_s, arg_s in re.findall(
-        r"\[AX7203_DDR3_LOADER_EVT\]\s+seq=([0-9A-Fa-f]{2})\s+type=([0-9A-Fa-f]{2})\s+arg=([0-9A-Fa-f]{2})",
-        text,
+    for event_idx, (seq_s, type_s, arg_s) in enumerate(
+        re.findall(
+            r"\[AX7203_DDR3_LOADER_EVT\]\s+seq=([0-9A-Fa-f]{2})\s+type=([0-9A-Fa-f]{2})\s+arg=([0-9A-Fa-f]{2})",
+            text,
+        )
     ):
         seq = int(seq_s, 16)
         evt_type = int(type_s, 16)
         evt_arg = int(arg_s, 16)
         decoded_lines.append(f"EVT seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
-        events.append((seq, evt_type, evt_arg))
-    result = reduce_loader_events(events, decoded_lines=decoded_lines, bad_frames=0)
+        events.append((event_idx * 5, seq, evt_type, evt_arg))
+    session = split_loader_session(events, require_ready_seq0=False)
+    if bool(session["session_start_not_found"]) and events:
+        session = {
+            "session_events": events,
+            "pre_session_frame_count": 0,
+            "session_start_offset": events[0][0],
+            "session_ready_seq": None,
+            "session_start_not_found": False,
+        }
+    result = reduce_loader_events(
+        session["session_events"],
+        pre_session_frame_count=int(session["pre_session_frame_count"]),
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+        session_start_not_found=bool(session["session_start_not_found"]),
+        decoded_lines=decoded_lines,
+        bad_frames=0,
+    )
     result["passthrough_bytes"] = b""
     result["capture_bytes"] = 0
     result["saw_exec_pass"] = ("DDR3 EXEC PASS" in text) or bool(re.search(r"\bexec_pass=1\b", text))
+    result["decoded_log_path"] = ""
+    return result
+
+
+def reduce_loader_early_audit_events(
+    events: list[tuple[int, int, int, int]],
+    *,
+    pre_session_frame_count: int,
+    session_start_offset: int | None,
+    session_ready_seq: int | None,
+    session_start_not_found: bool,
+    decoded_lines: list[str] | None = None,
+    bad_frames: int = 0,
+) -> dict[str, object]:
+    header_bytes: list[int | None] = [None, None, None, None]
+    ready_seen = False
+    idle_ok_seen = False
+    train_start_seen = False
+    train_done_seen = False
+    train_done_count: int | None = None
+    flush_done_seen = False
+    flush_done_count: int | None = None
+    header_enter_seen = False
+    train_timeout_seen = False
+    train_timeout_count: int | None = None
+    flush_timeout_seen = False
+    flush_timeout_count: int | None = None
+    header_magic_ok = False
+    load_start_seen = False
+    first_block_ack_seen = False
+    summary_seen = False
+    summary_mask: int | None = None
+    bad_magic_seen = False
+    bad_magic_byte_index: int | None = None
+    bad_seen = False
+    bad_code: int | None = None
+    seen_seq: set[int] = set()
+    good_frames = 0
+    dropped_duplicates = 0
+
+    for _offset, seq, evt_type, evt_arg in events:
+        if evt_type == LOADER_EVT_READY:
+            ready_seen = True
+        if session_start_not_found:
+            continue
+        if seq in seen_seq:
+            dropped_duplicates += 1
+            continue
+        seen_seq.add(seq)
+        good_frames += 1
+        if evt_type == LOADER_EA_EVT_HDR_B0_RX:
+            header_bytes[0] = evt_arg
+        elif evt_type == LOADER_EA_EVT_IDLE_OK:
+            idle_ok_seen = True
+        elif evt_type == LOADER_EA_EVT_TRAIN_START:
+            train_start_seen = True
+        elif evt_type == LOADER_EA_EVT_TRAIN_DONE:
+            train_done_seen = True
+            train_done_count = evt_arg
+        elif evt_type == LOADER_EA_EVT_FLUSH_DONE:
+            flush_done_seen = True
+            flush_done_count = evt_arg
+        elif evt_type == LOADER_EA_EVT_HEADER_ENTER:
+            header_enter_seen = True
+        elif evt_type == LOADER_EA_EVT_HDR_B1_RX:
+            header_bytes[1] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_B2_RX:
+            header_bytes[2] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_B3_RX:
+            header_bytes[3] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_MAGIC_OK:
+            header_magic_ok = True
+        elif evt_type == LOADER_EVT_LOAD_START:
+            load_start_seen = True
+        elif evt_type == LOADER_EVT_BLOCK_ACK and evt_arg == 0:
+            first_block_ack_seen = True
+        elif evt_type == LOADER_EVT_BAD_MAGIC:
+            bad_magic_seen = True
+            bad_magic_byte_index = evt_arg
+            bad_seen = True
+            bad_code = evt_type
+        elif evt_type == LOADER_EA_EVT_TRAIN_TIMEOUT:
+            train_timeout_seen = True
+            train_timeout_count = evt_arg
+            bad_seen = True
+            bad_code = evt_type
+        elif evt_type == LOADER_EA_EVT_FLUSH_TIMEOUT:
+            flush_timeout_seen = True
+            flush_timeout_count = evt_arg
+            bad_seen = True
+            bad_code = evt_type
+        elif evt_type == LOADER_EVT_SUMMARY:
+            summary_seen = True
+            summary_mask = evt_arg
+        elif evt_type == LOADER_EVT_TRAP:
+            bad_seen = True
+            bad_code = evt_type
+        elif evt_type in (
+            LOADER_EVT_BLOCK_NACK,
+            LOADER_EVT_CAL_FAIL,
+            LOADER_EVT_CHECKSUM_FAIL,
+            LOADER_EVT_READBACK_FAIL,
+            LOADER_EVT_READBACK_BLOCK_FAIL,
+            LOADER_EVT_RX_OVERRUN,
+            LOADER_EVT_RX_FRAME_ERR,
+            LOADER_EVT_DRAIN_TIMEOUT,
+            LOADER_EVT_SIZE_TOO_BIG,
+        ):
+            bad_seen = True
+            bad_code = evt_type
+
+    return {
+        "ready_seen": ready_seen,
+        "idle_ok_seen": idle_ok_seen,
+        "train_start_seen": train_start_seen,
+        "train_done_seen": train_done_seen,
+        "train_done_count": train_done_count,
+        "flush_done_seen": flush_done_seen,
+        "flush_done_count": flush_done_count,
+        "header_enter_seen": header_enter_seen,
+        "train_timeout_seen": train_timeout_seen,
+        "train_timeout_count": train_timeout_count,
+        "flush_timeout_seen": flush_timeout_seen,
+        "flush_timeout_count": flush_timeout_count,
+        "header_byte0": header_bytes[0],
+        "header_byte1": header_bytes[1],
+        "header_byte2": header_bytes[2],
+        "header_byte3": header_bytes[3],
+        "header_magic_ok": header_magic_ok,
+        "load_start_seen": load_start_seen,
+        "first_block_ack_seen": first_block_ack_seen,
+        "summary_seen": summary_seen,
+        "summary_mask": summary_mask,
+        "summary_ok_seen": loader_early_audit_summary_ok(summary_mask),
+        "bad_magic_seen": bad_magic_seen,
+        "bad_magic_byte_index": bad_magic_byte_index,
+        "bad_seen": bad_seen,
+        "bad_code": bad_code,
+        "bad_reason": loader_event_name(bad_code) if bad_code is not None else "none",
+        "good_frames": good_frames,
+        "bad_frames": bad_frames,
+        "dropped_duplicate_frames": dropped_duplicates,
+        "pre_session_frame_count": pre_session_frame_count,
+        "session_start_offset": session_start_offset,
+        "session_ready_seq": session_ready_seq,
+        "session_start_not_found": session_start_not_found,
+        "decoded_text": "\n".join(decoded_lines or []) + ("\n" if decoded_lines else ""),
+    }
+
+
+def validate_loader_early_audit_session_order(
+    dedup_events: list[tuple[int, int, int, int]],
+) -> tuple[bool, str]:
+    seen: set[int] = set()
+    singletons = {
+        LOADER_EVT_READY,
+        LOADER_EA_EVT_IDLE_OK,
+        LOADER_EA_EVT_TRAIN_START,
+        LOADER_EA_EVT_TRAIN_DONE,
+        LOADER_EA_EVT_TRAIN_TIMEOUT,
+        LOADER_EA_EVT_FLUSH_DONE,
+        LOADER_EA_EVT_FLUSH_TIMEOUT,
+        LOADER_EA_EVT_HEADER_ENTER,
+        LOADER_EA_EVT_HDR_MAGIC_OK,
+        LOADER_EVT_LOAD_START,
+        LOADER_EVT_SUMMARY,
+    }
+
+    for _offset, _seq, evt_type, _evt_arg in dedup_events:
+        if evt_type in singletons:
+            if evt_type in seen:
+                return False, f"duplicate_{loader_event_name(evt_type)}"
+            seen.add(evt_type)
+        if evt_type == LOADER_EA_EVT_TRAIN_DONE and LOADER_EA_EVT_TRAIN_START not in seen:
+            return False, "train_done_before_train_start"
+        if evt_type == LOADER_EA_EVT_TRAIN_TIMEOUT and LOADER_EA_EVT_TRAIN_START not in seen:
+            return False, "train_timeout_before_train_start"
+        if evt_type == LOADER_EA_EVT_FLUSH_DONE and not (
+            LOADER_EA_EVT_TRAIN_DONE in seen or LOADER_EA_EVT_TRAIN_TIMEOUT in seen
+        ):
+            return False, "flush_done_before_train_done"
+        if evt_type == LOADER_EA_EVT_FLUSH_TIMEOUT and not (
+            LOADER_EA_EVT_TRAIN_DONE in seen or LOADER_EA_EVT_TRAIN_TIMEOUT in seen
+        ):
+            return False, "flush_timeout_before_train_done"
+        if evt_type == LOADER_EA_EVT_HEADER_ENTER and not (
+            LOADER_EA_EVT_FLUSH_DONE in seen or LOADER_EA_EVT_FLUSH_TIMEOUT in seen
+        ):
+            return False, "header_enter_before_flush_done"
+        if evt_type == LOADER_EA_EVT_HDR_B0_RX and LOADER_EA_EVT_HEADER_ENTER not in seen:
+            return False, "hdr_b0_before_header_enter"
+        if evt_type == LOADER_EA_EVT_HDR_B1_RX and LOADER_EA_EVT_HDR_B0_RX not in seen:
+            return False, "hdr_b1_before_hdr_b0"
+        if evt_type == LOADER_EA_EVT_HDR_B2_RX and LOADER_EA_EVT_HDR_B1_RX not in seen:
+            return False, "hdr_b2_before_hdr_b1"
+        if evt_type == LOADER_EA_EVT_HDR_B3_RX and LOADER_EA_EVT_HDR_B2_RX not in seen:
+            return False, "hdr_b3_before_hdr_b2"
+        if evt_type == LOADER_EA_EVT_HDR_MAGIC_OK and LOADER_EA_EVT_HDR_B3_RX not in seen:
+            return False, "hdr_magic_ok_before_hdr_b3"
+        if evt_type == LOADER_EVT_LOAD_START and LOADER_EA_EVT_HDR_MAGIC_OK not in seen:
+            return False, "load_start_before_hdr_magic_ok"
+        if evt_type == LOADER_EVT_BLOCK_ACK and LOADER_EVT_LOAD_START not in seen:
+            return False, "block_ack_before_load_start"
+    return True, ""
+
+
+def summarize_loader_early_audit_session(events: list[tuple[int, int, int, int]], session_index: int) -> dict[str, object]:
+    header_bytes: list[int | None] = [None, None, None, None]
+    seen_seq: set[int] = set()
+    dedup_events: list[tuple[int, int, int, int]] = []
+    bad_magic_seen = False
+    bad_magic_byte_index: int | None = None
+    summary_mask: int | None = None
+    bad_code: int | None = None
+    idle_ok_seen = False
+    train_start_seen = False
+    train_done_seen = False
+    train_done_count: int | None = None
+    flush_done_seen = False
+    flush_done_count: int | None = None
+    header_enter_seen = False
+    train_timeout_seen = False
+    train_timeout_count: int | None = None
+    flush_timeout_seen = False
+    flush_timeout_count: int | None = None
+    ready_arg: int | None = None
+
+    for offset, seq, evt_type, evt_arg in events:
+        if seq in seen_seq:
+            continue
+        seen_seq.add(seq)
+        dedup_events.append((offset, seq, evt_type, evt_arg))
+        if evt_type == LOADER_EVT_READY:
+            ready_arg = evt_arg
+        elif evt_type == LOADER_EA_EVT_IDLE_OK:
+            idle_ok_seen = True
+        elif evt_type == LOADER_EA_EVT_TRAIN_START:
+            train_start_seen = True
+        elif evt_type == LOADER_EA_EVT_TRAIN_DONE:
+            train_done_seen = True
+            train_done_count = evt_arg
+        elif evt_type == LOADER_EA_EVT_FLUSH_DONE:
+            flush_done_seen = True
+            flush_done_count = evt_arg
+        elif evt_type == LOADER_EA_EVT_HEADER_ENTER:
+            header_enter_seen = True
+        elif evt_type == LOADER_EA_EVT_HDR_B0_RX:
+            header_bytes[0] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_B1_RX:
+            header_bytes[1] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_B2_RX:
+            header_bytes[2] = evt_arg
+        elif evt_type == LOADER_EA_EVT_HDR_B3_RX:
+            header_bytes[3] = evt_arg
+        elif evt_type == LOADER_EVT_BAD_MAGIC:
+            bad_magic_seen = True
+            bad_magic_byte_index = evt_arg
+            bad_code = evt_type
+        elif evt_type == LOADER_EA_EVT_TRAIN_TIMEOUT:
+            train_timeout_seen = True
+            train_timeout_count = evt_arg
+            bad_code = evt_type
+        elif evt_type == LOADER_EA_EVT_FLUSH_TIMEOUT:
+            flush_timeout_seen = True
+            flush_timeout_count = evt_arg
+            bad_code = evt_type
+        elif evt_type == LOADER_EVT_SUMMARY:
+            summary_mask = evt_arg
+        elif evt_type == LOADER_EVT_TRAP:
+            bad_code = evt_type
+        elif evt_type in (
+            LOADER_EVT_BLOCK_NACK,
+            LOADER_EVT_CAL_FAIL,
+            LOADER_EVT_CHECKSUM_FAIL,
+            LOADER_EVT_READBACK_FAIL,
+            LOADER_EVT_READBACK_BLOCK_FAIL,
+            LOADER_EVT_RX_OVERRUN,
+            LOADER_EVT_RX_FRAME_ERR,
+            LOADER_EVT_DRAIN_TIMEOUT,
+            LOADER_EVT_SIZE_TOO_BIG,
+        ):
+            bad_code = evt_type
+
+    first_event_types = [loader_event_name(evt_type) for _offset, _seq, evt_type, _arg in dedup_events[:8]]
+    header_magic_ok = any(evt_type == LOADER_EA_EVT_HDR_MAGIC_OK for _offset, _seq, evt_type, _arg in dedup_events)
+    load_start_seen = any(evt_type == LOADER_EVT_LOAD_START for _offset, _seq, evt_type, _arg in dedup_events)
+    first_block_ack_seen = any(
+        evt_type == LOADER_EVT_BLOCK_ACK and evt_arg == 0 for _offset, _seq, evt_type, evt_arg in dedup_events
+    )
+    summary_seen = summary_mask is not None
+    header_rx_count = sum(
+        1
+        for _offset, _seq, evt_type, _arg in dedup_events
+        if evt_type in (
+            LOADER_EA_EVT_HDR_B0_RX,
+            LOADER_EA_EVT_HDR_B1_RX,
+            LOADER_EA_EVT_HDR_B2_RX,
+            LOADER_EA_EVT_HDR_B3_RX,
+        )
+    )
+    event_order_valid, event_order_error = validate_loader_early_audit_session_order(dedup_events)
+
+    if not dedup_events:
+        classification = "empty_session"
+    elif not event_order_valid:
+        classification = "beacon_transport_corruption"
+    elif header_magic_ok and load_start_seen and first_block_ack_seen and loader_early_audit_summary_ok(summary_mask):
+        classification = "pass"
+    elif train_timeout_seen:
+        classification = "train_timeout"
+    elif flush_timeout_seen:
+        classification = "flush_timeout"
+    elif any(
+        evt_type == LOADER_EVT_RX_OVERRUN for _offset, _seq, evt_type, _arg in dedup_events
+    ) and not header_magic_ok:
+        classification = "rx_overrun_before_magic_complete"
+    elif (
+        header_bytes[0] in (0x00, 0x4D, 0x4B)
+        or header_bytes[1] == 0x31
+    ):
+        classification = "leading_zero_or_shifted_magic"
+    elif bad_code == LOADER_EVT_TRAP:
+        classification = "trap_fail"
+    elif bad_magic_seen:
+        classification = "magic_byte_fail"
+    elif header_enter_seen and header_rx_count == 0:
+        classification = "stuck_before_header_byte0"
+    elif header_rx_count > 0 and not header_magic_ok:
+        classification = "magic_byte_fail"
+    elif flush_done_seen and not header_enter_seen:
+        classification = "stuck_in_flush"
+    elif train_done_seen and not (flush_done_seen or flush_timeout_seen):
+        classification = "stuck_in_flush"
+    elif train_start_seen and not (train_done_seen or train_timeout_seen):
+        classification = "stuck_in_train"
+    elif idle_ok_seen and not train_start_seen:
+        classification = "stuck_in_train"
+    elif summary_seen:
+        classification = "ready_then_summary_only"
+    elif not idle_ok_seen:
+        classification = "stuck_before_idle_ok"
+    else:
+        classification = "other"
+
+    return {
+        "session_index": session_index,
+        "start_offset": dedup_events[0][0] if dedup_events else None,
+        "ready_seq": dedup_events[0][1] if dedup_events else None,
+        "ready_arg": ready_arg,
+        "first_event_types": first_event_types,
+        "idle_ok_seen": idle_ok_seen,
+        "train_start_seen": train_start_seen,
+        "train_done_seen": train_done_seen,
+        "train_done_count": train_done_count,
+        "flush_done_seen": flush_done_seen,
+        "flush_done_count": flush_done_count,
+        "header_enter_seen": header_enter_seen,
+        "train_timeout_seen": train_timeout_seen,
+        "train_timeout_count": train_timeout_count,
+        "flush_timeout_seen": flush_timeout_seen,
+        "flush_timeout_count": flush_timeout_count,
+        "header_byte0": header_bytes[0],
+        "header_byte1": header_bytes[1],
+        "header_byte2": header_bytes[2],
+        "header_byte3": header_bytes[3],
+        "header_magic_ok": header_magic_ok,
+        "load_start_seen": load_start_seen,
+        "first_block_ack_seen": first_block_ack_seen,
+        "bad_magic_seen": bad_magic_seen,
+        "bad_magic_byte_index": bad_magic_byte_index,
+        "summary_mask": summary_mask,
+        "event_count": len(dedup_events),
+        "classification": classification,
+        "bad_code": bad_code,
+        "event_order_valid": event_order_valid,
+        "event_order_error": event_order_error,
+    }
+
+
+def loader_early_audit_session_progress_key(session: dict[str, object]) -> tuple[int, ...]:
+    header_rx_count = sum(
+        1
+        for key in ("header_byte0", "header_byte1", "header_byte2", "header_byte3")
+        if isinstance(session.get(key), int)
+    )
+    return (
+        1 if bool(session.get("header_magic_ok")) and bool(session.get("load_start_seen")) and bool(session.get("first_block_ack_seen")) and loader_early_audit_summary_ok(session.get("summary_mask")) else 0,
+        1 if bool(session.get("first_block_ack_seen")) else 0,
+        1 if bool(session.get("load_start_seen")) else 0,
+        1 if bool(session.get("header_magic_ok")) else 0,
+        header_rx_count,
+        1 if bool(session.get("header_enter_seen")) else 0,
+        1 if bool(session.get("flush_done_seen")) or bool(session.get("flush_timeout_seen")) else 0,
+        1 if bool(session.get("train_done_seen")) or bool(session.get("train_timeout_seen")) else 0,
+        1 if bool(session.get("train_start_seen")) else 0,
+        1 if bool(session.get("idle_ok_seen")) else 0,
+        1 if isinstance(session.get("summary_mask"), int) else 0,
+        1 if bool(session.get("bad_magic_seen")) or session.get("bad_code") is not None else 0,
+        int(session.get("event_count", 0)),
+        int(session.get("start_offset", -1)),
+    )
+
+
+def build_loader_early_audit_sessions(events: list[tuple[int, int, int, int]]) -> list[dict[str, object]]:
+    sessions: list[dict[str, object]] = []
+    current: list[tuple[int, int, int, int]] = []
+    prev_ready_sig: tuple[int, int] | None = None
+    for offset, seq, evt_type, evt_arg in events:
+        if evt_type == LOADER_EVT_READY:
+            ready_sig = (seq, evt_arg)
+            if current and prev_ready_sig != ready_sig:
+                sessions.append(summarize_loader_early_audit_session(current, len(sessions)))
+                current = []
+            prev_ready_sig = ready_sig
+        current.append((offset, seq, evt_type, evt_arg))
+    if current:
+        sessions.append(summarize_loader_early_audit_session(current, len(sessions)))
+    return sessions
+
+
+def choose_loader_early_audit_session(
+    sessions: list[dict[str, object]],
+    *,
+    session_start_offset: int | None,
+    session_ready_seq: int | None,
+) -> dict[str, object] | None:
+    candidates: list[dict[str, object]] = []
+    for item in sessions:
+        start_offset = item.get("start_offset")
+        if not isinstance(start_offset, int):
+            continue
+        if session_start_offset is not None and start_offset < session_start_offset:
+            continue
+        candidates.append(item)
+    if not candidates and session_ready_seq is not None:
+        for item in sessions:
+            if item.get("ready_seq") == session_ready_seq:
+                candidates.append(item)
+    if not candidates:
+        candidates = [item for item in sessions if isinstance(item.get("start_offset"), int)]
+    if not candidates:
+        return None
+    return max(candidates, key=loader_early_audit_session_progress_key)
+
+
+def analyze_loader_early_audit_beacon(raw_bytes: bytes) -> dict[str, object]:
+    decoded = decode_loader_beacon_frames(raw_bytes)
+    sessions = build_loader_early_audit_sessions(decoded["events"])
+    session = split_loader_session(decoded["events"], require_ready_seq0=True)
+    result = reduce_loader_early_audit_events(
+        session["session_events"],
+        pre_session_frame_count=int(session["pre_session_frame_count"]),
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+        session_start_not_found=bool(session["session_start_not_found"]),
+        decoded_lines=list(decoded["decoded_lines"]),
+        bad_frames=int(decoded["bad_frames"]),
+    )
+    result["passthrough_bytes"] = decoded["passthrough_bytes"]
+    result["sessions"] = sessions
+    chosen_session = choose_loader_early_audit_session(
+        sessions,
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+    )
+    result["chosen_session_index"] = chosen_session.get("session_index") if isinstance(chosen_session, dict) else None
+    result["chosen_session_start_offset"] = chosen_session.get("start_offset") if isinstance(chosen_session, dict) else None
+    result["chosen_session_ready_arg"] = chosen_session.get("ready_arg") if isinstance(chosen_session, dict) else None
+    result["chosen_session_first_event_types"] = chosen_session.get("first_event_types", []) if isinstance(chosen_session, dict) else []
+    result["chosen_session_order_valid"] = chosen_session.get("event_order_valid", False) if isinstance(chosen_session, dict) else False
+    result["chosen_session_order_error"] = chosen_session.get("event_order_error", "") if isinstance(chosen_session, dict) else ""
+    result["session_classification"] = chosen_session.get("classification", "session_start_not_found" if bool(session["session_start_not_found"]) else "other") if isinstance(chosen_session, dict) else ("session_start_not_found" if bool(session["session_start_not_found"]) else "other")
+    return result
+
+
+def analyze_loader_early_audit_sim_log(text: str) -> dict[str, object]:
+    events: list[tuple[int, int, int, int]] = []
+    decoded_lines: list[str] = []
+    for event_idx, (seq_s, type_s, arg_s) in enumerate(
+        re.findall(
+            r"\[AX7203_DDR3_LOADER_EVT\]\s+seq=([0-9A-Fa-f]{2})\s+type=([0-9A-Fa-f]{2})\s+arg=([0-9A-Fa-f]{2})",
+            text,
+        )
+    ):
+        seq = int(seq_s, 16)
+        evt_type = int(type_s, 16)
+        evt_arg = int(arg_s, 16)
+        decoded_lines.append(f"EVT seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
+        events.append((event_idx * 5, seq, evt_type, evt_arg))
+    sessions = build_loader_early_audit_sessions(events)
+    session = split_loader_session(events, require_ready_seq0=True)
+    result = reduce_loader_early_audit_events(
+        session["session_events"],
+        pre_session_frame_count=int(session["pre_session_frame_count"]),
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+        session_start_not_found=bool(session["session_start_not_found"]),
+        decoded_lines=decoded_lines,
+        bad_frames=0,
+    )
+    result["passthrough_bytes"] = b""
+    result["capture_bytes"] = 0
+    result["decoded_log_path"] = ""
+    result["sessions"] = sessions
+    chosen_session = choose_loader_early_audit_session(
+        sessions,
+        session_start_offset=session["session_start_offset"],
+        session_ready_seq=session["session_ready_seq"],
+    )
+    result["chosen_session_index"] = chosen_session.get("session_index") if isinstance(chosen_session, dict) else None
+    result["chosen_session_start_offset"] = chosen_session.get("start_offset") if isinstance(chosen_session, dict) else None
+    result["chosen_session_ready_arg"] = chosen_session.get("ready_arg") if isinstance(chosen_session, dict) else None
+    result["chosen_session_first_event_types"] = chosen_session.get("first_event_types", []) if isinstance(chosen_session, dict) else []
+    result["chosen_session_order_valid"] = chosen_session.get("event_order_valid", False) if isinstance(chosen_session, dict) else False
+    result["chosen_session_order_error"] = chosen_session.get("event_order_error", "") if isinstance(chosen_session, dict) else ""
+    result["session_classification"] = chosen_session.get("classification", "session_start_not_found" if bool(session["session_start_not_found"]) else "other") if isinstance(chosen_session, dict) else ("session_start_not_found" if bool(session["session_start_not_found"]) else "other")
+    return result
+
+
+def collapse_exact_duplicate_beacon_frames(
+    events: list[tuple[int, int, int, int]]
+) -> tuple[list[tuple[int, int, int, int]], int]:
+    collapsed: list[tuple[int, int, int, int]] = []
+    duplicate_count = 0
+    for item in events:
+        if collapsed and item[1:] == collapsed[-1][1:]:
+            duplicate_count += 1
+            continue
+        collapsed.append(item)
+    return collapsed, duplicate_count
+
+
+def summarize_loader_beacon_selftest_session(
+    events: list[tuple[int, int, int, int]],
+    session_index: int,
+) -> dict[str, object]:
+    collapsed_events, duplicate_frame_count = collapse_exact_duplicate_beacon_frames(events)
+    dedup_events: list[tuple[int, int, int, int]] = []
+    seen_seq: dict[int, tuple[int, int]] = {}
+    ready_arg: int | None = None
+    mismatch_detail = ""
+    matched_prefix_len = 0
+    for offset, seq, evt_type, evt_arg in collapsed_events:
+        prev = seen_seq.get(seq)
+        if prev is not None:
+            mismatch_detail = f"duplicate_seq_{seq:02X}_{loader_event_name(evt_type)}_{evt_arg:02X}"
+            break
+        seen_seq[seq] = (evt_type, evt_arg)
+        dedup_events.append((offset, seq, evt_type, evt_arg))
+        if evt_type == LOADER_EVT_READY and ready_arg is None:
+            ready_arg = evt_arg
+
+    for idx, (_offset, _seq, evt_type, evt_arg) in enumerate(dedup_events):
+        if idx >= len(BEACON_SELFTEST_EXPECTED_SEQUENCE):
+            mismatch_detail = f"extra_event_{loader_event_name(evt_type)}"
+            break
+        exp_type, exp_arg = BEACON_SELFTEST_EXPECTED_SEQUENCE[idx]
+        if evt_type != exp_type or evt_arg != exp_arg:
+            mismatch_detail = (
+                f"idx{idx}_{loader_event_name(evt_type)}_{evt_arg:02X}"
+                f"_expected_{loader_event_name(exp_type)}_{exp_arg:02X}"
+            )
+            break
+        matched_prefix_len += 1
+
+    first_event_types = [loader_event_name(evt_type) for _offset, _seq, evt_type, _arg in dedup_events[:8]]
+    pass_seen = (
+        matched_prefix_len == len(BEACON_SELFTEST_EXPECTED_SEQUENCE)
+        and len(dedup_events) == len(BEACON_SELFTEST_EXPECTED_SEQUENCE)
+        and mismatch_detail == ""
+    )
+    classification = "pass" if pass_seen else ("beacon_transport_corruption" if mismatch_detail else "incomplete_sequence")
+    return {
+        "session_index": session_index,
+        "start_offset": dedup_events[0][0] if dedup_events else None,
+        "ready_seq": dedup_events[0][1] if dedup_events else None,
+        "ready_arg": ready_arg,
+        "first_event_types": first_event_types,
+        "matched_prefix_len": matched_prefix_len,
+        "event_count": len(dedup_events),
+        "duplicate_frame_count": duplicate_frame_count,
+        "event_order_valid": mismatch_detail == "",
+        "event_order_error": mismatch_detail,
+        "classification": classification,
+        "pass_seen": pass_seen,
+        "summary_seen": any(evt_type == LOADER_EVT_SUMMARY for _offset, _seq, evt_type, _arg in dedup_events),
+    }
+
+
+def build_loader_beacon_selftest_sessions(events: list[tuple[int, int, int, int]]) -> list[dict[str, object]]:
+    sessions: list[dict[str, object]] = []
+    current: list[tuple[int, int, int, int]] = []
+    for item in events:
+        if item[2] == LOADER_EVT_READY:
+            if current and any(evt_type == LOADER_EVT_SUMMARY for _offset, _seq, evt_type, _arg in current):
+                sessions.append(summarize_loader_beacon_selftest_session(current, len(sessions)))
+                current = [item]
+                continue
+        if current:
+            current.append(item)
+        else:
+            current = [item]
+    if current:
+        sessions.append(summarize_loader_beacon_selftest_session(current, len(sessions)))
+    return sessions
+
+
+def loader_beacon_selftest_session_progress_key(session: dict[str, object]) -> tuple[int, ...]:
+    return (
+        1 if bool(session.get("pass_seen")) else 0,
+        int(session.get("matched_prefix_len", 0)),
+        1 if bool(session.get("summary_seen")) else 0,
+        int(session.get("event_count", 0)),
+        int(session.get("start_offset", -1)),
+    )
+
+
+def choose_loader_beacon_selftest_session(sessions: list[dict[str, object]]) -> dict[str, object] | None:
+    candidates = [item for item in sessions if isinstance(item.get("start_offset"), int)]
+    if not candidates:
+        return None
+    return max(candidates, key=loader_beacon_selftest_session_progress_key)
+
+
+def analyze_loader_beacon_selftest_events(
+    events: list[tuple[int, int, int, int]],
+    *,
+    decoded_lines: list[str],
+    bad_frames: int,
+    passthrough_bytes: bytes,
+) -> dict[str, object]:
+    sessions = build_loader_beacon_selftest_sessions(events)
+    chosen_session = choose_loader_beacon_selftest_session(sessions)
+    pass_session_count = sum(1 for item in sessions if item.get("pass_seen"))
+    overall_pass = (
+        bad_frames == 0
+        and len(sessions) == 1
+        and pass_session_count == 1
+        and isinstance(chosen_session, dict)
+        and bool(chosen_session.get("pass_seen"))
+    )
+    classification = (
+        "pass"
+        if overall_pass
+        else chosen_session.get("classification", "no_ready_session")
+        if isinstance(chosen_session, dict)
+        else "no_ready_session"
+    )
+    if bad_frames > 0 and classification == "pass":
+        classification = "bad_frame"
+    elif bad_frames > 0 and classification == "no_ready_session":
+        classification = "bad_frame"
+    return {
+        "pass": overall_pass,
+        "session_count": len(sessions),
+        "pass_session_count": pass_session_count,
+        "bad_frames": bad_frames,
+        "good_frames": len(events),
+        "decoded_text": "\n".join(decoded_lines) + ("\n" if decoded_lines else ""),
+        "passthrough_bytes": passthrough_bytes,
+        "sessions": sessions,
+        "chosen_session_index": chosen_session.get("session_index") if isinstance(chosen_session, dict) else None,
+        "chosen_session_start_offset": chosen_session.get("start_offset") if isinstance(chosen_session, dict) else None,
+        "chosen_session_ready_arg": chosen_session.get("ready_arg") if isinstance(chosen_session, dict) else None,
+        "chosen_session_first_event_types": chosen_session.get("first_event_types", []) if isinstance(chosen_session, dict) else [],
+        "chosen_session_matched_prefix_len": chosen_session.get("matched_prefix_len", 0) if isinstance(chosen_session, dict) else 0,
+        "chosen_session_event_count": chosen_session.get("event_count", 0) if isinstance(chosen_session, dict) else 0,
+        "chosen_session_order_valid": chosen_session.get("event_order_valid", False) if isinstance(chosen_session, dict) else False,
+        "chosen_session_order_error": chosen_session.get("event_order_error", "") if isinstance(chosen_session, dict) else "",
+        "session_classification": classification,
+        "summary_seen": bool(isinstance(chosen_session, dict) and chosen_session.get("summary_seen")),
+    }
+
+
+def analyze_loader_beacon_selftest_beacon(raw_bytes: bytes) -> dict[str, object]:
+    decoded = decode_loader_beacon_frames(raw_bytes)
+    return analyze_loader_beacon_selftest_events(
+        decoded["events"],
+        decoded_lines=list(decoded["decoded_lines"]),
+        bad_frames=int(decoded["bad_frames"]),
+        passthrough_bytes=decoded["passthrough_bytes"],
+    )
+
+
+def analyze_loader_beacon_selftest_sim_log(text: str) -> dict[str, object]:
+    events: list[tuple[int, int, int, int]] = []
+    decoded_lines: list[str] = []
+    for event_idx, (seq_s, type_s, arg_s) in enumerate(
+        re.findall(
+            r"\[AX7203_DDR3_LOADER_EVT\]\s+seq=([0-9A-Fa-f]{2})\s+type=([0-9A-Fa-f]{2})\s+arg=([0-9A-Fa-f]{2})",
+            text,
+        )
+    ):
+        seq = int(seq_s, 16)
+        evt_type = int(type_s, 16)
+        evt_arg = int(arg_s, 16)
+        decoded_lines.append(f"EVT seq=0x{seq:02X} {loader_event_name(evt_type)} arg=0x{evt_arg:02X}")
+        events.append((event_idx * 5, seq, evt_type, evt_arg))
+    result = analyze_loader_beacon_selftest_events(
+        events,
+        decoded_lines=decoded_lines,
+        bad_frames=0,
+        passthrough_bytes=b"",
+    )
+    result["capture_bytes"] = 0
     result["decoded_log_path"] = ""
     return result
 
@@ -2115,6 +3478,243 @@ def drive_uart_loader(
     }
 
 
+def drive_uart_loader_early_audit(
+    ser,
+    manifest: dict[str, object],
+    capture_seconds: int,
+    text_log_path: Path,
+    *,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    sessions_json_path: Path | None = None,
+    wait_for_fresh_ready_only: bool = False,
+    allow_blind_header_fallback: bool = True,
+    post_jtag_quiet_ms: int = 100,
+    header_send_delay_ms: int = 0,
+    training_count: int = EARLY_AUDIT_TRAINING_COUNT_SIM,
+) -> dict[str, object]:
+    payload = Path(str(manifest["bin"])).read_bytes()[:UART_BLOCK_CHECKSUM_BYTES]
+    header = struct.pack(
+        "<IIIII",
+        0x314B4D42,
+        int(manifest["load_addr"]),
+        int(manifest["entry"]),
+        len(payload),
+        int(sum(payload) & 0xFFFFFFFF),
+    )
+    header_wire = bytes([EARLY_AUDIT_TRAINING_BYTE]) * training_count + header
+
+    raw_bytes = bytearray()
+    loader_analysis = analyze_loader_early_audit_beacon(b"")
+    passthrough_len = 0
+    sent_header = False
+    sent_payload = False
+    header_sent_at = 0.0
+    start = time.monotonic()
+    blind_header_deadline = start + 1.0
+    deadline = start + capture_seconds
+    text_log_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+    loader_decoded_path.parent.mkdir(parents=True, exist_ok=True)
+    if sessions_json_path is not None:
+        sessions_json_path.parent.mkdir(parents=True, exist_ok=True)
+    payload_ack_timeout = False
+    payload_ack_credit = 0
+    payload_ack_count = 0
+    payload_chunks_sent = 0
+    payload_block_ack_count = 0
+    payload_block_nack_count = 0
+    payload_block_retry_count = 0
+    payload_block_retry_limit_hit = False
+    payload_failed_block = -1
+    pending_block_replies: list[str] = []
+
+    def active_text() -> str:
+        return bytes(loader_analysis.get("passthrough_bytes", b"")).decode("latin1", errors="ignore")
+
+    def ingest_serial_bytes(chunk: bytes) -> str:
+        nonlocal loader_analysis, passthrough_len, payload_ack_credit, payload_ack_count
+        if chunk:
+            raw_bytes.extend(chunk)
+            loader_analysis = analyze_loader_early_audit_beacon(bytes(raw_bytes))
+            passthrough = bytes(loader_analysis.get("passthrough_bytes", b""))
+            new_passthrough = passthrough[passthrough_len:]
+            passthrough_len = len(passthrough)
+            for byte in new_passthrough:
+                if byte == UART_PAYLOAD_ACK:
+                    payload_ack_credit += 1
+                    payload_ack_count += 1
+                elif byte == UART_BLOCK_ACK:
+                    pending_block_replies.append("ack")
+                elif byte == UART_BLOCK_NACK:
+                    pending_block_replies.append("nack")
+        return active_text()
+
+    def wait_payload_ack() -> bool:
+        nonlocal payload_ack_credit
+        if payload_ack_credit > 0:
+            payload_ack_credit -= 1
+            return True
+        end = time.monotonic() + UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S
+        while time.monotonic() < end:
+            ack_chunk = ser.read(4096)
+            if ack_chunk:
+                ingest_serial_bytes(ack_chunk)
+                if payload_ack_credit > 0:
+                    payload_ack_credit -= 1
+                    return True
+            else:
+                time.sleep(0.001)
+        return False
+
+    def wait_block_reply() -> str:
+        if pending_block_replies:
+            return pending_block_replies.pop(0)
+        end = time.monotonic() + UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S
+        while time.monotonic() < end:
+            reply_chunk = ser.read(4096)
+            if reply_chunk:
+                ingest_serial_bytes(reply_chunk)
+                if pending_block_replies:
+                    return pending_block_replies.pop(0)
+            else:
+                time.sleep(0.001)
+        return "timeout"
+
+    def drain_serial_quiet(quiet_s: float) -> None:
+        end = time.monotonic() + quiet_s
+        while time.monotonic() < end:
+            reply_chunk = ser.read(4096)
+            if reply_chunk:
+                ingest_serial_bytes(reply_chunk)
+                end = time.monotonic() + quiet_s
+            else:
+                time.sleep(0.001)
+
+    def write_header_slow() -> None:
+        write_uart_bytes_slow(ser, header_wire, byte_delay_s=UART_HEADER_BYTE_DELAY_S)
+
+    while time.monotonic() < deadline:
+        chunk = ser.read(4096)
+        if chunk:
+            ingest_serial_bytes(chunk)
+            if (not sent_header) and bool(loader_analysis.get("ready_seen", False)) and (
+                (not wait_for_fresh_ready_only) or loader_analysis.get("session_ready_seq") == 0
+            ):
+                drain_serial_quiet(max(0.0, post_jtag_quiet_ms / 1000.0))
+                if header_send_delay_ms > 0:
+                    time.sleep(header_send_delay_ms / 1000.0)
+                write_header_slow()
+                sent_header = True
+                header_sent_at = time.monotonic()
+            if sent_payload and bool(loader_analysis.get("summary_seen", False)):
+                break
+            if bool(loader_analysis.get("bad_seen", False)) and sent_header:
+                break
+        elif (not sent_header) and allow_blind_header_fallback and time.monotonic() >= blind_header_deadline:
+            write_header_slow()
+            sent_header = True
+            header_sent_at = time.monotonic()
+
+        if (
+            sent_header
+            and (not sent_payload)
+            and (
+                bool(loader_analysis.get("load_start_seen", False))
+                or (header_sent_at != 0.0 and time.monotonic() >= (header_sent_at + UART_HEADER_TO_PAYLOAD_GRACE_S))
+            )
+        ):
+            time.sleep(0.1)
+            send_result = send_uart_payload_with_block_checksums(
+                ser,
+                payload,
+                wait_for_chunk_ack=wait_payload_ack,
+                wait_for_block_reply=wait_block_reply,
+                after_block_nack=lambda: drain_serial_quiet(0.050),
+                byte_delay_s=UART_MAINLINE_PAYLOAD_BYTE_DELAY_S,
+                chunk_gap_s=UART_MAINLINE_PAYLOAD_CHUNK_GAP_S,
+                pre_block_checksum_gap_s=UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S,
+                checksum_byte_delay_s=UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S,
+                block_gap_s=UART_MAINLINE_BLOCK_GAP_S,
+                block_retry_gap_s=UART_MAINLINE_BLOCK_RETRY_GAP_S,
+                retry_limit=1,
+            )
+            payload_chunks_sent += int(send_result["payload_chunks_sent"])
+            payload_ack_timeout = bool(send_result["payload_ack_timeout"])
+            payload_block_ack_count = int(send_result["payload_block_ack_count"])
+            payload_block_nack_count = int(send_result["payload_block_nack_count"])
+            payload_block_retry_count = int(send_result["payload_block_retry_count"])
+            payload_block_retry_limit_hit = bool(send_result["payload_block_retry_limit_hit"])
+            payload_failed_block = int(send_result["payload_failed_block"])
+            sent_payload = True
+            deadline = max(deadline, time.monotonic() + capture_seconds)
+            if payload_ack_timeout or payload_block_retry_limit_hit or bool(loader_analysis.get("bad_seen", False)):
+                break
+
+    loader_analysis = analyze_loader_early_audit_beacon(bytes(raw_bytes))
+    passthrough_bytes = bytes(loader_analysis.get("passthrough_bytes", b""))
+    current_text = passthrough_bytes.decode("latin1", errors="ignore")
+    text_log_path.write_text(current_text, encoding="latin1", errors="ignore")
+    raw_log_path.write_bytes(bytes(raw_bytes))
+    loader_decoded_path.write_text(str(loader_analysis.get("decoded_text", "")), encoding="utf-8")
+    if sessions_json_path is not None:
+        sessions_json_path.write_text(
+            json.dumps(loader_analysis.get("sessions", []), indent=2),
+            encoding="utf-8",
+        )
+
+    return {
+        "sent_header": sent_header,
+        "sent_payload": sent_payload,
+        "payload_ack_timeout": payload_ack_timeout,
+        "payload_ack_count": payload_ack_count,
+        "payload_ack_credit_remaining": payload_ack_credit,
+        "payload_chunks_sent": payload_chunks_sent,
+        "payload_block_ack_count": payload_block_ack_count,
+        "payload_block_nack_count": payload_block_nack_count,
+        "payload_block_retry_count": payload_block_retry_count,
+        "payload_block_retry_limit_hit": payload_block_retry_limit_hit,
+        "payload_failed_block": payload_failed_block,
+        "payload_size_bytes": len(payload),
+        "loader_ready_seen": bool(loader_analysis.get("ready_seen", False)),
+        "loader_header_byte0": loader_analysis.get("header_byte0"),
+        "loader_header_byte1": loader_analysis.get("header_byte1"),
+        "loader_header_byte2": loader_analysis.get("header_byte2"),
+        "loader_header_byte3": loader_analysis.get("header_byte3"),
+        "loader_header_magic_ok": bool(loader_analysis.get("header_magic_ok", False)),
+        "loader_load_start_seen": bool(loader_analysis.get("load_start_seen", False)),
+        "loader_first_block_ack_seen": bool(loader_analysis.get("first_block_ack_seen", False)),
+        "loader_summary_seen": bool(loader_analysis.get("summary_seen", False)),
+        "loader_summary_mask": loader_analysis.get("summary_mask"),
+        "loader_summary_ok": bool(loader_analysis.get("summary_ok_seen", False)),
+        "loader_bad_magic_seen": bool(loader_analysis.get("bad_magic_seen", False)),
+        "loader_bad_magic_byte_index": loader_analysis.get("bad_magic_byte_index"),
+        "loader_bad_seen": bool(loader_analysis.get("bad_seen", False)),
+        "loader_bad_code": loader_analysis.get("bad_code"),
+        "loader_good_frames": int(loader_analysis.get("good_frames", 0)),
+        "loader_bad_frames": int(loader_analysis.get("bad_frames", 0)),
+        "loader_dropped_duplicate_frames": int(loader_analysis.get("dropped_duplicate_frames", 0)),
+        "loader_pre_session_frame_count": int(loader_analysis.get("pre_session_frame_count", 0)),
+        "loader_session_start_offset": loader_analysis.get("session_start_offset"),
+        "loader_session_ready_seq": loader_analysis.get("session_ready_seq"),
+        "loader_session_start_not_found": bool(loader_analysis.get("session_start_not_found", False)),
+        "loader_session_count": len(loader_analysis.get("sessions", [])),
+        "loader_chosen_session_index": loader_analysis.get("chosen_session_index"),
+        "loader_chosen_session_start_offset": loader_analysis.get("chosen_session_start_offset"),
+        "loader_chosen_session_ready_arg": loader_analysis.get("chosen_session_ready_arg"),
+        "loader_chosen_session_first_events": loader_analysis.get("chosen_session_first_event_types", []),
+        "loader_chosen_session_order_valid": loader_analysis.get("chosen_session_order_valid", False),
+        "loader_chosen_session_order_error": loader_analysis.get("chosen_session_order_error", ""),
+        "loader_session_classification": loader_analysis.get("session_classification", "other"),
+        "loader_sessions_json_path": str(sessions_json_path) if sessions_json_path is not None else "",
+        "loader_decoded_log_path": str(loader_decoded_path),
+        "uart_capture_raw_file": str(raw_log_path),
+        "uart_capture_text_file": str(text_log_path),
+        "bad_reason": str(loader_analysis.get("bad_reason", "none")),
+        "capture_bytes": len(raw_bytes),
+    }
+
+
 def drive_uart_transport_sessions(ser, manifests: list[dict[str, object]], capture_seconds: int, log_path: Path) -> dict[str, object]:
     text_bytes = bytearray()
     payload_ack_timeout = False
@@ -2309,6 +3909,167 @@ def run_uart_loader_capture(
         )
 
 
+def run_uart_loader_early_audit_capture(
+    port: str | None,
+    manifest: dict[str, object],
+    capture_seconds: int,
+    text_log_path: Path,
+    *,
+    uart_baud: int = 115200,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    sessions_json_path: Path | None = None,
+    ser=None,
+    wait_for_fresh_ready_only: bool = False,
+    allow_blind_header_fallback: bool = True,
+    post_jtag_quiet_ms: int = 100,
+    header_send_delay_ms: int = 0,
+    training_count: int = EARLY_AUDIT_TRAINING_COUNT_SIM,
+) -> dict[str, object]:
+    if ser is not None:
+        return drive_uart_loader_early_audit(
+            ser,
+            manifest,
+            capture_seconds,
+            text_log_path,
+            raw_log_path=raw_log_path,
+            loader_decoded_path=loader_decoded_path,
+            sessions_json_path=sessions_json_path,
+            wait_for_fresh_ready_only=wait_for_fresh_ready_only,
+            allow_blind_header_fallback=allow_blind_header_fallback,
+            post_jtag_quiet_ms=post_jtag_quiet_ms,
+            header_send_delay_ms=header_send_delay_ms,
+            training_count=training_count,
+        )
+
+    try:
+        import serial  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on local environment
+        raise RuntimeError("pyserial is required for board early-audit UART loading") from exc
+
+    if port is None:
+        raise RuntimeError("Serial port must be provided when no open serial object is passed")
+    with serial.Serial(port, uart_baud, timeout=0.05) as open_ser:
+        open_ser.reset_input_buffer()
+        open_ser.reset_output_buffer()
+        return drive_uart_loader_early_audit(
+            open_ser,
+            manifest,
+            capture_seconds,
+            text_log_path,
+            raw_log_path=raw_log_path,
+            loader_decoded_path=loader_decoded_path,
+            sessions_json_path=sessions_json_path,
+            wait_for_fresh_ready_only=wait_for_fresh_ready_only,
+            allow_blind_header_fallback=allow_blind_header_fallback,
+            post_jtag_quiet_ms=post_jtag_quiet_ms,
+            header_send_delay_ms=header_send_delay_ms,
+            training_count=training_count,
+        )
+
+
+def capture_loader_beacon_selftest_stream(
+    ser,
+    capture_seconds: int,
+    text_log_path: Path,
+    *,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    sessions_json_path: Path | None = None,
+    reset_buffers: bool = True,
+) -> dict[str, object]:
+    raw_bytes = bytearray()
+    if reset_buffers:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+    deadline = time.monotonic() + capture_seconds
+    while time.monotonic() < deadline:
+        chunk = ser.read(4096)
+        if chunk:
+            raw_bytes.extend(chunk)
+            analysis = analyze_loader_beacon_selftest_beacon(bytes(raw_bytes))
+            if analysis.get("summary_seen"):
+                break
+        else:
+            time.sleep(0.001)
+    return finalize_loader_beacon_selftest_capture(
+        raw_bytes,
+        text_log_path,
+        raw_log_path=raw_log_path,
+        loader_decoded_path=loader_decoded_path,
+        sessions_json_path=sessions_json_path,
+    )
+
+
+def finalize_loader_beacon_selftest_capture(
+    raw_bytes: bytes | bytearray,
+    text_log_path: Path,
+    *,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    sessions_json_path: Path | None = None,
+) -> dict[str, object]:
+    raw_blob = bytes(raw_bytes)
+    analysis = analyze_loader_beacon_selftest_beacon(raw_blob)
+    text_log_path.parent.mkdir(parents=True, exist_ok=True)
+    raw_log_path.parent.mkdir(parents=True, exist_ok=True)
+    loader_decoded_path.parent.mkdir(parents=True, exist_ok=True)
+    text_log_path.write_text(bytes(analysis.get("passthrough_bytes", b"")).decode("latin1", errors="ignore"), encoding="latin1", errors="ignore")
+    raw_log_path.write_bytes(raw_blob)
+    loader_decoded_path.write_text(str(analysis.get("decoded_text", "")), encoding="utf-8")
+    if sessions_json_path is not None:
+        write_json(sessions_json_path, analysis.get("sessions", []))
+    return {
+        "loader_beacon_selftest_pass": bool(analysis.get("pass", False)),
+        "loader_session_count": int(analysis.get("session_count", 0)),
+        "loader_pass_session_count": int(analysis.get("pass_session_count", 0)),
+        "loader_bad_frames": int(analysis.get("bad_frames", 0)),
+        "loader_good_frames": int(analysis.get("good_frames", 0)),
+        "loader_session_classification": analysis.get("session_classification", "no_ready_session"),
+        "loader_chosen_session_index": analysis.get("chosen_session_index"),
+        "loader_chosen_session_start_offset": analysis.get("chosen_session_start_offset"),
+        "loader_chosen_session_ready_arg": analysis.get("chosen_session_ready_arg"),
+        "loader_chosen_session_first_events": list(analysis.get("chosen_session_first_event_types", [])),
+        "loader_chosen_session_matched_prefix_len": int(analysis.get("chosen_session_matched_prefix_len", 0)),
+        "loader_chosen_session_event_count": int(analysis.get("chosen_session_event_count", 0)),
+        "loader_chosen_session_order_valid": bool(analysis.get("chosen_session_order_valid", False)),
+        "loader_chosen_session_order_error": str(analysis.get("chosen_session_order_error", "")),
+        "loader_decoded_log_path": str(loader_decoded_path),
+        "loader_sessions_json_path": str(sessions_json_path) if sessions_json_path is not None else "N/A",
+        "uart_capture_raw_file": str(raw_log_path),
+        "uart_capture_text_file": str(text_log_path),
+        "capture_bytes": len(raw_blob),
+        "bad_reason": "none" if bool(analysis.get("pass", False)) else str(analysis.get("session_classification", "no_ready_session")),
+    }
+
+
+def run_uart_loader_beacon_selftest_capture(
+    port: str,
+    capture_seconds: int,
+    text_log_path: Path,
+    *,
+    uart_baud: int = 115200,
+    raw_log_path: Path,
+    loader_decoded_path: Path,
+    sessions_json_path: Path | None = None,
+) -> dict[str, object]:
+    try:
+        import serial  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on local environment
+        raise RuntimeError("pyserial is required for board beacon selftest UART capture") from exc
+
+    with serial.Serial(port, uart_baud, timeout=0.05) as ser:
+        return capture_loader_beacon_selftest_stream(
+            ser,
+            capture_seconds,
+            text_log_path,
+            raw_log_path=raw_log_path,
+            loader_decoded_path=loader_decoded_path,
+            sessions_json_path=sessions_json_path,
+            reset_buffers=True,
+        )
+
+
 def write_summary(path: Path, lines: list[str]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2329,6 +4090,14 @@ def main() -> int:
     parser.add_argument("--bridge-audit", action="store_true", help="Run the isolated DDR3 bridge CDC/handshake audit branch.")
     parser.add_argument("--bridge-audit-steps", action="store_true", help="Run the layered bridge-only single-word/small-burst audit branch.")
     parser.add_argument("--bridge-audit-step2-only", action="store_true", help="Run the focused Step-2-only adjacent-word bridge audit branch.")
+    parser.add_argument("--loader-early-audit", action="store_true", help="Run the header/first-block-only loader BAD_MAGIC audit branch.")
+    parser.add_argument("--loader-early-audit-board-only", action="store_true", help="Reuse the existing early-audit bitstream and payload, then run only board JTAG + UART capture.")
+    parser.add_argument("--loader-beacon-selftest", action="store_true", help="Run the fixed beacon transport selftest branch.")
+    parser.add_argument("--loader-beacon-selftest-board-only", action="store_true", help="Reuse the existing beacon selftest bitstream and run only board JTAG + UART capture.")
+    parser.add_argument("--early-audit-sweep-3point", action="store_true", help="Run the 3-point board-only early-audit timing sweep (Q100_H0, Q200_H0, Q100_H10).")
+    parser.add_argument("--early-audit-bad-magic-byte", type=int, default=-1, help="For top-sim fault injection, corrupt magic byte index 0..3. Default runs all four injected cases automatically in loader-early-audit mode.")
+    parser.add_argument("--early-audit-header-send-delay-ms", type=int, default=0, help="Board-only early-audit delay between fresh READY seq=0 and header transmission.")
+    parser.add_argument("--early-audit-post-jtag-quiet-ms", type=int, default=100, help="Board-only early-audit quiet wait after JTAG before reacting to the first fresh READY seq=0.")
     parser.add_argument("--transport-jitter-pct", type=int, default=4, help="Bit-period jitter percentage used by the minimal transport TB.")
     parser.add_argument("--transport-byte-gap", type=int, default=6, help="Maximum extra idle bit-times inserted between bytes in the transport TB.")
     parser.add_argument("--transport-ack-mode", choices=("tight", "loose"), default="loose", help="ACK pacing style for transport-only disturbance cases.")
@@ -2337,20 +4106,57 @@ def main() -> int:
     parser.add_argument("--skip-vivado", action="store_true", help="Stop after RTL/top simulation and payload build.")
     args = parser.parse_args()
 
-    active_modes = [mode for mode in (args.fetch_debug, args.transport_only, args.bridge_audit, args.bridge_audit_steps, args.bridge_audit_step2_only) if mode]
+    active_modes = [
+        mode
+        for mode in (
+            args.fetch_debug,
+            args.transport_only,
+            args.bridge_audit,
+            args.bridge_audit_steps,
+            args.bridge_audit_step2_only,
+            args.loader_early_audit,
+            args.loader_early_audit_board_only,
+            args.loader_beacon_selftest,
+            args.loader_beacon_selftest_board_only,
+        )
+        if mode
+    ]
     if len(active_modes) > 1:
-        raise SystemExit("--fetch-debug, --transport-only, --bridge-audit, --bridge-audit-steps, and --bridge-audit-step2-only are mutually exclusive")
+        raise SystemExit("--fetch-debug, --transport-only, --bridge-audit, --bridge-audit-steps, --bridge-audit-step2-only, --loader-early-audit, --loader-early-audit-board-only, --loader-beacon-selftest, and --loader-beacon-selftest-board-only are mutually exclusive")
+    if args.early_audit_sweep_3point and not args.loader_early_audit_board_only:
+        raise SystemExit("--early-audit-sweep-3point requires --loader-early-audit-board-only")
 
-    logs_dir = BUILD_DIR / (
+    logs_dir_name = (
         "fpga_bridge_audit_step2_only"
         if args.bridge_audit_step2_only
-        else ("fpga_bridge_audit_steps" if args.bridge_audit_steps else ("fpga_bridge_audit" if args.bridge_audit else "fpga_benchmark_ddr3"))
+        else "fpga_bridge_audit_steps"
+        if args.bridge_audit_steps
+        else "fpga_bridge_audit"
+        if args.bridge_audit
+        else "fpga_loader_beacon_selftest"
+        if args.loader_beacon_selftest
+        else "fpga_loader_beacon_selftest_board_only"
+        if args.loader_beacon_selftest_board_only
+        else "fpga_loader_early_audit"
+        if args.loader_early_audit
+        else "fpga_loader_early_audit_sweep"
+        if args.loader_early_audit_board_only
+        else "fpga_benchmark_ddr3"
     )
+    logs_dir = BUILD_DIR / logs_dir_name
     logs_dir.mkdir(parents=True, exist_ok=True)
+    diagnostic_single_thread = not (
+        args.transport_only
+        or args.bridge_audit
+        or args.bridge_audit_steps
+        or args.bridge_audit_step2_only
+    )
+    diagnostic_smt_mode = 0 if diagnostic_single_thread else 1
     failed_stage = "none"
     failure_detail = ""
     current_stage = "init"
     manifest: dict[str, object] = {}
+    early_audit_manifest: dict[str, object] = {}
     smoke_manifest: dict[str, object] = {}
     baseline_manifest: dict[str, object] = {}
     transport_manifests: list[dict[str, object]] = []
@@ -2358,6 +4164,7 @@ def main() -> int:
     bridge_tb_results: list[dict[str, object]] = []
     uart_result: dict[str, object] = {}
     uart_smoke_result: dict[str, object] = {}
+    early_audit_fault_logs: list[str] = []
     build_id = "N/A"
     sim_log = logs_dir / "not_run.log"
     loader_quick_sim_log = logs_dir / "not_run.log"
@@ -2369,32 +4176,113 @@ def main() -> int:
     capture_file = (
         STEP2_ONLY_CAPTURE_FILE
         if args.bridge_audit_step2_only
-        else (BRIDGE_STEPS_CAPTURE_FILE if args.bridge_audit_steps else (BRIDGE_CAPTURE_FILE if args.bridge_audit else (TRANSPORT_CAPTURE_FILE if args.transport_only else UART_CAPTURE_FILE)))
+        else (BRIDGE_STEPS_CAPTURE_FILE if args.bridge_audit_steps else (BRIDGE_CAPTURE_FILE if args.bridge_audit else (TRANSPORT_CAPTURE_FILE if args.transport_only else (UART_BEACON_SELFTEST_CAPTURE_FILE if (args.loader_beacon_selftest or args.loader_beacon_selftest_board_only) else (UART_EARLY_AUDIT_CAPTURE_FILE if args.loader_early_audit else UART_CAPTURE_FILE)))))
     )
     flow_name = (
         "AX7203 DDR3 Bridge Audit Step2 Only"
         if args.bridge_audit_step2_only
-        else (
-        "AX7203 DDR3 Bridge Audit Steps"
+        else "AX7203 DDR3 Bridge Audit Steps"
         if args.bridge_audit_steps
-        else ("AX7203 DDR3 Bridge Audit"
+        else "AX7203 DDR3 Bridge Audit"
         if args.bridge_audit
-        else ("AX7203 UART Loader Transport" if args.transport_only else "AX7203 DDR3 Benchmark Loader")))
+        else "AX7203 Loader Beacon Selftest"
+        if args.loader_beacon_selftest
+        else "AX7203 Loader Beacon Selftest Board-Only"
+        if args.loader_beacon_selftest_board_only
+        else "AX7203 UART Loader Transport"
+        if args.transport_only
+        else "AX7203 DDR3 Loader Early Audit"
+        if args.loader_early_audit
+        else "AX7203 DDR3 Loader Early Audit Board Sweep"
+        if args.loader_early_audit_board_only
+        else "AX7203 DDR3 Benchmark Loader"
     )
 
     env = build_env(
         args.rs_depth,
         args.fetch_buffer_depth,
         args.core_clk_mhz,
+        smt_mode=diagnostic_smt_mode,
         fetch_debug=args.fetch_debug and not args.transport_only,
         bridge_audit=args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only,
         step2_beacon_debug=args.bridge_audit_step2_only,
         loader_beacon_debug=not (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only),
         uart_baud=args.uart_baud,
-        rom_asm=STEP2_ONLY_ROM if args.bridge_audit_step2_only else (BRIDGE_STEPS_ROM if args.bridge_audit_steps else (BRIDGE_STRESS_ROM if args.bridge_audit else (TRANSPORT_ROM if args.transport_only else LOADER_ROM))),
+        rom_asm=STEP2_ONLY_ROM if args.bridge_audit_step2_only else (BRIDGE_STEPS_ROM if args.bridge_audit_steps else (BRIDGE_STRESS_ROM if args.bridge_audit else (TRANSPORT_ROM if args.transport_only else (BEACON_SELFTEST_ROM if (args.loader_beacon_selftest or args.loader_beacon_selftest_board_only) else (EARLY_AUDIT_ROM if (args.loader_early_audit or args.loader_early_audit_board_only) else LOADER_ROM))))),
         rom_march="rv32i_zicsr" if (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only) else None,
         transport_uart_rxdata_reg_test=USE_REGISTERED_UART_RXDATA,
     )
+    if args.loader_beacon_selftest_board_only:
+        vivado = which_required("vivado.bat", "vivado")
+        result, build_id, failed_stage, failure_detail, _jtag_log = run_loader_beacon_selftest_board(
+            logs_dir,
+            port=args.port,
+            uart_baud=args.uart_baud,
+            capture_seconds=args.capture_seconds,
+            vivado=vivado,
+            env=env,
+        )
+        write_json(
+            logs_dir / "summary.json",
+            {
+                "Flow": flow_name,
+                "BuildID": build_id,
+                "FailedStage": failed_stage,
+                "FailureDetail": failure_detail,
+                **result,
+            },
+        )
+        return 0 if (failed_stage == "none" and bool(result.get("loader_beacon_selftest_pass", False))) else 1
+    if args.loader_early_audit_board_only:
+        manifest = load_existing_early_audit_manifest(BUILD_DIR / "fpga_loader_early_audit")
+        vivado = which_required("vivado.bat", "vivado")
+        if args.early_audit_sweep_3point:
+            return run_loader_early_audit_board_sweep(
+                logs_dir,
+                manifest=manifest,
+                port=args.port,
+                uart_baud=args.uart_baud,
+                capture_seconds=args.capture_seconds,
+                vivado=vivado,
+                env=env,
+            )
+        single_trial = run_loader_early_audit_board_trial(
+            logs_dir / "single",
+            trial_name="single",
+            manifest=manifest,
+            port=args.port,
+            uart_baud=args.uart_baud,
+            capture_seconds=args.capture_seconds,
+            post_jtag_quiet_ms=args.early_audit_post_jtag_quiet_ms,
+            header_send_delay_ms=args.early_audit_header_send_delay_ms,
+            vivado=vivado,
+            env=env,
+        )
+        write_json(logs_dir / "summary.json", single_trial)
+        write_summary(
+            logs_dir / "summary.txt",
+            [
+                "Flow: AX7203 Loader Early Audit Board-Only",
+                f"Pass: {single_trial['pass']}",
+                f"TrialName: {single_trial['trial_name']}",
+                f"PostJtagQuietMs: {single_trial['post_jtag_quiet_ms']}",
+                f"HeaderSendDelayMs: {single_trial['header_send_delay_ms']}",
+                f"BuildID: {single_trial.get('build_id', 'N/A')}",
+                f"FailureStage: {single_trial.get('failure_stage', 'none')}",
+                f"FailureDetail: {single_trial.get('failure_detail', 'none')}",
+                f"SessionStartNotFound: {single_trial.get('session_start_not_found', False)}",
+                f"SessionClassification: {single_trial.get('session_classification', 'N/A')}",
+                f"ChosenSessionFirstEvents: {','.join(single_trial.get('chosen_session_first_events', []))}",
+                f"HeaderByte0: {fmt_optional_hex(single_trial.get('header_byte0', 'N/A'))}",
+                f"HeaderByte1: {fmt_optional_hex(single_trial.get('header_byte1', 'N/A'))}",
+                f"BadMagicSeen: {single_trial.get('bad_magic_seen', False)}",
+                f"BadMagicByteIndex: {single_trial.get('bad_magic_byte_index', 'N/A')}",
+                f"BadReason: {single_trial.get('bad_reason', 'none')}",
+                f"SummaryMask: {fmt_optional_hex(single_trial.get('summary_mask', 'N/A'))}",
+                f"TrialSummary: {logs_dir / 'single' / 'summary.txt'}",
+            ],
+        )
+        return 0 if single_trial["pass"] else 1
     try:
         current_stage = "basic"
         run_logged([sys.executable, str(REPO_ROOT / "verification" / "run_all_tests.py"), "--basic"], cwd=REPO_ROOT, log_path=logs_dir / "01_basic.log", timeout=3600)
@@ -2458,6 +4346,68 @@ def main() -> int:
             if args.skip_vivado:
                 uart_result = analyze_step2_only_sim_log(read_text(sim_log))
                 uart_result["decoded_log_path"] = str(sim_log)
+        elif args.loader_beacon_selftest:
+            current_stage = "loader_beacon_selftest_top_sim"
+            sim_log = logs_dir / "05_run_loader_beacon_selftest_top_sim.log"
+            sim_log = run_loader_beacon_selftest_top_sim(
+                logs_dir,
+                rs_depth=args.rs_depth,
+                fetch_buffer_depth=args.fetch_buffer_depth,
+                core_clk_mhz=args.core_clk_mhz,
+                uart_baud=args.uart_baud,
+                smt_mode=diagnostic_smt_mode,
+                log_name="05_run_loader_beacon_selftest_top_sim.log",
+                rom_asm=BEACON_SELFTEST_ROM,
+            )
+            if args.skip_vivado:
+                uart_result = analyze_loader_beacon_selftest_sim_log(read_text(sim_log))
+                uart_result["decoded_log_path"] = str(sim_log)
+        elif args.loader_early_audit:
+            current_stage = "build_dhrystone_payload"
+            manifest = build_dhrystone_payload(
+                logs_dir,
+                cpu_hz=int(round(args.core_clk_mhz * 1_000_000.0)),
+                runs=args.dhrystone_runs,
+                stem="dhrystone_loader_early_audit_source",
+            )
+            current_stage = "build_loader_early_audit_manifest"
+            early_audit_manifest = build_early_audit_manifest(logs_dir, manifest, stem="dhrystone_loader_early_audit")
+            current_stage = "loader_early_audit_top_sim"
+            sim_log = logs_dir / "05_run_loader_early_audit_top_sim.log"
+            sim_log = run_loader_top_sim(
+                logs_dir,
+                early_audit_manifest,
+                rs_depth=args.rs_depth,
+                fetch_buffer_depth=args.fetch_buffer_depth,
+                core_clk_mhz=args.core_clk_mhz,
+                expect_exec_pass=False,
+                uart_baud=args.uart_baud,
+                smt_mode=diagnostic_smt_mode,
+                log_name="05_run_loader_early_audit_top_sim.log",
+                rom_asm=EARLY_AUDIT_ROM,
+                early_audit_enable=True,
+                early_audit_bad_magic_byte=-1,
+            )
+            for bad_idx in range(4):
+                current_stage = f"loader_early_audit_fault_b{bad_idx}"
+                fault_log = run_loader_top_sim(
+                    logs_dir / f"fault_b{bad_idx}",
+                    early_audit_manifest,
+                    rs_depth=args.rs_depth,
+                    fetch_buffer_depth=args.fetch_buffer_depth,
+                    core_clk_mhz=args.core_clk_mhz,
+                    expect_exec_pass=False,
+                    uart_baud=args.uart_baud,
+                    smt_mode=diagnostic_smt_mode,
+                    log_name=f"06_run_loader_early_audit_fault_b{bad_idx}.log",
+                    rom_asm=EARLY_AUDIT_ROM,
+                    early_audit_enable=True,
+                    early_audit_bad_magic_byte=bad_idx,
+                )
+                early_audit_fault_logs.append(str(fault_log))
+            if args.skip_vivado:
+                uart_result = analyze_loader_early_audit_sim_log(read_text(sim_log))
+                uart_result["decoded_log_path"] = str(sim_log)
         elif args.bridge_audit:
             current_stage = "bridge_stress_tb"
             bridge_tb_results = run_bridge_stress_tb(logs_dir)
@@ -2493,6 +4443,7 @@ def main() -> int:
                     full_gate_prefix_enable=False,
                     fetch_debug=True,
                     uart_baud=args.uart_baud,
+                    smt_mode=diagnostic_smt_mode,
                     log_name="05_run_loader_top_sim.log",
                 )
             else:
@@ -2517,6 +4468,7 @@ def main() -> int:
                     expect_exec_pass=True,
                     full_gate_prefix_enable=False,
                     uart_baud=args.uart_baud,
+                    smt_mode=diagnostic_smt_mode,
                     log_name="05_run_loader_quick_sim.log",
                 )
                 current_stage = "build_dhrystone_smoke_payload"
@@ -2525,6 +4477,7 @@ def main() -> int:
                     cpu_hz=int(args.core_clk_mhz * 1_000_000),
                     runs=1,
                     stem="dhrystone_smoke",
+                    fixed_runs=10,
                 )
                 current_stage = "loader_full_payload_prefix1_sim"
                 prefix1_profile = loader_full_gate_profile(LOADER_FULL_PREFIX1_BLOCKS, args.core_clk_mhz)
@@ -2540,6 +4493,7 @@ def main() -> int:
                     full_gate_prefix_enable=True,
                     full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX1_BLOCKS,
                     uart_baud=args.uart_baud,
+                    smt_mode=diagnostic_smt_mode,
                     log_name="06_run_loader_full_payload_prefix1_sim.log",
                     fast_uart_profile=bool(prefix1_profile["fast_uart_profile"]),
                     fast_uart_inject=prefix1_profile["fast_uart_inject"],
@@ -2569,6 +4523,7 @@ def main() -> int:
                             full_gate_prefix_enable=True,
                             full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX4_BLOCKS,
                             uart_baud=args.uart_baud,
+                            smt_mode=diagnostic_smt_mode,
                             log_name="07_run_loader_full_payload_prefix4_sim.log",
                             fast_uart_profile=bool(prefix4_profile["fast_uart_profile"]),
                             fast_uart_inject=prefix4_profile["fast_uart_inject"],
@@ -2595,6 +4550,7 @@ def main() -> int:
                             full_gate_prefix_enable=True,
                             full_gate_prefix_block_ack_target=LOADER_FULL_PREFIX16_BLOCKS,
                             uart_baud=args.uart_baud,
+                            smt_mode=diagnostic_smt_mode,
                             log_name="08_run_loader_full_payload_long_sim.log",
                             fast_uart_profile=bool(prefix16_profile["fast_uart_profile"]),
                             fast_uart_inject=prefix16_profile["fast_uart_inject"],
@@ -2641,7 +4597,20 @@ def main() -> int:
             timing = parse_timing_summary(TIMING_SUMMARY_AGGR)
             if timing["constraints_met"] != "True" or float(timing["wns"]) < 0.0 or float(timing["whs"]) < 0.0:
                 raise RuntimeError(f"Aggressive implementation timing failed; see {TIMING_SUMMARY_AGGR}")
-            if args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only:
+            if args.loader_beacon_selftest:
+                board_result, build_id, board_failed_stage, board_failure_detail, _jtag_log = run_loader_beacon_selftest_board(
+                    logs_dir,
+                    port=args.port,
+                    uart_baud=args.uart_baud,
+                    capture_seconds=args.capture_seconds,
+                    vivado=vivado,
+                    env=env,
+                )
+                uart_result = board_result
+                current_stage = board_failed_stage
+                if board_failed_stage != "none":
+                    raise RuntimeError(board_failure_detail)
+            elif args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only:
                 try:
                     import serial  # type: ignore
                 except ImportError as exc:  # pragma: no cover - depends on local environment
@@ -2679,9 +4648,35 @@ def main() -> int:
                     import serial  # type: ignore
                 except ImportError as exc:  # pragma: no cover - depends on local environment
                     raise RuntimeError("pyserial is required for board benchmark UART loading") from exc
-                current_stage = "program_jtag"
-                run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
-                build_id = parse_build_id(BUILD_ID_FILE)
+                if args.loader_early_audit:
+                    with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                        ser.reset_input_buffer()
+                        ser.reset_output_buffer()
+                        current_stage = "program_jtag"
+                        run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                        build_id = parse_build_id(BUILD_ID_FILE)
+                        current_stage = "uart_load_and_capture_early_audit"
+                        uart_result = run_uart_loader_early_audit_capture(
+                            None,
+                            early_audit_manifest,
+                            args.capture_seconds,
+                            UART_EARLY_AUDIT_CAPTURE_FILE,
+                            uart_baud=args.uart_baud,
+                            raw_log_path=UART_EARLY_AUDIT_CAPTURE_RAW_FILE,
+                            loader_decoded_path=UART_EARLY_AUDIT_CAPTURE_DECODED_FILE,
+                            sessions_json_path=UART_EARLY_AUDIT_CAPTURE_SESSIONS_FILE,
+                            ser=ser,
+                            wait_for_fresh_ready_only=True,
+                            allow_blind_header_fallback=False,
+                            post_jtag_quiet_ms=args.early_audit_post_jtag_quiet_ms,
+                            header_send_delay_ms=args.early_audit_header_send_delay_ms,
+                            training_count=EARLY_AUDIT_TRAINING_COUNT_SIM,
+                        )
+                        capture_file = UART_EARLY_AUDIT_CAPTURE_FILE
+                else:
+                    current_stage = "program_jtag"
+                    run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                    build_id = parse_build_id(BUILD_ID_FILE)
                 if args.transport_only:
                     current_stage = "uart_load_and_capture"
                     with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
@@ -2700,6 +4695,8 @@ def main() -> int:
                         loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
                         expect_dhrystone=False,
                     )
+                elif args.loader_early_audit:
+                    pass
                 else:
                     current_stage = "uart_load_and_capture_smoke"
                     uart_smoke_result = run_uart_loader_capture(
@@ -2793,6 +4790,41 @@ def main() -> int:
                         raise RuntimeError(f"Fetch-debug loader SUMMARY indicates failure; see {capture_file}")
                     if not uart_result.get("saw_probe"):
                         raise RuntimeError(f"UART missing M0D fetch probe beacon; see {capture_file}")
+                elif args.loader_beacon_selftest:
+                    if not bool(uart_result.get("loader_beacon_selftest_pass", False)):
+                        raise RuntimeError(
+                            f"Beacon selftest mismatch ({uart_result.get('loader_session_classification', 'unknown')}); see {capture_file}"
+                        )
+                    if int(uart_result.get("loader_bad_frames", 0)) != 0:
+                        raise RuntimeError(f"Beacon selftest saw bad frames; see {capture_file}")
+                    if int(uart_result.get("loader_session_count", 0)) != 1:
+                        raise RuntimeError(f"Beacon selftest expected exactly one session; see {capture_file}")
+                elif args.loader_early_audit:
+                    if uart_result.get("loader_session_start_not_found"):
+                        raise RuntimeError(f"Early-audit session start not found; see {capture_file}")
+                    if uart_result.get("loader_bad_seen") or uart_result.get("loader_bad_magic_seen"):
+                        raise RuntimeError(
+                            f"Early-audit loader reported failure ({uart_result.get('bad_reason', 'unknown')}, "
+                            f"byte={uart_result.get('loader_bad_magic_byte_index', 'N/A')}); see {capture_file}"
+                        )
+                    if not uart_result.get("loader_ready_seen"):
+                        raise RuntimeError(f"Early-audit missing READY; see {capture_file}")
+                    if not uart_result.get("loader_header_magic_ok"):
+                        raise RuntimeError(
+                            f"Early-audit missing HDR_MAGIC_OK ({uart_result.get('loader_session_classification', 'other')}); see {capture_file}"
+                        )
+                    if not uart_result.get("loader_load_start_seen"):
+                        raise RuntimeError(
+                            f"Early-audit missing LOAD_START ({uart_result.get('loader_session_classification', 'other')}); see {capture_file}"
+                        )
+                    if not uart_result.get("loader_first_block_ack_seen"):
+                        raise RuntimeError(
+                            f"Early-audit missing BLOCK_ACK(0) ({uart_result.get('loader_session_classification', 'other')}); see {capture_file}"
+                        )
+                    if not uart_result.get("loader_summary_seen"):
+                        raise RuntimeError(f"Early-audit missing SUMMARY; see {capture_file}")
+                    if not uart_result.get("loader_summary_ok"):
+                        raise RuntimeError(f"Early-audit SUMMARY indicates failure; see {capture_file}")
                 else:
                     if uart_result.get("loader_bad_seen"):
                         raise RuntimeError(f"Loader beacon reported failure ({uart_result.get('bad_reason', 'unknown')}); see {capture_file}")
@@ -2873,6 +4905,8 @@ def main() -> int:
         f"BenchmarkManifest: {manifest.get('bin', 'N/A')}",
         f"SmokeManifest: {smoke_manifest.get('bin', 'N/A')}",
         f"BaselineManifest: {baseline_manifest.get('bin', 'N/A')}",
+        f"EarlyAuditManifest: {early_audit_manifest.get('bin', 'N/A')}",
+        f"EarlyAuditFaultLogs: {','.join(early_audit_fault_logs) if early_audit_fault_logs else 'N/A'}",
         f"TransportBoardPayloadCount: {len(transport_manifests)}",
         f"TransportTbCaseCount: {len(transport_tb_results)}",
         f"BridgeTbCaseCount: {len(bridge_tb_results)}",
@@ -2885,6 +4919,8 @@ def main() -> int:
         f"UartCaptureFile: {capture_file if capture_file.exists() else (sim_log if sim_log else 'N/A')}",
         f"UartCaptureRawFile: {uart_result.get('uart_capture_raw_file', 'N/A')}",
         f"LoaderDecodedCaptureFile: {uart_result.get('loader_decoded_log_path', uart_result.get('decoded_log_path', 'N/A'))}",
+        f"LoaderEarlyAuditSessionsFile: {uart_result.get('loader_sessions_json_path', 'N/A')}",
+        f"LoaderBeaconSelftestSessionsFile: {uart_result.get('loader_sessions_json_path', 'N/A')}",
         f"SmokeCaptureFile: {UART_SMOKE_CAPTURE_FILE if UART_SMOKE_CAPTURE_FILE.exists() else 'N/A'}",
         f"SmokeCaptureRawFile: {UART_SMOKE_CAPTURE_RAW_FILE if UART_SMOKE_CAPTURE_RAW_FILE.exists() else 'N/A'}",
         f"SmokeLoaderDecodedFile: {UART_SMOKE_CAPTURE_LOADER_DECODED_FILE if UART_SMOKE_CAPTURE_LOADER_DECODED_FILE.exists() else 'N/A'}",
@@ -2927,6 +4963,55 @@ def main() -> int:
         f"LoaderDroppedDuplicateFrames: {uart_result.get('loader_dropped_duplicate_frames', 0)}",
         f"LoaderBlockAckEvents: {uart_result.get('loader_block_ack_events', 0)}",
         f"LoaderBlockNackEvents: {uart_result.get('loader_block_nack_events', 0)}",
+        f"LoaderPreSessionFrameCount: {uart_result.get('loader_pre_session_frame_count', uart_result.get('pre_session_frame_count', 'N/A'))}",
+        f"LoaderSessionStartOffset: {fmt_optional_hex(uart_result.get('loader_session_start_offset', uart_result.get('session_start_offset', 'N/A')))}",
+        f"LoaderSessionReadySeq: {uart_result.get('loader_session_ready_seq', uart_result.get('session_ready_seq', 'N/A'))}",
+        f"LoaderSessionStartNotFound: {uart_result.get('loader_session_start_not_found', uart_result.get('session_start_not_found', False))}",
+        f"LoaderEarlyAuditSessionCount: {uart_result.get('loader_session_count', len(uart_result.get('sessions', [])) if isinstance(uart_result.get('sessions'), list) else 'N/A')}",
+        f"LoaderEarlyAuditChosenSessionIndex: {uart_result.get('loader_chosen_session_index', 'N/A')}",
+        f"LoaderEarlyAuditChosenSessionOffset: {fmt_optional_hex(uart_result.get('loader_chosen_session_start_offset', uart_result.get('loader_session_start_offset', uart_result.get('session_start_offset', 'N/A'))))}",
+        f"LoaderEarlyAuditChosenSessionReadyArg: {uart_result.get('loader_chosen_session_ready_arg', 'N/A')}",
+        f"LoaderEarlyAuditChosenSessionFirstEvents: {','.join(uart_result.get('loader_chosen_session_first_events', [])) if isinstance(uart_result.get('loader_chosen_session_first_events', []), list) else 'N/A'}",
+        f"LoaderEarlyAuditChosenSessionOrderValid: {uart_result.get('loader_chosen_session_order_valid', 'N/A')}",
+        f"LoaderEarlyAuditChosenSessionOrderError: {uart_result.get('loader_chosen_session_order_error', '')}",
+        f"LoaderEarlyAuditSessionClassification: {uart_result.get('loader_session_classification', 'N/A')}",
+        f"LoaderEarlyAuditReadySeen: {uart_result.get('loader_ready_seen', uart_result.get('ready_seen', False))}",
+        f"LoaderEarlyAuditIdleOkSeen: {uart_result.get('loader_idle_ok_seen', uart_result.get('idle_ok_seen', False))}",
+        f"LoaderEarlyAuditTrainStartSeen: {uart_result.get('loader_train_start_seen', uart_result.get('train_start_seen', False))}",
+        f"LoaderEarlyAuditTrainDoneSeen: {uart_result.get('loader_train_done_seen', uart_result.get('train_done_seen', False))}",
+        f"LoaderEarlyAuditTrainDoneCount: {uart_result.get('loader_train_done_count', uart_result.get('train_done_count', 'N/A'))}",
+        f"LoaderEarlyAuditFlushDoneSeen: {uart_result.get('loader_flush_done_seen', uart_result.get('flush_done_seen', False))}",
+        f"LoaderEarlyAuditFlushDoneCount: {uart_result.get('loader_flush_done_count', uart_result.get('flush_done_count', 'N/A'))}",
+        f"LoaderEarlyAuditHeaderEnterSeen: {uart_result.get('loader_header_enter_seen', uart_result.get('header_enter_seen', False))}",
+        f"LoaderEarlyAuditTrainTimeoutSeen: {uart_result.get('loader_train_timeout_seen', uart_result.get('train_timeout_seen', False))}",
+        f"LoaderEarlyAuditTrainTimeoutCount: {uart_result.get('loader_train_timeout_count', uart_result.get('train_timeout_count', 'N/A'))}",
+        f"LoaderEarlyAuditFlushTimeoutSeen: {uart_result.get('loader_flush_timeout_seen', uart_result.get('flush_timeout_seen', False))}",
+        f"LoaderEarlyAuditFlushTimeoutCount: {uart_result.get('loader_flush_timeout_count', uart_result.get('flush_timeout_count', 'N/A'))}",
+        f"LoaderEarlyAuditHeaderByte0: {fmt_optional_hex(uart_result.get('loader_header_byte0', uart_result.get('header_byte0', 'N/A')))}",
+        f"LoaderEarlyAuditHeaderByte1: {fmt_optional_hex(uart_result.get('loader_header_byte1', uart_result.get('header_byte1', 'N/A')))}",
+        f"LoaderEarlyAuditHeaderByte2: {fmt_optional_hex(uart_result.get('loader_header_byte2', uart_result.get('header_byte2', 'N/A')))}",
+        f"LoaderEarlyAuditHeaderByte3: {fmt_optional_hex(uart_result.get('loader_header_byte3', uart_result.get('header_byte3', 'N/A')))}",
+        f"LoaderEarlyAuditBadMagicSeen: {uart_result.get('loader_bad_magic_seen', uart_result.get('bad_magic_seen', False))}",
+        f"LoaderEarlyAuditBadMagicByteIndex: {uart_result.get('loader_bad_magic_byte_index', uart_result.get('bad_magic_byte_index', 'N/A'))}",
+        f"LoaderEarlyAuditHeaderMagicOk: {uart_result.get('loader_header_magic_ok', uart_result.get('header_magic_ok', False))}",
+        f"LoaderEarlyAuditLoadStartSeen: {uart_result.get('loader_load_start_seen', uart_result.get('load_start_seen', False))}",
+        f"LoaderEarlyAuditFirstBlockAckSeen: {uart_result.get('loader_first_block_ack_seen', uart_result.get('first_block_ack_seen', False))}",
+        f"LoaderEarlyAuditSummaryMask: {fmt_optional_hex(uart_result.get('loader_summary_mask', uart_result.get('summary_mask', 'N/A')))}",
+        f"LoaderEarlyAuditPass: {bool(uart_result.get('loader_ready_seen', uart_result.get('ready_seen', False)) and uart_result.get('loader_header_magic_ok', uart_result.get('header_magic_ok', False)) and uart_result.get('loader_load_start_seen', uart_result.get('load_start_seen', False)) and uart_result.get('loader_first_block_ack_seen', uart_result.get('first_block_ack_seen', False)) and uart_result.get('loader_summary_ok', uart_result.get('summary_ok_seen', False)) and not uart_result.get('loader_bad_seen', uart_result.get('bad_seen', False)) and not uart_result.get('loader_session_start_not_found', uart_result.get('session_start_not_found', False)))}",
+        f"LoaderBeaconSelftestPass: {uart_result.get('loader_beacon_selftest_pass', False)}",
+        f"LoaderBeaconSelftestSessionCount: {uart_result.get('loader_session_count', 'N/A')}",
+        f"LoaderBeaconSelftestPassSessionCount: {uart_result.get('loader_pass_session_count', 'N/A')}",
+        f"LoaderBeaconSelftestGoodFrames: {uart_result.get('loader_good_frames', 0)}",
+        f"LoaderBeaconSelftestBadFrames: {uart_result.get('loader_bad_frames', 0)}",
+        f"LoaderBeaconSelftestClassification: {uart_result.get('loader_session_classification', 'N/A')}",
+        f"LoaderBeaconSelftestChosenSessionIndex: {uart_result.get('loader_chosen_session_index', 'N/A')}",
+        f"LoaderBeaconSelftestChosenSessionOffset: {fmt_optional_hex(uart_result.get('loader_chosen_session_start_offset', 'N/A'))}",
+        f"LoaderBeaconSelftestChosenSessionReadyArg: {fmt_optional_hex(uart_result.get('loader_chosen_session_ready_arg', 'N/A'))}",
+        f"LoaderBeaconSelftestChosenSessionFirstEvents: {','.join(uart_result.get('loader_chosen_session_first_events', [])) if isinstance(uart_result.get('loader_chosen_session_first_events', []), list) else 'N/A'}",
+        f"LoaderBeaconSelftestChosenSessionMatchedPrefixLen: {uart_result.get('loader_chosen_session_matched_prefix_len', 'N/A')}",
+        f"LoaderBeaconSelftestChosenSessionEventCount: {uart_result.get('loader_chosen_session_event_count', 'N/A')}",
+        f"LoaderBeaconSelftestChosenSessionOrderValid: {uart_result.get('loader_chosen_session_order_valid', 'N/A')}",
+        f"LoaderBeaconSelftestChosenSessionOrderError: {uart_result.get('loader_chosen_session_order_error', '')}",
         f"LoaderFullPrefix1Pass: {loader_prefix_target_ok(loader_full_prefix1_sim_result, LOADER_FULL_PREFIX1_BLOCKS)}",
         f"LoaderFullPrefix1AckEvents: {loader_full_prefix1_sim_result.get('block_ack_events', 0)}",
         f"LoaderFullPrefix1MaxAckBlock: {loader_full_prefix1_sim_result.get('max_block_ack_arg', 'N/A')}",

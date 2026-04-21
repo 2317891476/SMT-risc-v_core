@@ -465,6 +465,16 @@ always @(posedge clk or negedge rstn) begin
                 sb_tail_next[1] = sb_tail_next[1] + 1;
                 sb_count_next[1] = sb_count_next[1] + 1;
             end
+`ifndef SYNTHESIS
+            if (store_addr == `DEBUG_BEACON_EVT_ADDR) begin
+                $display("[DBG_SB_ENQ] t=%0t tid=%0d order=%0d tail=%0d addr=%h raw=%h aligned=%h func3=%0d",
+                         $time, store_tid, store_order_id,
+                         store_tid ? sb_tail_next[1] : sb_tail_next[0],
+                         store_addr, store_data,
+                         align_store_data(store_data, store_func3, store_addr[1:0]),
+                         store_func3);
+            end
+`endif
             `ifdef VERBOSE_SIM_LOGS
             $display("[SB ENQ] tid=%0d order=%0d addr=%h data=%h func3=%0d",
                      store_tid, store_order_id, store_addr, store_data, store_func3);
@@ -512,6 +522,13 @@ always @(posedge clk or negedge rstn) begin
         // ── Store Drain ─────────────────────────────────────────
         // Remove drained stores from buffer (T0 has priority)
         if (drain_fire_t0) begin
+`ifndef SYNTHESIS
+            if (sb_addr[0][sb_head_next[0]] == `DEBUG_BEACON_EVT_ADDR) begin
+                $display("[DBG_SB_DRAIN] t=%0t tid=0 order=%0d head=%0d addr=%h data=%h wen=%b",
+                         $time, sb_order_id[0][sb_head_next[0]], sb_head_next[0],
+                         sb_addr[0][sb_head_next[0]], sb_data[0][sb_head_next[0]], mem_write_wen);
+            end
+`endif
             `ifdef VERBOSE_SIM_LOGS
             $display("[SB DRAIN] tid=0 order=%0d addr=%h data=%h wen=%b",
                      sb_order_id[0][sb_head_next[0]], sb_addr[0][sb_head_next[0]],
@@ -522,6 +539,13 @@ always @(posedge clk or negedge rstn) begin
             sb_head_next[0] = sb_head_next[0] + 1;
             sb_count_next[0] = sb_count_next[0] - 1;
         end else if (drain_fire_t1) begin
+`ifndef SYNTHESIS
+            if (sb_addr[1][sb_head_next[1]] == `DEBUG_BEACON_EVT_ADDR) begin
+                $display("[DBG_SB_DRAIN] t=%0t tid=1 order=%0d head=%0d addr=%h data=%h wen=%b",
+                         $time, sb_order_id[1][sb_head_next[1]], sb_head_next[1],
+                         sb_addr[1][sb_head_next[1]], sb_data[1][sb_head_next[1]], mem_write_wen);
+            end
+`endif
             `ifdef VERBOSE_SIM_LOGS
             $display("[SB DRAIN] tid=1 order=%0d addr=%h data=%h wen=%b",
                      sb_order_id[1][sb_head_next[1]], sb_addr[1][sb_head_next[1]],
