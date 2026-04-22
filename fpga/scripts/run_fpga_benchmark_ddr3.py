@@ -1208,7 +1208,7 @@ def build_dhrystone_payload(
     run_logged(
         cmd,
         cwd=REPO_ROOT,
-        log_path=logs_dir / "06_build_dhrystone_payload.log",
+        log_path=logs_dir / f"06_build_{stem}_payload.log",
         timeout=600,
     )
     manifest_path = BUILD_DIR / "benchmark_images" / "dhrystone" / "dhrystone_ddr3.json"
@@ -4576,6 +4576,7 @@ def main() -> int:
                         cpu_hz=int(args.core_clk_mhz * 1_000_000),
                         runs=args.dhrystone_runs,
                         stem="dhrystone_baseline",
+                        fixed_runs=args.dhrystone_runs,
                     )
                 )
                 manifest = baseline_manifest

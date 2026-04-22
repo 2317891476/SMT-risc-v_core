@@ -12,7 +12,9 @@ module iq_pipe1_arbiter(
     input  wire [`METADATA_ORDER_ID_W-1:0] mem_order_id,
     input  wire                             mul_valid,
     input  wire [`METADATA_ORDER_ID_W-1:0] mul_order_id,
-    output reg  [1:0]                      winner,       // 2'b00=none, 2'b10=MEM, 2'b11=MUL
+    input  wire                             div_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] div_order_id,
+    output reg  [1:0]                      winner,       // 2'b00=none, 2'b01=DIV, 2'b10=MEM, 2'b11=MUL
     output reg                             winner_valid
 );
 
@@ -33,6 +35,12 @@ module iq_pipe1_arbiter(
             winner       = 2'b11;
             winner_valid = 1'b1;
             best_order   = mul_order_id;
+        end
+
+        if (div_valid && (!winner_valid || div_order_id < best_order)) begin
+            winner       = 2'b01;
+            winner_valid = 1'b1;
+            best_order   = div_order_id;
         end
     end
 

@@ -30,6 +30,7 @@
 ../rtl/exec_pipe0.v
 ../rtl/exec_pipe1.v
 ../rtl/mul_unit.v
+../rtl/div_unit.v
 
 // ─── Memory Pipeline ──────────────────────────────────────────────────────
 ../rtl/lsu_shell.v

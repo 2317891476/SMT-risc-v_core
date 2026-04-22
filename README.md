@@ -11,7 +11,7 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 
 | 维度 | 能力 |
 |------|------|
-| **ISA** | RV32I 全部 47 条指令 + RV32M 乘法扩展 |
+| **ISA** | RV32I 全部 47 条指令 + RV32M 乘除法扩展（`MUL* / DIV* / REM*`） |
 | **发射宽度** | 双发射 (Dual-Issue)，双调度端口 |
 | **执行引擎** | 乱序执行 (OoO)，Rename + 16-entry ROB + 3×Split Issue Queue + 48-entry PRF |
 | **流水线** | IF → FetchBuffer → DualDecode → Dispatch(Rename+IQ) → RO → EX(Pipe0/Pipe1) → MEM → WB |
@@ -24,7 +24,16 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp)，异常入口/MRET |
 | **中断** | CLINT (定时器中断) + PLIC (外部中断)，支持 mcause=0x80000007/0B |
 
-> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。当前有效 bitstream `BuildID=0x69DF37C7` 已通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测验证。
+> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。最新有效 bitstream `BuildID=0x69E89179` 已于 **2026-04-22** 重新通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测验证。
+
+### 最新验证快照（2026-04-22）
+
+| 项目 | 当前结果 | 说明 |
+|------|------|------|
+| 本地基础回归 | ✅ `28/28 PASS` | 默认 `--basic` 已纳入 2 条 divider 回归 |
+| FPGA 同配置基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic --fpga-config` |
+| Verilator Dhrystone | ✅ `ExitReason=done` | `BENCH CYCLES=40133`, `INSTRET=6208`, `IPC_X1000=154` |
+| FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`, `ConstraintsMet=True` |
 
 ---
 
@@ -116,8 +125,9 @@ AdamRiscv/
 │  ├─ scoreboard.v                  # (旧 Scoreboard, 保留参考, 不再实例化)
 │  ├─ bypass_network.v              # ★ PRF 旁路网络 (tagbuf→PRF fallback)
 │  ├─ exec_pipe0.v                  # ★ 执行管道0 (INT+Branch)
-│  ├─ exec_pipe1.v                  # ★ 执行管道1 (INT+MUL+AGU)
+│  ├─ exec_pipe1.v                  # ★ 执行管道1 (INT+MUL+DIV+AGU)
 │  ├─ mul_unit.v                    # ★ 3 级流水乘法器 (RV32M)
+│  ├─ div_unit.v                    # ★ 顺序除法器 (DIV/DIVU/REM/REMU)
 │  │
 │  │  ── 存储子系统 ──
 │  ├─ tlb.v                         # ★ 参数化全相联 TLB
@@ -196,8 +206,9 @@ AdamRiscv/
 | `iq_pipe1_arbiter` | Pipe1 仲裁器：跨 INT/MEM/MUL IQ 最老优先选择 | 组合逻辑 |
 | `bypass_network` | PRF 旁路网络 (tagbuf→PRF fallback) | 流水线前递已禁用 (OoO+PRF 模式) |
 | `exec_pipe0` | 执行管道0: INT ALU + Branch 解析 | 1 周期延迟 |
-| `exec_pipe1` | 执行管道1: INT ALU + MUL + AGU | MUL 3 周期, AGU 1 周期 |
+| `exec_pipe1` | 执行管道1: INT ALU + MUL + DIV + AGU | MUL 3 周期, DIV 33 周期, AGU 1 周期 |
 | `mul_unit` | 3 级流水 Booth 乘法器 | 支持 MUL/MULH/MULHSU/MULHU |
+| `div_unit` | 顺序恢复除法器 | 支持 DIV/DIVU/REM/REMU |
 
 ### 4.3 存储子系统 (Memory Subsystem)
 
@@ -307,7 +318,7 @@ python verification/run_all_tests.py --basic
 ============================================================
   Test Summary
 ============================================================
-  Total: 26 passed, 0 failed, 0 skipped
+  Total: 28 passed, 0 failed, 0 skipped
 ```
 
 ### 运行 RoCC 协处理器测试
@@ -380,7 +391,7 @@ python verification/run_riscv_tests.py --suite riscv-tests
 默认仿真使用 `RS_DEPTH=16`（RTL 默认值）。`--fpga-config` 当前也使用 `RS_DEPTH=16`，并显式启用 `ENABLE_MEM_SUBSYS=1`，与 FPGA 板级 bitstream 的主内存路径一致。当前 AX7203 主线为 `mem_subsys + DDR3 + L2_PASSTHROUGH`，RS_DEPTH=16 @ 25MHz 已完成 post-impl aggressive 签核（`WNS=+0.426ns`, `WHS=+0.036ns`），bitstream 已生成并通过 JTAG 与 UART/DDR3 板测验证。
 
 ```powershell
-# 基础 26 测试 — FPGA 同配置 (RS_DEPTH=16)
+# 基础 28 测试 — FPGA 同配置 (RS_DEPTH=16)
 python verification/run_all_tests.py --basic --fpga-config
 
 # 基础 + riscv-tests — FPGA 同配置
@@ -411,7 +422,7 @@ python verification/run_riscv_tests.py --suite riscv-tests --fpga-config
 python verification/run_all_tests.py --basic --riscv-tests --riscv-arch-test
 
 # 单独运行各测试集
-python verification/run_all_tests.py --basic              # 基础测试 (默认 26 个测试，不含 RoCC)
+python verification/run_all_tests.py --basic              # 基础测试 (默认 28 个测试，不含 RoCC)
 python verification/run_all_tests.py --basic --enable-rocc  # 基础测试 + 3 个 RoCC 测试
 python verification/run_all_tests.py --riscv-tests        # 经典 riscv-tests (自动下载)
 python verification/run_all_tests.py --riscv-arch-test    # 官方 arch-test (自动下载)
@@ -466,13 +477,15 @@ python verification/run_all_tests.py --basic
 
 ### 7.1 基础测试 (Basic Tests)
 
-当前 `--basic` 默认包含 **26** 个测试；RoCC 的 3 个专项测试默认关闭，需要 `--enable-rocc` 才会纳入回归。`test_smt.s` 仍可通过 `--tests test_smt.s` 单独运行，但不在当前默认 basic 集合内。
+当前 `--basic` 默认包含 **28** 个测试；其中新增 2 条 divider 回归（`test_div_basic.s` 与 `test_div_helper_path.s`）。RoCC 的 3 个专项测试默认关闭，需要 `--enable-rocc` 才会纳入回归。`test_smt.s` 仍可通过 `--tests test_smt.s` 单独运行，但不在当前默认 basic 集合内。
 
 | 测试文件 | 覆盖内容 | 验证方式 |
 |---------|---------|---------|
 | `test1.s` | ADD/SUB/AND/OR/XOR/LW/SW | 寄存器 x1-x9 + DRAM 黄金值 |
 | `test2.S` | RAW 冒险链 (ADD→SUB→LW→SW→LW) | 寄存器 x1-x9 + DRAM 黄金值 |
 | `test_rv32i_full.s` | **RV32I 全部 47 条指令** (详见下表) | 9 个 DRAM 检查点 + TUBE 标记 |
+| `test_div_basic.s` | RV32M `DIV/DIVU/REM/REMU` 冒烟回归 | 覆盖正负数、除零、溢出边界、背靠背依赖 |
+| `test_div_helper_path.s` | 64-bit helper-path 回归 | 强制走 `__udivdi3/__umoddi3` 链路，验证 divider 与退休路径 |
 | `test_store_buffer_simple.s` | Store Buffer 基础功能测试 | 存储-加载验证 |
 | `test_store_buffer_commit.s` | Store Buffer 提交边界测试 | ROB 提交时序验证 |
 | `test_store_buffer_forwarding.s` | Store-Load 转发测试 | 数据前递验证 |
@@ -660,7 +673,7 @@ rob_recover_en, rob_recover_prd_new
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
 | ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=1 / ENABLE_DDR3=1 / L2_PASSTHROUGH=1`，AX7203 板测通过，激进实现 `WNS=+0.426ns / WHS=+0.036ns`)   |
 | ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；当前主线抓包有效字符统计 `571862`，字符比例检查通过，并捕获 `CAL=1` / `DDR3 PASS`)       |
-| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🔄 Dhrystone 已完成板级镜像构建和数据内存初始化基础设施（`$readmemh` + `data_word.hex`），板测可启动但计算结果异常（见 §13.10）。CoreMark 待测。 |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🟡 Dhrystone 的 divider/helper-path 主线已恢复：Verilator `preload` 可稳定跑完并打印 `BENCH IPC_X1000: 154`；AX7203 官方主线签核也已恢复绿色。下一步是补 dedicated 板级 benchmark 跑分与 CoreMark。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
@@ -706,7 +719,7 @@ rob_recover_en, rob_recover_prd_new
 | **QSPI Flash** | ✅ | 16MB Flash 持久化启动 |
 | **DDR3** | ✅ | 板载 2×MT41K256M16HA-125 (1GB, 32-bit)，MIG 7-Series v4.2 已集成，CDC 桥接模块 `ddr3_mem_port.v` 已调通，板测读写验证通过 |
 | **当前固定配置** | ✅ | `FPGA_MODE=1`, `ENABLE_MEM_SUBSYS=1`, `ENABLE_DDR3=1`, `L2_PASSTHROUGH=1`, `ENABLE_ROCC_ACCEL=0`, `SMT_MODE=1`, `RS_DEPTH=16`, `FetchBuffer=16`, `25MHz` |
-| **OoO 后端上板** | ✅ | Rename + ROB + 3×Split IQ + 48-entry PRF 乱序后端，`RS_DEPTH=16 / FetchBuffer=16 / 25MHz / SMT_MODE=1` 板测通过，当前有效 bitstream 为 `BuildID=0x69DF37C7` |
+| **OoO 后端上板** | ✅ | Rename + ROB + 3×Split IQ + 48-entry PRF 乱序后端，`RS_DEPTH=16 / FetchBuffer=16 / 25MHz / SMT_MODE=1` 板测通过，当前有效 bitstream 为 `BuildID=0x69E89179` |
 | **clk_locked 复位门控** | ✅ | `post_lock_cnt` + `post_lock_ready` 机制：等待 MMCM `clk_locked` + 255 稳定时钟周期后释放核心复位 |
 | **mem_subsys 上板** | ✅ | 当前主线默认启用 `mem_subsys + L2_PASSTHROUGH + DDR3`，覆盖 CLINT/PLIC/UART MMIO、片上 RAM 与 DDR3 地址窗口 |
 
@@ -770,13 +783,13 @@ fpga/
 | 项目 | 当前已验证结果 | 证据 |
 |------|------|------|
 | 主线自动验收 | `PASS` / `FailedStage=none` | `build/fpga_mainline_validation/summary.txt` |
-| Bitstream / Build ID | `0x69DF37C7` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| Bitstream / Build ID | `0x69E89179` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
 | 板级配置 | `RS=16 / FetchBuffer=16 / SMT=1 / 25MHz / mem_subsys + DDR3 + L2_PASSTHROUGH` | 本节 §13.4 固定配置 |
 | JTAG 烧录 | `DONE=1`, `EOS=1`, `USERCODE/USR_ACCESS` 均匹配 | `build/fpga_mainline_validation/09_program_jtag.log` |
 | DDR3 板测 | 捕获 `CAL=1` 与 `DDR3 PASS`，顶层仿真和板级 ROM 均执行 `0x8000_0000` 的 `DEADBEEF` 写回读 | `build/fpga_mainline_validation/05_run_top_sim.log`, `build/uart_test_rs16.txt` |
 | UART 板测 | 双 SMT 线程稳定交错输出 `UART DIAG PASS` | `build/uart_test_rs16.txt` |
-| 字符统计 | `U=47655`, `A=142966`, `R=47656`, `T=47655`, `D=47656`, `I=47653`, `G=47654`, `P=47656`, `S=95311`，有效字符总数 `571862` | `build/fpga_mainline_validation/summary.txt` |
-| 时序签核 | `25MHz`, `WNS=+0.426ns`, `WHS=+0.036ns` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
+| 字符统计 | `U=42909`, `A=128725`, `R=42909`, `T=42907`, `D=42909`, `I=42907`, `G=42907`, `P=42908`, `S=85817`，有效字符总数 `514898` | `build/fpga_mainline_validation/summary.txt` |
+| 时序签核 | `25MHz`, `WNS=+0.329ns`, `WHS=+0.056ns` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
 | 资源占用 | `53708 LUT / 43482 FF / 5203 LUTRAM / 4 DSP` | `build/ax7203/reports/utilization_aggressive.rpt` |
 
 > **说明**: `UART DIAG PASS` 的字符交错是两个 SMT 线程共享 UART TX、且软件层未做串口互斥时的**预期行为**，不是乱码、死锁或崩溃。当前主线 UART 抓包由脚本在 JTAG 前预先打开，确保能覆盖一次性 boot banner 中的 `CAL=1` / `DDR3 PASS`，随后继续抓取稳定的双线程持续输出。
@@ -1209,11 +1222,13 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 
 ### 13.10 Dhrystone 板级测试（2026-04）
 
+> **最新更新（2026-04-22）**: divider/helper-path 导致的退休停滞已修复。当前 WSL Verilator `preload` Dhrystone 已稳定完成，最新 benchmark 窗口结果为 `BENCH CYCLES=40133`、`BENCH INSTRET=6208`、`BENCH IPC_X1000=154`（10 runs, `HZ=25MHz`）。同日 AX7203 官方主线 `run_fpga_mainline_validation.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10` 已重新通过，`BuildID=0x69E89179`，`Result=PASS`，`ConstraintsMet=True`。需要注意的是，这条主线签核验证的是 DDR3/UART/mainline ROM 闭环，不是 dedicated Dhrystone 板级跑分脚本；当前仓库里最新可复现的 Dhrystone分数仍以上述 Verilator 结果为准。
+
 > **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前 `--bridge-audit-step2-only` 辅助支线已经通过 beacon 化稳定住自动板测，最新 25MHz 辅助 bitstream `BuildID=0x69E39477` 的综合/实现/JTAG/10 秒板测都通过。但这仍然只是 DDR3 bridge 的辅助定位支线，不等价于 Dhrystone 主线已经重新上板通过。
 
 > **补充（2026-04-21）**: 当前 WSL Verilator + mock memory 高速环境（见 §13.5.1）已经能在 `preload` 模式下稳定跑完 Dhrystone，并看到 `DHRYSTONE DONE`；Verilator 主线 gate 保持绿色。DDR3 loader/FPGA 主线这边，`loader_quick_sim` 与 `loader_full_payload_prefix1_sim` 已恢复为绿色，beacon/UART 观测链也已通过独立 `loader-beacon-selftest` 自检；当前唯一剩余 blocker 已收敛为**板级 smoke 里 benchmark 完成路径未看到 `DHRYSTONE DONE`**。
 
-**最新相关状态（2026-04-18）**
+**历史相关状态（2026-04-18）**
 
 | 项目 | 当前状态 | 说明 |
 |------|------|------|
@@ -1222,7 +1237,7 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 | Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E39477`, `WNS=+0.522ns`, `WHS=+0.030ns` |
 | Step2-only 脚本化板测 | ✅ | Beacon 抓包稳定通过，`summary_mask=0x1F`, `any_bad=0` |
 
-**当前 DDR3 loader / board smoke 主线最新状态（2026-04-21）**
+**历史 DDR3 loader / board smoke 主线状态（2026-04-21）**
 
 | 项目 | 当前状态 | 说明 |
 |------|------|------|
@@ -1396,15 +1411,16 @@ Dhrystone 1 次迭代运行完成但计算结果错误：
 
 > 此问题不影响诊断 ROM（纯汇编、无 `.data` 段）的板测通过，仅影响 C 语言 Benchmark。
 
-### 基础测试（截至 2026-03-30，本地 `--basic` 回归）
+### 基础测试（截至 2026-04-22，本地 `--basic` 回归）
 
 | 测试 | 结果 |
 |------|---------|
 | 核心功能测试 (`test1` / `test2` / `test_rv32i_full`) | ✅ PASS |
+| **Divider 测试 (2个)** | ✅ PASS |
 | **Store Buffer 测试 (10个)** | ✅ PASS |
 | **L2/Cache/MMIO 测试 (7个)** | ✅ PASS |
 | **CSR/中断测试 (6个)** | ✅ PASS |
-| **默认 basic 总计** | **26/26 PASS** |
+| **默认 basic 总计** | **28/28 PASS** |
 | `test_smt.s` | 可单独运行，不在当前默认 `--basic` 集合中 |
 | `test_rocc_*.s` (3个) | 默认关闭；需 `--enable-rocc` 显式打开 |
 

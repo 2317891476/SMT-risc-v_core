@@ -4,7 +4,7 @@ Unified test runner for AdamRiscv.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
-  --basic           : Core tests + Store Buffer tests + P2 L2/Interrupt tests (26 tests)
+  --basic           : Core tests + divider tests + Store Buffer tests + P2 L2/Interrupt tests (28 tests)
                       - test1, test2, test_rv32i_full (core functionality)
                       - test_store_buffer_simple, test_store_buffer_commit,
                         test_store_buffer_forwarding, test_store_buffer_hazard,
@@ -129,6 +129,7 @@ class TestRunner:
                 f"-march={march_flag}",
                 "-mabi=ilp32",
                 test,
+                *(["-lgcc"] if ("div_helper" in test_name or test.endswith(".c")) else []),
                 "-o",
                 f"{test_name}.elf",
             ],
@@ -271,6 +272,8 @@ class TestRunner:
                 "test1.s",
                 "test2.S",
                 "test_rv32i_full.s",
+                "test_div_basic.s",
+                "test_div_helper_path.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
@@ -320,7 +323,7 @@ class TestRunner:
             
             # Build ROM
             # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
-            march_flag = "rv32i_zicsr" if "csr" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32i"
+            march_flag = "rv32i_zicsr" if "csr" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
             ret, out, err = self.build_basic_rom(test, test_name, march_flag)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))

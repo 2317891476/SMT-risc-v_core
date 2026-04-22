@@ -49,6 +49,7 @@ void board_delay_ms(uint32_t ms);
 
 int board_vprintf(const char *fmt, va_list ap);
 int board_printf(const char *fmt, ...);
+void board_print_u32(uint32_t val);
 int printf(const char *fmt, ...);
 int sprintf(char *str, const char *fmt, ...);
 int putchar(int ch);

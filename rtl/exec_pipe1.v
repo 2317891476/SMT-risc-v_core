@@ -72,13 +72,24 @@ module exec_pipe1 #(
     output wire [4:0]         mul_out_rd,
     output wire               mul_out_regs_write,
     output wire [2:0]         mul_out_fu,
-    output wire [0:0]         mul_out_tid
+    output wire [0:0]         mul_out_tid,
+
+    // ─── Divider result (33-cycle path) ─────────────────────────
+    output wire               div_out_valid,
+    output wire [TAG_W-1:0]   div_out_tag,
+    output wire [31:0]        div_out_result,
+    output wire [4:0]         div_out_rd,
+    output wire               div_out_regs_write,
+    output wire [2:0]         div_out_fu,
+    output wire [0:0]         div_out_tid,
+    output wire               div_busy
 );
 
 // ─── Routing logic ──────────────────────────────────────────────────────────
 wire is_mem_op = in_mem_read || in_mem_write;
 wire is_mul_op = (in_fu == `FU_MUL);
-wire is_alu_op = in_valid && !is_mem_op && !is_mul_op;
+wire is_div_op = (in_fu == `FU_DIV);
+wire is_alu_op = in_valid && !is_mem_op && !is_mul_op && !is_div_op;
 
 // ─── ALU path (same logic as pipe0 but no branch) ──────────────────────────
 wire [3:0] alu_ctrl;
@@ -130,6 +141,29 @@ mul_unit #(.TAG_W(TAG_W)) u_mul (
     .out_regs_write(mul_out_regs_write),
     .out_fu        (mul_out_fu        ),
     .out_tid       (mul_out_tid       )
+);
+
+// ─── DIV Unit ───────────────────────────────────────────────────────────────
+div_unit #(.TAG_W(TAG_W)) u_div (
+    .clk           (clk           ),
+    .rstn          (rstn          ),
+    .in_valid      (in_valid && is_div_op),
+    .in_tag        (in_tag        ),
+    .in_op_a       (in_op_a       ),
+    .in_op_b       (in_op_b       ),
+    .in_func3      (in_func3      ),
+    .in_rd         (in_rd         ),
+    .in_regs_write (in_regs_write ),
+    .in_fu         (in_fu         ),
+    .in_tid        (in_tid        ),
+    .out_valid     (div_out_valid     ),
+    .out_tag       (div_out_tag       ),
+    .out_result    (div_out_result    ),
+    .out_rd        (div_out_rd        ),
+    .out_regs_write(div_out_regs_write),
+    .out_fu        (div_out_fu        ),
+    .out_tid       (div_out_tid       ),
+    .busy          (div_busy          )
 );
 
 // ─── ALU output (INT + AGU share, but only one active at a time) ────────────
@@ -203,7 +237,7 @@ always @(posedge clk or negedge rstn) begin
         end
 
         if (in_valid && is_mem_op) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
             if (in_mem_write && (eff_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                 $display("[DBG_EP1_STORE] t=%0t pc=%h order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
                          $time, in_pc, in_order_id, in_tag, eff_addr, in_op_b, in_func3, in_tid);
@@ -226,7 +260,7 @@ always @(posedge clk or negedge rstn) begin
         end else if (mem_req_valid_r && !mem_req_accept &&
                      mem_req_wen_r && (mem_req_addr_r == `DEBUG_BEACON_EVT_ADDR) &&
                      !dbg_beacon_wait_reported_r) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
             $display("[DBG_EP1_WAIT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
                      $time, mem_req_order_id_r, mem_req_tag_r, mem_req_addr_r,
                      mem_req_wdata_r, mem_req_func3_r, mem_req_tid_r);

@@ -291,8 +291,27 @@ void board_runtime_init(void) {
 }
 
 void board_uart_putc(char ch) {
+    while (!(*mmio32(AX7203_UART_STATUS_ADDR) & AX7203_UART_STATUS_TX_READY)) {
+        board_mmio_relax();
+    }
     *mmio32(AX7203_UART_TXDATA_ADDR) = (uint32_t)(uint8_t)ch;
     board_uart_tx_delay();
+}
+
+void __attribute__((noinline)) board_print_u32(uint32_t val) {
+    char buf[10];
+    int pos = 0;
+    if (val == 0u) {
+        board_uart_putc('0');
+        return;
+    }
+    while (val != 0u) {
+        buf[pos++] = (char)('0' + (val % 10u));
+        val /= 10u;
+    }
+    while (pos-- > 0) {
+        board_uart_putc(buf[pos]);
+    }
 }
 
 int board_uart_try_getc(uint8_t *byte_out) {

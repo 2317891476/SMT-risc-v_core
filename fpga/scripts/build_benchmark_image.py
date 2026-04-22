@@ -293,6 +293,21 @@ def main() -> int:
         else REPO_ROOT / "benchmarks" / "common_ax7203" / "ax7203_harvard_bench.ld"
     )
 
+    board_runtime_src = str(REPO_ROOT / "benchmarks" / "common_ax7203" / "ax7203_board_runtime.c")
+    board_runtime_obj = str(build_dir / "ax7203_board_runtime.o")
+    other_sources = [s for s in sources if s != board_runtime_src]
+
+    compile_runtime_cmd = [
+        gcc,
+        *[f for f in cflags if not f.startswith("-O")],
+        "-O1",
+        "-c",
+        board_runtime_src,
+        "-o",
+        board_runtime_obj,
+    ]
+    run_checked(compile_runtime_cmd, ROM_DIR)
+
     link_cmd = [
         gcc,
         *cflags,
@@ -301,7 +316,8 @@ def main() -> int:
         "-Wl,--build-id=none",
         "-Wl,--gc-sections",
         f"-Wl,-T,{link_script}",
-        *sources,
+        *other_sources,
+        board_runtime_obj,
         "-lgcc",
         "-o",
         str(elf_path),

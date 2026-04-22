@@ -166,6 +166,10 @@ always @(*) begin
         12'hB80: csr_rdata = mcycle[63:32];      // mcycleh
         12'hB02: csr_rdata = minstret[31:0];     // minstret
         12'hB82: csr_rdata = minstret[63:32];    // minstreth
+        12'hC00: csr_rdata = mcycle[31:0];       // cycle (user-mode alias)
+        12'hC80: csr_rdata = mcycle[63:32];      // cycleh
+        12'hC02: csr_rdata = minstret[31:0];     // instret (user-mode alias)
+        12'hC82: csr_rdata = minstret[63:32];    // instreth
         12'h180: csr_rdata = satp;               // satp
         default: csr_rdata = 32'd0;
         endcase

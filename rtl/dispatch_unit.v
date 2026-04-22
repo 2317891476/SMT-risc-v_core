@@ -2,12 +2,13 @@
 // =============================================================================
 // Module : dispatch_unit
 // Description: Drop-in replacement for the scoreboard.
-//   Internally uses 3 split issue-queues (INT/MEM/MUL) plus a shared
+//   Internally uses 4 split issue-queues (INT/MEM/MUL/DIV) plus a shared
 //   tag pool and reg_result table for dependency tracking.
 //
 //   IQ_INT  : 8 entries — FU_INT0, FU_INT1, FU_NOP → issues to pipe0
 //   IQ_MEM  : 4 entries — FU_LOAD, FU_STORE          → issues to pipe1
 //   IQ_MUL  : 4 entries — FU_MUL                     → issues to pipe1
+//   IQ_DIV  : 4 entries — FU_DIV                     → issues to pipe1
 //   Pipe1 winner is chosen by iq_pipe1_arbiter (oldest-first).
 //
 //   Port interface is identical to scoreboard.v for drop-in swap.
@@ -178,6 +179,33 @@ module dispatch_unit #(
     output reg         p1_mul_cand_is_mret,
     output reg  [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id,
     output reg  [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch,
+    output reg         p1_div_cand_valid,
+    output reg  [RS_TAG_W-1:0] p1_div_cand_tag,
+    output reg  [31:0] p1_div_cand_pc,
+    output reg  [31:0] p1_div_cand_imm,
+    output reg  [2:0]  p1_div_cand_func3,
+    output reg         p1_div_cand_func7,
+    output reg  [4:0]  p1_div_cand_rd,
+    output reg  [4:0]  p1_div_cand_rs1,
+    output reg  [4:0]  p1_div_cand_rs2,
+    output reg         p1_div_cand_rs1_used,
+    output reg         p1_div_cand_rs2_used,
+    output reg  [RS_TAG_W-1:0] p1_div_cand_src1_tag,
+    output reg  [RS_TAG_W-1:0] p1_div_cand_src2_tag,
+    output reg         p1_div_cand_br,
+    output reg         p1_div_cand_mem_read,
+    output reg         p1_div_cand_mem2reg,
+    output reg  [2:0]  p1_div_cand_alu_op,
+    output reg         p1_div_cand_mem_write,
+    output reg  [1:0]  p1_div_cand_alu_src1,
+    output reg  [1:0]  p1_div_cand_alu_src2,
+    output reg         p1_div_cand_br_addr_mode,
+    output reg         p1_div_cand_regs_write,
+    output reg  [2:0]  p1_div_cand_fu,
+    output reg  [0:0]  p1_div_cand_tid,
+    output reg         p1_div_cand_is_mret,
+    output reg  [`METADATA_ORDER_ID_W-1:0] p1_div_cand_order_id,
+    output reg  [`METADATA_EPOCH_W-1:0]    p1_div_cand_epoch,
     output wire        branch_pending_any,
     output wire        debug_br_found_t0,
     output wire        debug_branch_in_flight_t0,
@@ -387,10 +415,12 @@ end
 wire d0_is_int = (disp0_fu == `FU_INT0) || (disp0_fu == `FU_INT1) || (disp0_fu == `FU_NOP);
 wire d0_is_mem = (disp0_fu == `FU_LOAD) || (disp0_fu == `FU_STORE);
 wire d0_is_mul = (disp0_fu == `FU_MUL);
+wire d0_is_div = (disp0_fu == `FU_DIV);
 
 wire d1_is_int = (disp1_fu == `FU_INT0) || (disp1_fu == `FU_INT1) || (disp1_fu == `FU_NOP);
 wire d1_is_mem = (disp1_fu == `FU_LOAD) || (disp1_fu == `FU_STORE);
 wire d1_is_mul = (disp1_fu == `FU_MUL);
+wire d1_is_div = (disp1_fu == `FU_DIV);
 
 // For each IQ: connect disp0 port from first matching dispatch,
 //              disp1 port from second matching dispatch.
@@ -411,6 +441,11 @@ wire iq_mem_d1_valid = (d0_is_mem && disp1_valid && d1_is_mem) && !iq_mem_dp0_fr
 wire iq_mul_dp0_from1 = !d0_is_mul && d1_is_mul;
 wire iq_mul_d0_valid = iq_mul_dp0_from1 ? (disp1_valid && d1_is_mul) : (disp0_valid && d0_is_mul);
 wire iq_mul_d1_valid = (d0_is_mul && disp1_valid && d1_is_mul) && !iq_mul_dp0_from1;
+
+// IQ_DIV dispatch:
+wire iq_div_dp0_from1 = !d0_is_div && d1_is_div;
+wire iq_div_d0_valid = iq_div_dp0_from1 ? (disp1_valid && d1_is_div) : (disp0_valid && d0_is_div);
+wire iq_div_d1_valid = (d0_is_div && disp1_valid && d1_is_div) && !iq_div_dp0_from1;
 
 // Dispatch data mux: when dp0_from1, IQ's disp0 port gets disp1 fields
 
@@ -503,6 +538,7 @@ end
 wire iq_int_full, iq_int_almost_full;
 wire iq_mem_full, iq_mem_almost_full;
 wire iq_mul_full, iq_mul_almost_full;
+wire iq_div_full, iq_div_almost_full;
 
 // d0: branch stall for d0's thread
 wire d0_br_stall = (disp0_tid == 1'b0 && pending_branch_t0) ||
@@ -511,7 +547,8 @@ wire d0_br_stall = (disp0_tid == 1'b0 && pending_branch_t0) ||
 // d0: target IQ has capacity?
 wire d0_cap_ok = (!d0_is_int || !iq_int_full) &&
                  (!d0_is_mem || !iq_mem_full) &&
-                 (!d0_is_mul || !iq_mul_full);
+                 (!d0_is_mul || !iq_mul_full) &&
+                 (!d0_is_div || !iq_div_full);
 
 // d0: tag available?
 wire d0_tag_ok = can_accept_1;
@@ -529,7 +566,8 @@ wire d1_br_stall = (disp1_tid == 1'b0 && pending_branch_t0) ||
 wire d1_int_ok = !d1_is_int || ((d0_is_int && d0_go) ? !iq_int_almost_full : !iq_int_full);
 wire d1_mem_ok = !d1_is_mem || ((d0_is_mem && d0_go) ? !iq_mem_almost_full : !iq_mem_full);
 wire d1_mul_ok = !d1_is_mul || ((d0_is_mul && d0_go) ? !iq_mul_almost_full : !iq_mul_full);
-wire d1_cap_ok = d1_int_ok && d1_mem_ok && d1_mul_ok;
+wire d1_div_ok = !d1_is_div || ((d0_is_div && d0_go) ? !iq_div_almost_full : !iq_div_full);
+wire d1_cap_ok = d1_int_ok && d1_mem_ok && d1_mul_ok && d1_div_ok;
 
 // d1: need 2 tags total (d0 uses 1)
 wire d1_tag_ok = can_accept_2;
@@ -613,6 +651,26 @@ wire [0:0]  mul_iss_tid;
 wire        mul_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] mul_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    mul_iss_epoch;
+
+// DIV IQ issue wires
+wire        div_iss_valid;
+wire [RS_TAG_W-1:0] div_iss_tag;
+wire [31:0] div_iss_pc, div_iss_imm;
+wire [2:0]  div_iss_func3;
+wire        div_iss_func7;
+wire [4:0]  div_iss_rd, div_iss_rs1, div_iss_rs2;
+wire        div_iss_rs1_used, div_iss_rs2_used;
+wire [RS_TAG_W-1:0] div_iss_src1_tag, div_iss_src2_tag;
+wire        div_iss_br, div_iss_mem_read, div_iss_mem2reg;
+wire [2:0]  div_iss_alu_op;
+wire        div_iss_mem_write;
+wire [1:0]  div_iss_alu_src1, div_iss_alu_src2;
+wire        div_iss_br_addr_mode, div_iss_regs_write;
+wire [2:0]  div_iss_fu;
+wire [0:0]  div_iss_tid;
+wire        div_iss_is_mret;
+wire [`METADATA_ORDER_ID_W-1:0] div_iss_order_id;
+wire [`METADATA_EPOCH_W-1:0]    div_iss_epoch;
 
 // ═════════════════════════════════════════════════════════════════
 // 8. Issue Queue — INT (8 entries, commit-time dealloc)
@@ -1010,8 +1068,138 @@ issue_queue #(
 );
 
 // ═════════════════════════════════════════════════════════════════
+// 10b. Issue Queue — DIV (4 entries, commit-time dealloc)
+// ═════════════════════════════════════════════════════════════════
+issue_queue #(
+    .IQ_DEPTH  (4),
+    .IQ_IDX_W  (2),
+    .RS_TAG_W  (RS_TAG_W),
+    .NUM_THREAD(NUM_THREAD),
+    .WAKE_HOLD (1),
+    .DEALLOC_AT_COMMIT (1)
+) u_iq_div (
+    .clk        (clk),
+    .rstn       (rstn),
+    .flush      (flush),
+    .flush_tid  (flush_tid),
+    .flush_new_epoch (flush_new_epoch),
+    .flush_order_valid (flush_order_valid),
+    .flush_order_id    (flush_order_id),
+    // Dispatch 0
+    .disp0_valid       (iq_div_dp0_from1 ? (d1_go && d1_is_div) : (d0_go && d0_is_div)),
+    .disp0_tag         (iq_div_dp0_from1 ? free1_tag   : free0_tag),
+    .disp0_pc          (iq_div_dp0_from1 ? disp1_pc    : disp0_pc),
+    .disp0_imm         (iq_div_dp0_from1 ? disp1_imm   : disp0_imm),
+    .disp0_func3       (iq_div_dp0_from1 ? disp1_func3 : disp0_func3),
+    .disp0_func7       (iq_div_dp0_from1 ? disp1_func7 : disp0_func7),
+    .disp0_rd          (iq_div_dp0_from1 ? disp1_rd    : disp0_rd),
+    .disp0_br          (iq_div_dp0_from1 ? disp1_br    : disp0_br),
+    .disp0_mem_read    (iq_div_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
+    .disp0_mem2reg     (iq_div_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_alu_op      (iq_div_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
+    .disp0_mem_write   (iq_div_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_alu_src1    (iq_div_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
+    .disp0_alu_src2    (iq_div_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
+    .disp0_br_addr_mode(iq_div_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_regs_write  (iq_div_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
+    .disp0_rs1         (iq_div_dp0_from1 ? disp1_rs1   : disp0_rs1),
+    .disp0_rs2         (iq_div_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1_used    (iq_div_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
+    .disp0_rs2_used    (iq_div_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
+    .disp0_fu          (iq_div_dp0_from1 ? disp1_fu    : disp0_fu),
+    .disp0_tid         (iq_div_dp0_from1 ? disp1_tid   : disp0_tid),
+    .disp0_is_mret     (iq_div_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_order_id    (iq_div_dp0_from1 ? disp1_order_id    : disp0_order_id),
+    .disp0_epoch       (iq_div_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_src1_tag    (iq_div_dp0_from1 ? d1_src1   : d0_src1),
+    .disp0_src2_tag    (iq_div_dp0_from1 ? d1_src2   : d0_src2),
+    // Dispatch 1
+    .disp1_valid       (d0_go && d0_is_div && d1_go && d1_is_div),
+    .disp1_tag         (free1_tag),
+    .disp1_pc          (disp1_pc),
+    .disp1_imm         (disp1_imm),
+    .disp1_func3       (disp1_func3),
+    .disp1_func7       (disp1_func7),
+    .disp1_rd          (disp1_rd),
+    .disp1_br          (disp1_br),
+    .disp1_mem_read    (disp1_mem_read),
+    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_alu_op      (disp1_alu_op),
+    .disp1_mem_write   (disp1_mem_write),
+    .disp1_alu_src1    (disp1_alu_src1),
+    .disp1_alu_src2    (disp1_alu_src2),
+    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_regs_write  (disp1_regs_write),
+    .disp1_rs1         (disp1_rs1),
+    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1_used    (disp1_rs1_used),
+    .disp1_rs2_used    (disp1_rs2_used),
+    .disp1_fu          (disp1_fu),
+    .disp1_tid         (disp1_tid),
+    .disp1_is_mret     (disp1_is_mret),
+    .disp1_order_id    (disp1_order_id),
+    .disp1_epoch       (disp1_epoch),
+    .disp1_src1_tag    (d1_src1),
+    .disp1_src2_tag    (d1_src2),
+    // Outputs
+    .iq_full        (iq_div_full),
+    .iq_almost_full (iq_div_almost_full),
+    .iss_valid       (div_iss_valid),
+    .iss_tag         (div_iss_tag),
+    .iss_pc          (div_iss_pc),
+    .iss_imm         (div_iss_imm),
+    .iss_func3       (div_iss_func3),
+    .iss_func7       (div_iss_func7),
+    .iss_rd          (div_iss_rd),
+    .iss_rs1         (div_iss_rs1),
+    .iss_rs2         (div_iss_rs2),
+    .iss_rs1_used    (div_iss_rs1_used),
+    .iss_rs2_used    (div_iss_rs2_used),
+    .iss_src1_tag    (div_iss_src1_tag),
+    .iss_src2_tag    (div_iss_src2_tag),
+    .iss_br          (div_iss_br),
+    .iss_mem_read    (div_iss_mem_read),
+    .iss_mem2reg     (div_iss_mem2reg),
+    .iss_alu_op      (div_iss_alu_op),
+    .iss_mem_write   (div_iss_mem_write),
+    .iss_alu_src1    (div_iss_alu_src1),
+    .iss_alu_src2    (div_iss_alu_src2),
+    .iss_br_addr_mode(div_iss_br_addr_mode),
+    .iss_regs_write  (div_iss_regs_write),
+    .iss_fu          (div_iss_fu),
+    .iss_tid         (div_iss_tid),
+    .iss_is_mret     (div_iss_is_mret),
+    .iss_order_id    (div_iss_order_id),
+    .iss_epoch       (div_iss_epoch),
+    .wb0_valid       (wb0_valid),
+    .wb0_tag         (wb0_tag),
+    .wb0_regs_write  (wb0_regs_write),
+    .wb1_valid       (wb1_valid),
+    .wb1_tag         (wb1_tag),
+    .wb1_regs_write  (wb1_regs_write),
+    .commit0_valid   (commit0_valid),
+    .commit0_tag     (commit0_tag),
+    .commit0_tid     (commit0_tid),
+    .commit0_order_id(commit0_order_id),
+    .commit1_valid   (commit1_valid),
+    .commit1_tag     (commit1_tag),
+    .commit1_tid     (commit1_tid),
+    .commit1_order_id(commit1_order_id),
+    .older_store_valid_t0   (1'b0),
+    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .older_store_valid_t1   (1'b0),
+    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_inhibit_t0(div_issue_inhibit),
+    .issue_inhibit_t1(div_issue_inhibit),
+    .oldest_store_valid_t0(),
+    .oldest_store_order_id_t0(),
+    .oldest_store_valid_t1(),
+    .oldest_store_order_id_t1()
+);
+
+// ═════════════════════════════════════════════════════════════════
 // 11. FU Busy Tracking (prevents over-issue to shared pipe1 resources)
-//     MEM/MUL share pipe1. Only one mem op at a time (LSU single-port).
+//     MEM/MUL/DIV share pipe1. Only one mem op at a time (LSU single-port).
 //     Busy set at issue, cleared at WB completion of that FU type.
 //
 //     Partial-flush awareness: the LSU can kill a pending load during a
@@ -1019,7 +1207,7 @@ issue_queue #(
 //     the flush point. When that happens no WB1 arrives, so we must
 //     also clear mem_fu_busy here using the same younger-than test.
 // ═════════════════════════════════════════════════════════════════
-reg mem_fu_busy, mul_fu_busy;
+reg mem_fu_busy, mul_fu_busy, div_fu_busy;
 reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
 reg [0:0]                      mem_fu_tid;
 wire mem_issue_inhibit = mem_fu_busy ||
@@ -1028,6 +1216,9 @@ wire mem_issue_inhibit = mem_fu_busy ||
 wire mul_issue_inhibit = mul_fu_busy ||
                          (p1_mul_cand_valid &&
                           !(p1_winner_valid && p1_winner == 2'b11));
+wire div_issue_inhibit = div_fu_busy ||
+                         (p1_div_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b01));
 
 wire mem_fu_flush_kill = mem_fu_busy &&
                          (mem_fu_tid == flush_tid) &&
@@ -1043,6 +1234,11 @@ wire p1_mul_cand_flush_kill = flush &&
                               (p1_mul_cand_tid == flush_tid) &&
                               (!flush_order_valid ||
                                (p1_mul_cand_order_id > flush_order_id));
+wire p1_div_cand_flush_kill = flush &&
+                              p1_div_cand_valid &&
+                              (p1_div_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_div_cand_order_id > flush_order_id));
 wire mem_raw_issue_flush_kill = flush &&
                                 mem_iss_valid &&
                                 (mem_iss_tid == flush_tid) &&
@@ -1053,12 +1249,20 @@ wire mul_raw_issue_flush_kill = flush &&
                                 (mul_iss_tid == flush_tid) &&
                                 (!flush_order_valid ||
                                  (mul_iss_order_id > flush_order_id));
+wire div_raw_issue_flush_kill = flush &&
+                                div_iss_valid &&
+                                (div_iss_tid == flush_tid) &&
+                                (!flush_order_valid ||
+                                 (div_iss_order_id > flush_order_id));
 wire p1_mem_cand_arb_valid = p1_mem_cand_valid &&
                              !p1_mem_cand_flush_kill &&
                              !mem_fu_busy;
 wire p1_mul_cand_arb_valid = p1_mul_cand_valid &&
                              !p1_mul_cand_flush_kill &&
                              !mul_fu_busy;
+wire p1_div_cand_arb_valid = p1_div_cand_valid &&
+                             !p1_div_cand_flush_kill &&
+                             !div_fu_busy;
 wire mem_cand_consume = p1_winner_valid && (p1_winner == 2'b10);
 wire mem_cand_raw_valid = mem_iss_valid && !mem_raw_issue_flush_kill;
 wire mem_cand_clear = p1_mem_cand_flush_kill ||
@@ -1090,6 +1294,7 @@ always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         mem_fu_busy              <= 1'b0;
         mul_fu_busy              <= 1'b0;
+        div_fu_busy              <= 1'b0;
         mem_fu_order_id          <= {`METADATA_ORDER_ID_W{1'b0}};
         mem_fu_tid               <= 1'b0;
         p1_mem_cand_valid        <= 1'b0;
@@ -1128,6 +1333,33 @@ always @(posedge clk or negedge rstn) begin
         p1_mul_cand_is_mret      <= 1'b0;
         p1_mul_cand_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
         p1_mul_cand_epoch        <= {`METADATA_EPOCH_W{1'b0}};
+        p1_div_cand_valid        <= 1'b0;
+        p1_div_cand_tag          <= {RS_TAG_W{1'b0}};
+        p1_div_cand_pc           <= 32'd0;
+        p1_div_cand_imm          <= 32'd0;
+        p1_div_cand_func3        <= 3'd0;
+        p1_div_cand_func7        <= 1'b0;
+        p1_div_cand_rd           <= 5'd0;
+        p1_div_cand_rs1          <= 5'd0;
+        p1_div_cand_rs2          <= 5'd0;
+        p1_div_cand_rs1_used     <= 1'b0;
+        p1_div_cand_rs2_used     <= 1'b0;
+        p1_div_cand_src1_tag     <= {RS_TAG_W{1'b0}};
+        p1_div_cand_src2_tag     <= {RS_TAG_W{1'b0}};
+        p1_div_cand_br           <= 1'b0;
+        p1_div_cand_mem_read     <= 1'b0;
+        p1_div_cand_mem2reg      <= 1'b0;
+        p1_div_cand_alu_op       <= 3'd0;
+        p1_div_cand_mem_write    <= 1'b0;
+        p1_div_cand_alu_src1     <= 2'd0;
+        p1_div_cand_alu_src2     <= 2'd0;
+        p1_div_cand_br_addr_mode <= 1'b0;
+        p1_div_cand_regs_write   <= 1'b0;
+        p1_div_cand_fu           <= 3'd0;
+        p1_div_cand_tid          <= 1'b0;
+        p1_div_cand_is_mret      <= 1'b0;
+        p1_div_cand_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
+        p1_div_cand_epoch        <= {`METADATA_EPOCH_W{1'b0}};
     end else begin
         if (flush) begin
             // Clear fu_busy on GLOBAL flush (trap/interrupt entry,
@@ -1136,6 +1368,7 @@ always @(posedge clk or negedge rstn) begin
             if (!flush_order_valid) begin
                 mem_fu_busy <= 1'b0;
                 mul_fu_busy <= 1'b0;
+                div_fu_busy <= 1'b0;
             end else if (mem_fu_flush_kill) begin
                 // Partial flush (branch redirect): clear mem_fu_busy if the
                 // in-flight mem op belongs to the flushed thread AND is younger
@@ -1223,6 +1456,71 @@ always @(posedge clk or negedge rstn) begin
             p1_mul_cand_epoch        <= mul_iss_epoch;
         end
 
+        // DIV candidate update
+        if (p1_div_cand_flush_kill) begin
+            p1_div_cand_valid <= 1'b0;
+        end else if (p1_winner_valid && p1_winner == 2'b01) begin
+            if (div_iss_valid && !div_raw_issue_flush_kill) begin
+                p1_div_cand_valid        <= 1'b1;
+                p1_div_cand_tag          <= div_iss_tag;
+                p1_div_cand_pc           <= div_iss_pc;
+                p1_div_cand_imm          <= div_iss_imm;
+                p1_div_cand_func3        <= div_iss_func3;
+                p1_div_cand_func7        <= div_iss_func7;
+                p1_div_cand_rd           <= div_iss_rd;
+                p1_div_cand_rs1          <= div_iss_rs1;
+                p1_div_cand_rs2          <= div_iss_rs2;
+                p1_div_cand_rs1_used     <= div_iss_rs1_used;
+                p1_div_cand_rs2_used     <= div_iss_rs2_used;
+                p1_div_cand_src1_tag     <= div_iss_src1_tag;
+                p1_div_cand_src2_tag     <= div_iss_src2_tag;
+                p1_div_cand_br           <= div_iss_br;
+                p1_div_cand_mem_read     <= div_iss_mem_read;
+                p1_div_cand_mem2reg      <= div_iss_mem2reg;
+                p1_div_cand_alu_op       <= div_iss_alu_op;
+                p1_div_cand_mem_write    <= div_iss_mem_write;
+                p1_div_cand_alu_src1     <= div_iss_alu_src1;
+                p1_div_cand_alu_src2     <= div_iss_alu_src2;
+                p1_div_cand_br_addr_mode <= div_iss_br_addr_mode;
+                p1_div_cand_regs_write   <= div_iss_regs_write;
+                p1_div_cand_fu           <= div_iss_fu;
+                p1_div_cand_tid          <= div_iss_tid;
+                p1_div_cand_is_mret      <= div_iss_is_mret;
+                p1_div_cand_order_id     <= div_iss_order_id;
+                p1_div_cand_epoch        <= div_iss_epoch;
+            end else begin
+                p1_div_cand_valid <= 1'b0;
+            end
+        end else if (!p1_div_cand_valid && div_iss_valid && !div_raw_issue_flush_kill) begin
+            p1_div_cand_valid        <= 1'b1;
+            p1_div_cand_tag          <= div_iss_tag;
+            p1_div_cand_pc           <= div_iss_pc;
+            p1_div_cand_imm          <= div_iss_imm;
+            p1_div_cand_func3        <= div_iss_func3;
+            p1_div_cand_func7        <= div_iss_func7;
+            p1_div_cand_rd           <= div_iss_rd;
+            p1_div_cand_rs1          <= div_iss_rs1;
+            p1_div_cand_rs2          <= div_iss_rs2;
+            p1_div_cand_rs1_used     <= div_iss_rs1_used;
+            p1_div_cand_rs2_used     <= div_iss_rs2_used;
+            p1_div_cand_src1_tag     <= div_iss_src1_tag;
+            p1_div_cand_src2_tag     <= div_iss_src2_tag;
+            p1_div_cand_br           <= div_iss_br;
+            p1_div_cand_mem_read     <= div_iss_mem_read;
+            p1_div_cand_mem2reg      <= div_iss_mem2reg;
+            p1_div_cand_alu_op       <= div_iss_alu_op;
+            p1_div_cand_mem_write    <= div_iss_mem_write;
+            p1_div_cand_alu_src1     <= div_iss_alu_src1;
+            p1_div_cand_alu_src2     <= div_iss_alu_src2;
+            p1_div_cand_br_addr_mode <= div_iss_br_addr_mode;
+            p1_div_cand_regs_write   <= div_iss_regs_write;
+            p1_div_cand_fu           <= div_iss_fu;
+            p1_div_cand_tid          <= div_iss_tid;
+            p1_div_cand_is_mret      <= div_iss_is_mret;
+            p1_div_cand_order_id     <= div_iss_order_id;
+            p1_div_cand_epoch        <= div_iss_epoch;
+        end
+
         if (p1_winner_valid && p1_winner == 2'b10) begin
             // A freshly issued pipe1 MEM op must keep the FU busy even if the
             // previous MEM op also completes on WB1 in the same cycle.
@@ -1238,6 +1536,12 @@ always @(posedge clk or negedge rstn) begin
         end else if (wb1_valid && wb1_fu == `FU_MUL) begin
             mul_fu_busy <= 1'b0;
         end
+        if (p1_winner_valid && p1_winner == 2'b01) begin
+            // Same priority rule for DIV: new issue beats same-cycle clear.
+            div_fu_busy <= 1'b1;
+        end else if (wb1_valid && wb1_fu == `FU_DIV) begin
+            div_fu_busy <= 1'b0;
+        end
     end
 end
 
@@ -1250,6 +1554,8 @@ iq_pipe1_arbiter u_p1_arb (
     .mem_order_id (p1_mem_cand_order_id),
     .mul_valid    (p1_mul_cand_arb_valid),
     .mul_order_id (p1_mul_cand_order_id),
+    .div_valid    (p1_div_cand_arb_valid),
+    .div_order_id (p1_div_cand_order_id),
     .winner       (p1_winner),
     .winner_valid (p1_winner_valid)
 );

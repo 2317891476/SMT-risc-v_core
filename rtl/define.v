@@ -98,6 +98,7 @@
 `define FU_INT0    3'd1   // Integer pipe 0 (ADD/SUB/shifts/logic)
 `define FU_INT1    3'd2   // Integer pipe 1 (same ops, second port)
 `define FU_MUL     3'd3   // Multiplier (3-cycle latency)
+`define FU_DIV     3'd4   // Divider (34-cycle latency)
 `define FU_LOAD    3'd6   // Load unit
 `define FU_STORE   3'd7   // Store unit
 

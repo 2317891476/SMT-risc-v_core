@@ -365,7 +365,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_IDLE: begin
                 // Ready to accept new request
                 if (req_valid && req_accept) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                         $display("[DBG_LSU_ACCEPT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
                                  $time, req_order_id, req_tag, req_addr, req_wdata, req_func3, req_tid);
@@ -414,7 +414,7 @@ always @(posedge clk or negedge rstn) begin
                     end
                 end else if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
                              !dbg_beacon_block_reported_r) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
                              $time, lsu_state, state_machine_idle, sb_store_accept,
                              sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
@@ -422,7 +422,7 @@ always @(posedge clk or negedge rstn) begin
                     dbg_beacon_block_reported_r <= 1'b1;
                 end else if (use_mem_subsys && sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
                     // Drain one committed store-buffer entry through mem_subsys M1.
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     if (sb_mem_write_addr_int == `DEBUG_BEACON_EVT_ADDR) begin
                         $display("[DBG_LSU_DRAIN] t=%0t addr=%h wdata=%h wen=%b",
                                  $time, sb_mem_write_addr_int, sb_mem_write_data_int, sb_mem_write_wen_int);
@@ -442,7 +442,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_REQ: begin
                 if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
                     !dbg_beacon_block_reported_r) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
                              $time, lsu_state, state_machine_idle, sb_store_accept,
                              sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
@@ -452,7 +452,7 @@ always @(posedge clk or negedge rstn) begin
                 if (use_mem_subsys) begin
                     // Waiting for mem_subsys to accept request
                     if (m1_req_ready) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                         if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                             $display("[DBG_LSU_REQ_GNT] t=%0t addr=%h wdata=%h wen=%b",
                                      $time, m1_req_addr, m1_req_wdata, m1_req_wen);
@@ -473,7 +473,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_WAIT_RESP: begin
                 if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
                     !dbg_beacon_block_reported_r) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
                              $time, lsu_state, state_machine_idle, sb_store_accept,
                              sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
@@ -482,7 +482,7 @@ always @(posedge clk or negedge rstn) begin
                 end
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                         $display("[DBG_LSU_RESP_SEEN] t=%0t drain=%0d addr=%h data=%h",
                                  $time, m1_txn_is_drain, m1_req_addr, m1_resp_data);
@@ -505,7 +505,7 @@ always @(posedge clk or negedge rstn) begin
             LSU_RESP: begin
                 if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
                     !dbg_beacon_block_reported_r) begin
-`ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
                     $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
                              $time, lsu_state, state_machine_idle, sb_store_accept,
                              sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);

@@ -11,6 +11,7 @@ ddr3_mem_port.v
 decoder_dual.v
 define.v
 dispatch_unit.v
+div_unit.v
 exec_pipe0.v
 exec_pipe1.v
 fetch_buffer.v

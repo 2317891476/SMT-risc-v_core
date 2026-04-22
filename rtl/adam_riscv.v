@@ -7,7 +7,7 @@
 //
 //   New Pipeline:
 //   IF → FetchBuffer → DualDecoder → Scoreboard → RO → BypassNet →
-//   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+AGU) → MEM → WB
+//   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+DIV+AGU) → MEM → WB
 
 `include "define.v"
 //
@@ -712,6 +712,23 @@ wire [2:0]  p1_mul_cand_fu;
 wire [0:0]  p1_mul_cand_tid;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch;
+wire        p1_div_cand_valid;
+wire [4:0]  p1_div_cand_tag;
+wire [31:0] p1_div_cand_pc, p1_div_cand_imm;
+wire [2:0]  p1_div_cand_func3;
+wire        p1_div_cand_func7;
+wire [4:0]  p1_div_cand_rd, p1_div_cand_rs1, p1_div_cand_rs2;
+wire        p1_div_cand_rs1_used, p1_div_cand_rs2_used;
+wire [4:0]  p1_div_cand_src1_tag, p1_div_cand_src2_tag;
+wire        p1_div_cand_br, p1_div_cand_mem_read, p1_div_cand_mem2reg;
+wire [2:0]  p1_div_cand_alu_op;
+wire        p1_div_cand_mem_write;
+wire [1:0]  p1_div_cand_alu_src1, p1_div_cand_alu_src2;
+wire        p1_div_cand_br_addr_mode, p1_div_cand_regs_write;
+wire [2:0]  p1_div_cand_fu;
+wire [0:0]  p1_div_cand_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_div_cand_order_id;
+wire [`METADATA_EPOCH_W-1:0]    p1_div_cand_epoch;
 wire        sb_branch_pending_any;
 wire        sb_debug_br_found_t0;
 wire        sb_debug_branch_in_flight_t0;
@@ -907,6 +924,33 @@ dispatch_unit #(
     .p1_mul_cand_is_mret(),
     .p1_mul_cand_order_id(p1_mul_cand_order_id),
     .p1_mul_cand_epoch (p1_mul_cand_epoch ),
+    .p1_div_cand_valid (p1_div_cand_valid ),
+    .p1_div_cand_tag   (p1_div_cand_tag   ),
+    .p1_div_cand_pc    (p1_div_cand_pc    ),
+    .p1_div_cand_imm   (p1_div_cand_imm   ),
+    .p1_div_cand_func3 (p1_div_cand_func3 ),
+    .p1_div_cand_func7 (p1_div_cand_func7 ),
+    .p1_div_cand_rd    (p1_div_cand_rd    ),
+    .p1_div_cand_rs1   (p1_div_cand_rs1   ),
+    .p1_div_cand_rs2   (p1_div_cand_rs2   ),
+    .p1_div_cand_rs1_used(p1_div_cand_rs1_used),
+    .p1_div_cand_rs2_used(p1_div_cand_rs2_used),
+    .p1_div_cand_src1_tag(p1_div_cand_src1_tag),
+    .p1_div_cand_src2_tag(p1_div_cand_src2_tag),
+    .p1_div_cand_br    (p1_div_cand_br    ),
+    .p1_div_cand_mem_read(p1_div_cand_mem_read),
+    .p1_div_cand_mem2reg(p1_div_cand_mem2reg),
+    .p1_div_cand_alu_op(p1_div_cand_alu_op),
+    .p1_div_cand_mem_write(p1_div_cand_mem_write),
+    .p1_div_cand_alu_src1(p1_div_cand_alu_src1),
+    .p1_div_cand_alu_src2(p1_div_cand_alu_src2),
+    .p1_div_cand_br_addr_mode(p1_div_cand_br_addr_mode),
+    .p1_div_cand_regs_write(p1_div_cand_regs_write),
+    .p1_div_cand_fu    (p1_div_cand_fu    ),
+    .p1_div_cand_tid   (p1_div_cand_tid   ),
+    .p1_div_cand_is_mret(),
+    .p1_div_cand_order_id(p1_div_cand_order_id),
+    .p1_div_cand_epoch (p1_div_cand_epoch ),
     .branch_pending_any(sb_branch_pending_any),
     .debug_br_found_t0 (sb_debug_br_found_t0),
     .debug_branch_in_flight_t0(sb_debug_branch_in_flight_t0),
@@ -962,9 +1006,13 @@ dispatch_unit #(
 );
 
 wire       p1_issue_is_mem     = (p1_winner == 2'b10);
-wire [0:0] p1_issue_arch_tid   = p1_issue_is_mem ? p1_mem_cand_tid : p1_mul_cand_tid;
-wire [4:0] p1_issue_arch_rs1   = p1_issue_is_mem ? p1_mem_cand_rs1 : p1_mul_cand_rs1;
-wire [4:0] p1_issue_arch_rs2   = p1_issue_is_mem ? p1_mem_cand_rs2 : p1_mul_cand_rs2;
+wire       p1_issue_is_div     = (p1_winner == 2'b01);
+wire [0:0] p1_issue_arch_tid   = p1_issue_is_mem ? p1_mem_cand_tid :
+                                  p1_issue_is_div ? p1_div_cand_tid : p1_mul_cand_tid;
+wire [4:0] p1_issue_arch_rs1   = p1_issue_is_mem ? p1_mem_cand_rs1 :
+                                  p1_issue_is_div ? p1_div_cand_rs1 : p1_mul_cand_rs1;
+wire [4:0] p1_issue_arch_rs2   = p1_issue_is_mem ? p1_mem_cand_rs2 :
+                                  p1_issue_is_div ? p1_div_cand_rs2 : p1_mul_cand_rs2;
 
 // ════════════════════════════════════════════════════════════════════════════
 // ROB Lite (Reorder Buffer for in-order commit)
@@ -1368,14 +1416,6 @@ always @(posedge clk or negedge rstn) begin
         p1_pre_ro_valid <= p1_winner_valid;
         if (p1_winner_valid) begin
             if (p1_issue_is_mem) begin
-`ifndef SYNTHESIS
-                if (p1_mem_cand_mem_write) begin
-                    $display("[DBG_P1_WIN] t=%0t tag=%0d pc=%h order=%0d tid=%0d rs2=%0d src2_tag=%0d prs2=%0d memw=%0b",
-                             $time, p1_mem_cand_tag, p1_mem_cand_pc, p1_mem_cand_order_id,
-                             p1_mem_cand_tid, p1_mem_cand_rs2, p1_mem_cand_src2_tag,
-                             tag_prs2_map[p1_mem_cand_tag], p1_mem_cand_mem_write);
-                end
-`endif
                 p1_pre_ro_tag          <= p1_mem_cand_tag;
                 p1_pre_ro_pc           <= p1_mem_cand_pc;
                 p1_pre_ro_imm          <= p1_mem_cand_imm;
@@ -1403,6 +1443,34 @@ always @(posedge clk or negedge rstn) begin
                 p1_pre_ro_epoch        <= p1_mem_cand_epoch;
                 p1_pre_ro_prs1         <= tag_prs1_map[p1_mem_cand_tag];
                 p1_pre_ro_prs2         <= tag_prs2_map[p1_mem_cand_tag];
+            end else if (p1_issue_is_div) begin
+                p1_pre_ro_tag          <= p1_div_cand_tag;
+                p1_pre_ro_pc           <= p1_div_cand_pc;
+                p1_pre_ro_imm          <= p1_div_cand_imm;
+                p1_pre_ro_func3        <= p1_div_cand_func3;
+                p1_pre_ro_func7        <= p1_div_cand_func7;
+                p1_pre_ro_rd           <= p1_div_cand_rd;
+                p1_pre_ro_rs1          <= p1_div_cand_rs1;
+                p1_pre_ro_rs2          <= p1_div_cand_rs2;
+                p1_pre_ro_rs1_used     <= p1_div_cand_rs1_used;
+                p1_pre_ro_rs2_used     <= p1_div_cand_rs2_used;
+                p1_pre_ro_src1_tag     <= p1_div_cand_src1_tag;
+                p1_pre_ro_src2_tag     <= p1_div_cand_src2_tag;
+                p1_pre_ro_alu_op       <= p1_div_cand_alu_op;
+                p1_pre_ro_alu_src1     <= p1_div_cand_alu_src1;
+                p1_pre_ro_alu_src2     <= p1_div_cand_alu_src2;
+                p1_pre_ro_br           <= p1_div_cand_br;
+                p1_pre_ro_mem_read     <= p1_div_cand_mem_read;
+                p1_pre_ro_mem_write    <= p1_div_cand_mem_write;
+                p1_pre_ro_mem2reg      <= p1_div_cand_mem2reg;
+                p1_pre_ro_regs_write   <= p1_div_cand_regs_write;
+                p1_pre_ro_br_addr_mode <= p1_div_cand_br_addr_mode;
+                p1_pre_ro_fu           <= p1_div_cand_fu;
+                p1_pre_ro_tid          <= p1_div_cand_tid;
+                p1_pre_ro_order_id     <= p1_div_cand_order_id;
+                p1_pre_ro_epoch        <= p1_div_cand_epoch;
+                p1_pre_ro_prs1         <= tag_prs1_map[p1_div_cand_tag];
+                p1_pre_ro_prs2         <= tag_prs2_map[p1_div_cand_tag];
             end else begin
                 p1_pre_ro_tag          <= p1_mul_cand_tag;
                 p1_pre_ro_pc           <= p1_mul_cand_pc;
@@ -1852,6 +1920,15 @@ wire        p1_mul_regs_write;
 wire [2:0]  p1_mul_fu;
 wire [0:0]  p1_mul_tid;
 
+wire        p1_div_valid;
+wire [4:0]  p1_div_tag;
+wire [31:0] p1_div_result;
+wire [4:0]  p1_div_rd;
+wire        p1_div_regs_write;
+wire [2:0]  p1_div_fu;
+wire [0:0]  p1_div_tid;
+wire        p1_div_busy;
+
 // ════════════════════════════════════════════════════════════════════════════
 // Pipeline Register: PRF + Bypass → Exec Pipe1  (ro1 stage)
 //   The issue side has already been captured by p1_pre_ro. This stage now only
@@ -1881,13 +1958,6 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         ro1_valid <= p1_pre_ro_valid;
         if (p1_pre_ro_valid) begin
-`ifndef SYNTHESIS
-            if (p1_pre_ro_mem_write) begin
-                $display("[DBG_RO1_CAP] t=%0t tag=%0d pc=%h order=%0d tid=%0d rs2=%0d prs2=%0d opb=%h",
-                         $time, p1_pre_ro_tag, p1_pre_ro_pc, p1_pre_ro_order_id, p1_pre_ro_tid,
-                         p1_pre_ro_rs2, p1_pre_ro_prs2, byp1_op_b);
-            end
-`endif
             ro1_tag        <= p1_pre_ro_tag;
             ro1_pc         <= p1_pre_ro_pc;
             ro1_imm        <= p1_pre_ro_imm;
@@ -1972,7 +2042,15 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .mul_out_rd         (p1_mul_rd            ),
     .mul_out_regs_write (p1_mul_regs_write    ),
     .mul_out_fu         (p1_mul_fu            ),
-    .mul_out_tid        (p1_mul_tid           )
+    .mul_out_tid        (p1_mul_tid           ),
+    .div_out_valid      (p1_div_valid         ),
+    .div_out_tag        (p1_div_tag           ),
+    .div_out_result     (p1_div_result        ),
+    .div_out_rd         (p1_div_rd            ),
+    .div_out_regs_write (p1_div_regs_write    ),
+    .div_out_fu         (p1_div_fu            ),
+    .div_out_tid        (p1_div_tid           ),
+    .div_busy           (p1_div_busy          )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2178,28 +2256,131 @@ assign wb0_regs_write = wb0_from_rocc ? (rocc_resp_rd != 5'd0) : p0_ex_rd_wen;
 assign wb0_fu         = wb0_from_rocc ? `FU_INT0          : p0_ex_fu;
 assign wb0_tid        = wb0_from_rocc ? rocc_resp_tid     : p0_ex_tid;
 
-// ─── WB Port 1: from MEM or MUL (whichever is valid) ──────────────────────
-// MUL takes priority if both valid simultaneously (edge case)
-wire wb1_from_mul = p1_mul_valid;
-wire wb1_from_mem = lsu_resp_valid && !p1_mul_valid;
-wire wb1_from_alu = p1_alu_valid && !p1_mul_valid && !lsu_resp_valid;
+// ─── WB Port 1: from DIV, MUL, MEM, or ALU (priority order) ──────────────
+// DIV takes highest priority, then MUL, then MEM, then ALU
+wire        wb1_div_curr_valid = p1_div_valid;
+wire [4:0]  wb1_div_curr_tag = p1_div_tag;
+wire [4:0]  wb1_div_curr_rd = p1_div_rd;
+wire        wb1_div_curr_regs_write = p1_div_regs_write;
+wire [2:0]  wb1_div_curr_fu = p1_div_fu;
+wire [0:0]  wb1_div_curr_tid = p1_div_tid;
+wire [31:0] wb1_div_curr_data = p1_div_result;
 
-assign wb1_valid      = wb1_from_mul || wb1_from_mem || wb1_from_alu;
-assign wb1_tag        = wb1_from_mul ? p1_mul_tag  :
-                        wb1_from_mem ? lsu_resp_tag :
-                        wb1_from_alu ? p1_alu_tag  : 5'd0;
-assign wb1_rd         = wb1_from_mul ? p1_mul_rd  :
-                        wb1_from_mem ? lsu_resp_rd :
-                        wb1_from_alu ? p1_alu_rd  : 5'd0;
-assign wb1_regs_write = wb1_from_mul ? p1_mul_regs_write :
-                        wb1_from_mem ? lsu_resp_regs_write :
-                        wb1_from_alu ? p1_alu_rd_wen : 1'b0;
-assign wb1_fu         = wb1_from_mul ? p1_mul_fu  :
-                        wb1_from_mem ? lsu_resp_fu :
-                        wb1_from_alu ? p1_alu_fu  : 3'd0;
-assign wb1_tid        = wb1_from_mul ? p1_mul_tid  :
-                        wb1_from_mem ? lsu_resp_tid :
-                        wb1_from_alu ? p1_alu_tid  : 1'b0;
+wire        wb1_mul_curr_valid = p1_mul_valid;
+wire [4:0]  wb1_mul_curr_tag = p1_mul_tag;
+wire [4:0]  wb1_mul_curr_rd = p1_mul_rd;
+wire        wb1_mul_curr_regs_write = p1_mul_regs_write;
+wire [2:0]  wb1_mul_curr_fu = p1_mul_fu;
+wire [0:0]  wb1_mul_curr_tid = p1_mul_tid;
+wire [31:0] wb1_mul_curr_data = p1_mul_result;
+
+wire        wb1_mem_curr_valid = lsu_resp_valid;
+wire [4:0]  wb1_mem_curr_tag = lsu_resp_tag;
+wire [4:0]  wb1_mem_curr_rd = lsu_resp_rd;
+wire        wb1_mem_curr_regs_write = lsu_resp_regs_write;
+wire [2:0]  wb1_mem_curr_fu = lsu_resp_fu;
+wire [0:0]  wb1_mem_curr_tid = lsu_resp_tid;
+wire [31:0] wb1_mem_curr_data = mem_wb_data_sel;
+
+wire        wb1_alu_curr_valid = p1_alu_valid;
+wire [4:0]  wb1_alu_curr_tag = p1_alu_tag;
+wire [4:0]  wb1_alu_curr_rd = p1_alu_rd;
+wire        wb1_alu_curr_regs_write = p1_alu_rd_wen;
+wire [2:0]  wb1_alu_curr_fu = p1_alu_fu;
+wire [0:0]  wb1_alu_curr_tid = p1_alu_tid;
+wire [31:0] wb1_alu_curr_data = p1_alu_result;
+
+reg         wb1_div_pending_valid;
+reg  [4:0]  wb1_div_pending_tag;
+reg  [4:0]  wb1_div_pending_rd;
+reg         wb1_div_pending_regs_write;
+reg  [2:0]  wb1_div_pending_fu;
+reg  [0:0]  wb1_div_pending_tid;
+reg  [31:0] wb1_div_pending_data;
+
+reg         wb1_mul_pending_valid;
+reg  [4:0]  wb1_mul_pending_tag;
+reg  [4:0]  wb1_mul_pending_rd;
+reg         wb1_mul_pending_regs_write;
+reg  [2:0]  wb1_mul_pending_fu;
+reg  [0:0]  wb1_mul_pending_tid;
+reg  [31:0] wb1_mul_pending_data;
+
+reg         wb1_mem_pending_valid;
+reg  [4:0]  wb1_mem_pending_tag;
+reg  [4:0]  wb1_mem_pending_rd;
+reg         wb1_mem_pending_regs_write;
+reg  [2:0]  wb1_mem_pending_fu;
+reg  [0:0]  wb1_mem_pending_tid;
+reg  [31:0] wb1_mem_pending_data;
+
+reg         wb1_alu_pending_valid;
+reg  [4:0]  wb1_alu_pending_tag;
+reg  [4:0]  wb1_alu_pending_rd;
+reg         wb1_alu_pending_regs_write;
+reg  [2:0]  wb1_alu_pending_fu;
+reg  [0:0]  wb1_alu_pending_tid;
+reg  [31:0] wb1_alu_pending_data;
+
+wire wb1_div_avail = wb1_div_pending_valid || wb1_div_curr_valid;
+wire wb1_mul_avail = wb1_mul_pending_valid || wb1_mul_curr_valid;
+wire wb1_mem_avail = wb1_mem_pending_valid || wb1_mem_curr_valid;
+wire wb1_alu_avail = wb1_alu_pending_valid || wb1_alu_curr_valid;
+
+wire wb1_from_div = wb1_div_avail;
+wire wb1_from_mul = !wb1_from_div && wb1_mul_avail;
+wire wb1_from_mem = !wb1_from_div && !wb1_from_mul && wb1_mem_avail;
+wire wb1_from_alu = !wb1_from_div && !wb1_from_mul && !wb1_from_mem && wb1_alu_avail;
+
+wire [4:0]  wb1_div_sel_tag = wb1_div_pending_valid ? wb1_div_pending_tag : wb1_div_curr_tag;
+wire [4:0]  wb1_div_sel_rd = wb1_div_pending_valid ? wb1_div_pending_rd : wb1_div_curr_rd;
+wire        wb1_div_sel_regs_write = wb1_div_pending_valid ? wb1_div_pending_regs_write : wb1_div_curr_regs_write;
+wire [2:0]  wb1_div_sel_fu = wb1_div_pending_valid ? wb1_div_pending_fu : wb1_div_curr_fu;
+wire [0:0]  wb1_div_sel_tid = wb1_div_pending_valid ? wb1_div_pending_tid : wb1_div_curr_tid;
+wire [31:0] wb1_div_sel_data = wb1_div_pending_valid ? wb1_div_pending_data : wb1_div_curr_data;
+
+wire [4:0]  wb1_mul_sel_tag = wb1_mul_pending_valid ? wb1_mul_pending_tag : wb1_mul_curr_tag;
+wire [4:0]  wb1_mul_sel_rd = wb1_mul_pending_valid ? wb1_mul_pending_rd : wb1_mul_curr_rd;
+wire        wb1_mul_sel_regs_write = wb1_mul_pending_valid ? wb1_mul_pending_regs_write : wb1_mul_curr_regs_write;
+wire [2:0]  wb1_mul_sel_fu = wb1_mul_pending_valid ? wb1_mul_pending_fu : wb1_mul_curr_fu;
+wire [0:0]  wb1_mul_sel_tid = wb1_mul_pending_valid ? wb1_mul_pending_tid : wb1_mul_curr_tid;
+wire [31:0] wb1_mul_sel_data = wb1_mul_pending_valid ? wb1_mul_pending_data : wb1_mul_curr_data;
+
+wire [4:0]  wb1_mem_sel_tag = wb1_mem_pending_valid ? wb1_mem_pending_tag : wb1_mem_curr_tag;
+wire [4:0]  wb1_mem_sel_rd = wb1_mem_pending_valid ? wb1_mem_pending_rd : wb1_mem_curr_rd;
+wire        wb1_mem_sel_regs_write = wb1_mem_pending_valid ? wb1_mem_pending_regs_write : wb1_mem_curr_regs_write;
+wire [2:0]  wb1_mem_sel_fu = wb1_mem_pending_valid ? wb1_mem_pending_fu : wb1_mem_curr_fu;
+wire [0:0]  wb1_mem_sel_tid = wb1_mem_pending_valid ? wb1_mem_pending_tid : wb1_mem_curr_tid;
+wire [31:0] wb1_mem_sel_data = wb1_mem_pending_valid ? wb1_mem_pending_data : wb1_mem_curr_data;
+
+wire [4:0]  wb1_alu_sel_tag = wb1_alu_pending_valid ? wb1_alu_pending_tag : wb1_alu_curr_tag;
+wire [4:0]  wb1_alu_sel_rd = wb1_alu_pending_valid ? wb1_alu_pending_rd : wb1_alu_curr_rd;
+wire        wb1_alu_sel_regs_write = wb1_alu_pending_valid ? wb1_alu_pending_regs_write : wb1_alu_curr_regs_write;
+wire [2:0]  wb1_alu_sel_fu = wb1_alu_pending_valid ? wb1_alu_pending_fu : wb1_alu_curr_fu;
+wire [0:0]  wb1_alu_sel_tid = wb1_alu_pending_valid ? wb1_alu_pending_tid : wb1_alu_curr_tid;
+wire [31:0] wb1_alu_sel_data = wb1_alu_pending_valid ? wb1_alu_pending_data : wb1_alu_curr_data;
+
+assign wb1_valid      = wb1_from_div || wb1_from_mul || wb1_from_mem || wb1_from_alu;
+assign wb1_tag        = wb1_from_div ? wb1_div_sel_tag  :
+                        wb1_from_mul ? wb1_mul_sel_tag  :
+                        wb1_from_mem ? wb1_mem_sel_tag  :
+                        wb1_from_alu ? wb1_alu_sel_tag  : 5'd0;
+assign wb1_rd         = wb1_from_div ? wb1_div_sel_rd  :
+                        wb1_from_mul ? wb1_mul_sel_rd  :
+                        wb1_from_mem ? wb1_mem_sel_rd  :
+                        wb1_from_alu ? wb1_alu_sel_rd  : 5'd0;
+assign wb1_regs_write = wb1_from_div ? wb1_div_sel_regs_write :
+                        wb1_from_mul ? wb1_mul_sel_regs_write :
+                        wb1_from_mem ? wb1_mem_sel_regs_write :
+                        wb1_from_alu ? wb1_alu_sel_regs_write : 1'b0;
+assign wb1_fu         = wb1_from_div ? wb1_div_sel_fu  :
+                        wb1_from_mul ? wb1_mul_sel_fu  :
+                        wb1_from_mem ? wb1_mem_sel_fu  :
+                        wb1_from_alu ? wb1_alu_sel_fu  : 3'd0;
+assign wb1_tid        = wb1_from_div ? wb1_div_sel_tid  :
+                        wb1_from_mul ? wb1_mul_sel_tid  :
+                        wb1_from_mem ? wb1_mem_sel_tid  :
+                        wb1_from_alu ? wb1_alu_sel_tid  : 1'b0;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Result Buffer: Store WB results indexed by tag for commit-time RF write
@@ -2222,9 +2403,20 @@ reg [7:0]  debug_uart_tx_start_count_r;
 
 // WB data sources for result buffer
 wire [31:0] wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
-wire [31:0] wb1_result_data = wb1_from_mul ? p1_mul_result :
-                              wb1_from_mem ? mem_wb_data_sel :
-                              wb1_from_alu ? p1_alu_result : 32'd0;
+wire [31:0] wb1_result_data = wb1_from_div ? wb1_div_sel_data :
+                              wb1_from_mul ? wb1_mul_sel_data :
+                              wb1_from_mem ? wb1_mem_sel_data :
+                              wb1_from_alu ? wb1_alu_sel_data : 32'd0;
+
+wire wb1_div_emit_curr = wb1_from_div && !wb1_div_pending_valid;
+wire wb1_mul_emit_curr = wb1_from_mul && !wb1_mul_pending_valid;
+wire wb1_mem_emit_curr = wb1_from_mem && !wb1_mem_pending_valid;
+wire wb1_alu_emit_curr = wb1_from_alu && !wb1_alu_pending_valid;
+
+wire wb1_div_capture_curr = wb1_div_curr_valid && !wb1_div_emit_curr;
+wire wb1_mul_capture_curr = wb1_mul_curr_valid && !wb1_mul_emit_curr;
+wire wb1_mem_capture_curr = wb1_mem_curr_valid && !wb1_mem_emit_curr;
+wire wb1_alu_capture_curr = wb1_alu_curr_valid && !wb1_alu_emit_curr;
 
 // Write to result buffer on WB (capture completion data)
 integer i;
@@ -2234,6 +2426,34 @@ always @(posedge clk or negedge rstn) begin
             result_buffer[i] <= 32'd0;
             result_valid[i]  <= 1'b0;
         end
+        wb1_div_pending_valid <= 1'b0;
+        wb1_div_pending_tag <= 5'd0;
+        wb1_div_pending_rd <= 5'd0;
+        wb1_div_pending_regs_write <= 1'b0;
+        wb1_div_pending_fu <= 3'd0;
+        wb1_div_pending_tid <= 1'b0;
+        wb1_div_pending_data <= 32'd0;
+        wb1_mul_pending_valid <= 1'b0;
+        wb1_mul_pending_tag <= 5'd0;
+        wb1_mul_pending_rd <= 5'd0;
+        wb1_mul_pending_regs_write <= 1'b0;
+        wb1_mul_pending_fu <= 3'd0;
+        wb1_mul_pending_tid <= 1'b0;
+        wb1_mul_pending_data <= 32'd0;
+        wb1_mem_pending_valid <= 1'b0;
+        wb1_mem_pending_tag <= 5'd0;
+        wb1_mem_pending_rd <= 5'd0;
+        wb1_mem_pending_regs_write <= 1'b0;
+        wb1_mem_pending_fu <= 3'd0;
+        wb1_mem_pending_tid <= 1'b0;
+        wb1_mem_pending_data <= 32'd0;
+        wb1_alu_pending_valid <= 1'b0;
+        wb1_alu_pending_tag <= 5'd0;
+        wb1_alu_pending_rd <= 5'd0;
+        wb1_alu_pending_regs_write <= 1'b0;
+        wb1_alu_pending_fu <= 3'd0;
+        wb1_alu_pending_tid <= 1'b0;
+        wb1_alu_pending_data <= 32'd0;
         debug_last_iss0_pc_lo_r <= 8'd0;
         debug_last_iss1_pc_lo_r <= 8'd0;
         debug_branch_issue_count_r <= 8'd0;
@@ -2266,7 +2486,8 @@ always @(posedge clk or negedge rstn) begin
         if (p0_pre_ro_valid)
             debug_last_iss0_pc_lo_r <= p0_pre_ro_pc[7:0];
         if (p1_winner_valid)
-            debug_last_iss1_pc_lo_r <= p1_issue_is_mem ? p1_mem_cand_pc[7:0] : p1_mul_cand_pc[7:0];
+            debug_last_iss1_pc_lo_r <= p1_issue_is_mem ? p1_mem_cand_pc[7:0] :
+                                        p1_issue_is_div ? p1_div_cand_pc[7:0] : p1_mul_cand_pc[7:0];
         if (p0_pre_ro_valid && p0_pre_ro_br)
             debug_branch_issue_count_r <= debug_branch_issue_count_r + 8'd1;
         if (pipe0_br_complete)
@@ -2279,6 +2500,52 @@ always @(posedge clk or negedge rstn) begin
         if (disp1_accepted && (sb_disp1_tag != 5'd0))
             result_valid[sb_disp1_tag] <= 1'b0;
 
+        if (wb1_from_div && wb1_div_pending_valid)
+            wb1_div_pending_valid <= 1'b0;
+        if (wb1_from_mul && wb1_mul_pending_valid)
+            wb1_mul_pending_valid <= 1'b0;
+        if (wb1_from_mem && wb1_mem_pending_valid)
+            wb1_mem_pending_valid <= 1'b0;
+        if (wb1_from_alu && wb1_alu_pending_valid)
+            wb1_alu_pending_valid <= 1'b0;
+
+        if (wb1_div_capture_curr && (!wb1_div_pending_valid || wb1_from_div)) begin
+            wb1_div_pending_valid <= 1'b1;
+            wb1_div_pending_tag <= wb1_div_curr_tag;
+            wb1_div_pending_rd <= wb1_div_curr_rd;
+            wb1_div_pending_regs_write <= wb1_div_curr_regs_write;
+            wb1_div_pending_fu <= wb1_div_curr_fu;
+            wb1_div_pending_tid <= wb1_div_curr_tid;
+            wb1_div_pending_data <= wb1_div_curr_data;
+        end
+        if (wb1_mul_capture_curr && (!wb1_mul_pending_valid || wb1_from_mul)) begin
+            wb1_mul_pending_valid <= 1'b1;
+            wb1_mul_pending_tag <= wb1_mul_curr_tag;
+            wb1_mul_pending_rd <= wb1_mul_curr_rd;
+            wb1_mul_pending_regs_write <= wb1_mul_curr_regs_write;
+            wb1_mul_pending_fu <= wb1_mul_curr_fu;
+            wb1_mul_pending_tid <= wb1_mul_curr_tid;
+            wb1_mul_pending_data <= wb1_mul_curr_data;
+        end
+        if (wb1_mem_capture_curr && (!wb1_mem_pending_valid || wb1_from_mem)) begin
+            wb1_mem_pending_valid <= 1'b1;
+            wb1_mem_pending_tag <= wb1_mem_curr_tag;
+            wb1_mem_pending_rd <= wb1_mem_curr_rd;
+            wb1_mem_pending_regs_write <= wb1_mem_curr_regs_write;
+            wb1_mem_pending_fu <= wb1_mem_curr_fu;
+            wb1_mem_pending_tid <= wb1_mem_curr_tid;
+            wb1_mem_pending_data <= wb1_mem_curr_data;
+        end
+        if (wb1_alu_capture_curr && (!wb1_alu_pending_valid || wb1_from_alu)) begin
+            wb1_alu_pending_valid <= 1'b1;
+            wb1_alu_pending_tag <= wb1_alu_curr_tag;
+            wb1_alu_pending_rd <= wb1_alu_curr_rd;
+            wb1_alu_pending_regs_write <= wb1_alu_curr_regs_write;
+            wb1_alu_pending_fu <= wb1_alu_curr_fu;
+            wb1_alu_pending_tid <= wb1_alu_curr_tid;
+            wb1_alu_pending_data <= wb1_alu_curr_data;
+        end
+
         // Write WB0 result (highest priority if same tag)
         if (wb0_valid && wb0_regs_write) begin
             result_buffer[wb0_tag] <= wb0_result_data;
@@ -2289,6 +2556,10 @@ always @(posedge clk or negedge rstn) begin
         if (wb1_valid && wb1_regs_write) begin
             result_buffer[wb1_tag] <= wb1_result_data;
             result_valid[wb1_tag]  <= 1'b1;
+`ifdef VERBOSE_SIM_LOGS
+            if (wb1_from_div)
+                $display("[WB1_DIV] t=%0t tag=%0d rd=%0d data=%h", $time, wb1_tag, wb1_rd, wb1_result_data);
+`endif
         end
 
         if (rob_commit0_valid && rob_commit0_has_result && (rob_commit0_tag != 5'd0))

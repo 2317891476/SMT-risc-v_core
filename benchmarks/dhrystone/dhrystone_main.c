@@ -224,9 +224,9 @@ int main (int argc, char **argv)
     Bench_Ipc_X1000 = 0UL;
   }
 
-  printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
-  printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
-  printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
+  printf("BENCH CYCLES: %u\n", (unsigned)Bench_Total_Cycles);
+  printf("BENCH INSTRET: %u\n", (unsigned)Bench_Total_Instret);
+  printf("BENCH IPC_X1000: %u\n", (unsigned)Bench_Ipc_X1000);
 #ifndef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
@@ -237,9 +237,9 @@ int main (int argc, char **argv)
 #else
   for (;;) {
     board_delay_ms(250);
-    printf("BENCH CYCLES: %llu\n", Bench_Total_Cycles);
-    printf("BENCH INSTRET: %llu\n", Bench_Total_Instret);
-    printf("BENCH IPC_X1000: %lu\n", Bench_Ipc_X1000);
+    printf("BENCH CYCLES: %u\n", (unsigned)Bench_Total_Cycles);
+    printf("BENCH INSTRET: %u\n", (unsigned)Bench_Total_Instret);
+    printf("BENCH IPC_X1000: %u\n", (unsigned)Bench_Ipc_X1000);
     printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
     printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
     printf("DHRYSTONE DONE\n");

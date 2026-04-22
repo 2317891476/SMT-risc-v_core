@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cat)",
+      "Read(//tmp/**)",
+      "Bash(python fpga/scripts/run_fpga_benchmark_ddr3.py --skip-vivado --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 120)",
+      "Bash(python fpga/scripts/run_fpga_benchmark_ddr3.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 120)",
+      "Bash(python verification/run_all_tests.py --basic)",
+      "Bash(python fpga/scripts/run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 1)",
+      "Bash(xxd /e/1/SMT-risc-v_core-main/build/dhrystone_ddr3_uart_capture.bin)",
+      "Bash(xxd /e/1/SMT-risc-v_core-main/build/dhrystone_ddr3_smoke_uart_capture.bin)",
+      "Bash(riscv-none-elf-objdump -d /e/1/SMT-risc-v_core-main/build/benchmark_images/dhrystone/dhrystone_ddr3.elf)",
+      "Bash(riscv-none-elf-strings /e/1/SMT-risc-v_core-main/build/benchmark_images/dhrystone/dhrystone_ddr3.elf)",
+      "Bash(awk '/<board_vprintfmt>/{found=1} found{print; count++} count>60{exit}')",
+      "Bash(awk '/<board_vprintfmt>/{found=1} found && /ret/{print; exit} found{print}')"
+    ]
+  }
+}
