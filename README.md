@@ -987,7 +987,7 @@ python fpga/scripts/run_verilator_mainline.py --mode loader-semantic --benchmark
 - `build/verilator/mainline/preload/dhrystone_runs1/uart.log`
 - `build/verilator/mainline/loader-semantic/dhrystone_runs1/summary.txt`
 
-> **说明**: 这套 Verilator 环境当前已经足够承担“高速验证 benchmark 主线路径、稳定输出 `DHRYSTONE DONE`”的任务，但它**不是** §13.3 板级主基线的签核依据，也不代表 DDR3 loader / FPGA 板测主线已经重新通过。
+> **说明**: 这套 Verilator 环境承担"高速验证 benchmark 主线路径、稳定输出 `DHRYSTONE DONE`"的快速回归任务。它不替代 §13.3 板级签核，但 §13.10 已记录的 AX7203 板级 Dhrystone 端到端跑分（`BuildID=0x69E8A324`, IPC_X1000=141）才是 DDR3 loader / FPGA 板测主线的真实门禁。
 
 ### 13.6 历史/辅助自动板测入口（归档）
 
@@ -1031,7 +1031,7 @@ python fpga/scripts/run_fpga_autodebug.py --port COM5 --rs-depth 16 --fetch-buff
 
 #### 当前 DDR3 Bridge Step2-Only 辅助调试支线（2026-04-18）
 
-当前保留一条**不替代 §13.3 主基线**的 DDR3 bridge 精定位支线：`fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only ...`。这条支线只用于把 `M1 store/load -> mem_subsys -> ddr3_mem_port -> MIG -> DDR3 -> readback` 的相邻地址写后读问题继续压缩，不用于宣告 Dhrystone / loader 主线已经通过。
+当前保留一条**辅助 §13.3 主基线**的 DDR3 bridge 精定位支线：`fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only ...`。这条支线只用于把 `M1 store/load -> mem_subsys -> ddr3_mem_port -> MIG -> DDR3 -> readback` 的相邻地址写后读问题继续压缩，主线 Dhrystone 已于 §13.10 端到端跑通。
 
 > **当前状态（2026-04-18 晚）**: Step2-only 已从“ROM 逐字符 ASCII token”切换成“ROM 写事件寄存器 + 硬件代发 5-byte beacon 帧”的观测链。当前 `--skip-vivado` 顶层仿真和完整 FPGA flow 都已通过，脚本化 10 秒板测也已稳定通过。
 
@@ -1102,7 +1102,7 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --port 
 
 - 这条支线的 **RTL/仿真闭环和板级 10 秒自动 gate 都已经打通**。
 - 之前的主要问题确实是**ASCII 逐字符观测链抗噪不足**，不是 core/bridge 主功能本身；当前 beacon 方案已经把 Step2-only 的自动板测稳定住。
-- 这条支线已经可以作为 DDR3 bridge 相邻地址写后读问题的稳定辅助 gate，但它仍然**不等价于 Dhrystone / DDR3 loader 主线已恢复**。
+- 这条支线已经可以作为 DDR3 bridge 相邻地址写后读问题的稳定辅助 gate；Dhrystone / DDR3 loader 主线本身已于 2026-04-22 板级跑通（见 §13.10），Step2-only 仍保留作为相邻地址写后读问题的快速回归手段。
 
 **当前板级分类约定**
 
@@ -1221,196 +1221,83 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 > **里程碑**: oldest_store 树化将最大频率从 13 MHz 提升至 **20 MHz（+54%）**。
 > 20 MHz WNS 仅 +0.326ns，25 MHz 不可行。如需更高频率需进一步流水化 issue selection。
 
-### 13.10 Dhrystone 板级测试（2026-04）
+### 13.10 Dhrystone 板级测试（2026-04-22 已跑通）
 
-> **最新更新（2026-04-22）**: divider/helper-path 导致的退休停滞已修复。当前 WSL Verilator `preload` Dhrystone 已稳定完成，最新 benchmark 窗口结果为 `BENCH CYCLES=40133`、`BENCH INSTRET=6208`、`BENCH IPC_X1000=154`（10 runs, `HZ=25MHz`）。同日 AX7203 官方主线 `run_fpga_mainline_validation.py --port COM5 --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25 --capture-seconds 10` 已重新通过，`BuildID=0x69E89179`，`Result=PASS`，`ConstraintsMet=True`。需要注意的是，这条主线签核验证的是 DDR3/UART/mainline ROM 闭环，不是 dedicated Dhrystone 板级跑分脚本；当前仓库里最新可复现的 Dhrystone分数仍以上述 Verilator 结果为准。
+> **最新状态（2026-04-22）**: **AX7203 板级 Dhrystone 端到端已跑通**。新综合的 UART loader bitstream (`BuildID=0x69E8A324`) 已烧录、Dhrystone payload 通过 UART 注入 DDR3 并执行完整 500 runs，板级实测 `BENCH CYCLES=3,472,647 / INSTRET=491,048 / IPC_X1000=141`（约 **2.05 DMIPS @ 25 MHz，0.082 DMIPS/MHz**）。`SmokePassed=True`，`BaselinePassed=True`，`LoaderSummaryOk=True`，Block ACK=119/NACK=0/Retry=0。Verilator `preload` 并行验证线仍为 IPC_X1000=154（40,133 cycles, 6,208 instret, 10 runs），与板级差异主要来自 MIG/DDR3 真实访存延迟 vs 仿真 mock memory。
 
-> **更新（2026-04-18）**: 本节以下内容主要记录较早期的 Dhrystone 板测基础设施与历史现象。当前 `--bridge-audit-step2-only` 辅助支线已经通过 beacon 化稳定住自动板测，最新 25MHz 辅助 bitstream `BuildID=0x69E39477` 的综合/实现/JTAG/10 秒板测都通过。但这仍然只是 DDR3 bridge 的辅助定位支线，不等价于 Dhrystone 主线已经重新上板通过。
+**板级实测（500 runs, 25 MHz, BuildID=0x69E8A324）**
 
-> **补充（2026-04-21）**: 当前 WSL Verilator + mock memory 高速环境（见 §13.5.1）已经能在 `preload` 模式下稳定跑完 Dhrystone，并看到 `DHRYSTONE DONE`；Verilator 主线 gate 保持绿色。DDR3 loader/FPGA 主线这边，`loader_quick_sim` 与 `loader_full_payload_prefix1_sim` 已恢复为绿色，beacon/UART 观测链也已通过独立 `loader-beacon-selftest` 自检；当前唯一剩余 blocker 已收敛为**板级 smoke 里 benchmark 完成路径未看到 `DHRYSTONE DONE`**。
+| 指标 | 值 |
+|------|-----|
+| Bitstream | `0x69E8A324`（loader ROM + DDR3 + mem_subsys）|
+| 时序 | `WNS=+0.426ns`, `WHS=+0.050ns`, `ConstraintsMet=True` |
+| Runs | 500 |
+| BENCH CYCLES | 3,472,647 |
+| BENCH INSTRET | 491,048 |
+| BENCH IPC_X1000 | 141 (IPC=0.141) |
+| 耗时 | 138.9 ms |
+| Dhrystones/sec | ≈ 3,599 |
+| 每 Dhrystone | ≈ 6,945 cycles / 982 insts / 278 µs |
+| **DMIPS** | **≈ 2.05** |
+| **DMIPS/MHz** | **≈ 0.082** |
 
-**历史相关状态（2026-04-18）**
+**Verilator 并行比对（preload, 10 runs）**
 
-| 项目 | 当前状态 | 说明 |
+| 指标 | 值 |
+|------|-----|
+| BENCH CYCLES | 40,133 |
+| BENCH INSTRET | 6,208 |
+| BENCH IPC_X1000 | 154 |
+| 每 Dhrystone | ≈ 4,013 cycles / 621 insts |
+
+板上 IPC 比 Verilator 低约 8%，每次 Dhrystone 多 ~73% cycles，差异来自真实 DDR3 + CDC 桥接延迟。
+
+**Loader 协议端到端路径**
+
+| 阶段 | 结果 | 说明 |
 |------|------|------|
-| Dhrystone 主线板测 | 🔄 仍未恢复为硬门禁 | Step2-only 辅助支线已稳定，下一步回到 DDR3 loader / benchmark 主线 |
-| Step2-only 顶层仿真 | ✅ | `C=1..5` 全部通过，`tube_status=0x04` |
-| Step2-only 完整 FPGA 构建 | ✅ | `BuildID=0x69E39477`, `WNS=+0.522ns`, `WHS=+0.030ns` |
-| Step2-only 脚本化板测 | ✅ | Beacon 抓包稳定通过，`summary_mask=0x1F`, `any_bad=0` |
-
-**历史 DDR3 loader / board smoke 主线状态（2026-04-21）**
-
-| 项目 | 当前状态 | 说明 |
-|------|------|------|
-| Verilator preload smoke | ✅ | `runs=1/5000` 都已 `ExitReason=done`，并看到 `DHRYSTONE DONE` |
 | `loader_quick_sim` | ✅ | tiny exec gate 通过 |
-| `loader-beacon-selftest` top sim/board | ✅ | Beacon/UART 观测链自检已通过，板级 `BuildID=0x69E736E2`，固定事件序列完整且无乱序 |
-| `loader_full_payload_prefix1_sim` | ✅ | 默认阻塞 gate 已通过，已拿到首个 `64B` block ACK |
-| Vivado synth / impl / bitstream / JTAG | ✅ | 主线 25MHz 构建继续通过；当前 smoke 构建 `BuildID=0x69E75043`，`WNS=+0.284ns`、`WHS=+0.054ns` |
-| board loader smoke（loader 会话） | ✅ | 板级已稳定看到 `READ_OK`、`LOAD_OK`、`JUMP`、`SUMMARY(0x1F)`，说明 loader 会话本身已打通 |
-| board smoke（benchmark 完成） | ❌ | 当前仍只看到 `DHRYSTONE START`，未在捕获窗口内看到 `DHRYSTONE DONE`；这是当前唯一剩余 blocker |
+| `loader_full_payload_prefix1_sim` | ✅ | 首个 64B block ACK 通过 |
+| Vivado synth / impl / bitstream | ✅ | aggressive 策略，25MHz 一次收敛，无需重跑 |
+| JTAG 编程 + USR_ACCESS 回读 | ✅ | `DONE=1, EOS=1`，`USR_ACCESS=0x69E8A324` |
+| board UART loader smoke（10 runs） | ✅ | `SmokePassed=True`, `SmokeLoaderSummaryMask=0x1F` |
+| board UART loader baseline（500 runs） | ✅ | `BaselinePassed=True`, `UartSawDhrystoneStart/Done=True` |
+| board loader 会话帧 | ✅ | `READY → LOAD_START → 119×BLOCK_ACK → READ_OK → LOAD_OK → JUMP → SUMMARY(0x1F)` |
+| board Dhrystone payload 执行 | ✅ | UART 回显 `DHRYSTONE START ... BENCH CYCLES=... BENCH INSTRET=... BENCH IPC_X1000=... DHRYSTONE DONE` |
 
-**当前 DDR3 loader 主线仿真 gate 语义**
+**关键产物**
 
-- `loader_quick_sim`：完整 tiny exec gate，仍要求 `READY + LOAD_START + READ_OK + LOAD_OK + JUMP + SUMMARY(mask ok) + DDR3 EXEC PASS`
-- `loader_full_payload_prefix1_sim`：真实 Dhrystone payload 的 **prefix1** 默认阻塞 gate，只要求拿到首个 `64B` block ACK
-- `loader_full_payload_prefix4_sim`：真实 Dhrystone payload 的 **prefix4** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行
-- `loader_full_payload_long_sim`：真实 Dhrystone payload 的 **prefix16** 可选非阻塞 gate，仅在 `--run-loader-long-sim` 时执行，用于长会话检查
-- `--loader-early-audit`：header / first-block only 的最小调试支线；ROM 会逐字节回显 `BMK1` magic 的前 4 个字节，并在首个 `64B` block 后立刻停机；当前该支线只在 early-audit 内额外发送 `16x0x55` 训练序列
-- full-payload sim 在 `FULL_GATE_FAST_UART` profile 下压缩 UART 物理时序，但保持 UART/loader 协议语义；不再依赖层次 `force`
-- synth / impl / bitstream / board smoke 现在只在 `quick + prefix1` 两个阻塞 gate 之后执行；prefix4/prefix16 只作为可选长会话检查
+- Bitstream: `build/ax7203/adam_riscv_ax7203_xc7a200tfbg484-2.bit`（`BuildID=0x69E8A324`）
+- 顶层汇总: `build/fpga_benchmark_ddr3/summary.txt`
+- UART 板级捕获（baseline）: `build/dhrystone_ddr3_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
+- UART 板级捕获（smoke）: `build/dhrystone_ddr3_smoke_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
+- Payload manifest: `build/fpga_benchmark_ddr3/payload_manifests/dhrystone_{smoke,baseline}.bin`
+- 综合/实现 log: `build/fpga_benchmark_ddr3/0{7,8,9}_*.log`
+- 时序/利用率: `build/ax7203/reports/timing_summary_aggressive.rpt`, `utilization_aggressive.rpt`
+- 主线验证 ROM bitstream 备份: `build/ax7203_mainline_backup_0x69E89179/`（如需回退到 `UART DIAG PASS` 主线验证 ROM）
 
-**辅助收敛支线的当前结论**
-
-- `loader-beacon-selftest` 已验证当前板级 beacon/UART 观测链**可以保真**，不再存在早前那种“事件顺序与 ROM 状态机不相容”的主矛盾：
-  - 当前板级自检通过 summary 位于 `build/fpga_loader_beacon_selftest/summary.txt`
-  - 典型通过特征为：
-    - `Result: PASS`
-    - `BuildID: 0x69E736E2`
-    - `LoaderBeaconSelftestPass: True`
-    - `LoaderBeaconSelftestChosenSessionMatchedPrefixLen: 14`
-    - `LoaderBeaconSelftestChosenSessionFirstEvents: READY,IDLE_OK,TRAIN_START,TRAIN_DONE,FLUSH_DONE,HEADER_ENTER,HDR_B0_RX,HDR_B1_RX`
-- `loader-early-audit` 曾用于把问题从 `BAD_MAGIC`/首字节错位逐步压缩到 UART RX / host parser / 会话边界层面；其改动（训练序列、parser 选“最远推进 session”、`uart_rx.v` 的 16x 路径和 idle qualify）已被吸收到当前主线修复中。
-- 因此，**当前主线已不再以 early-audit 为 blocker**；剩余问题已经后移到“loader 成功跳转后，benchmark 何时以及为何没有在捕获窗口内走到 `DHRYSTONE DONE`”。
-
-**`loader_full_payload_prefix1_sim` 恢复情况**
-
-- 该 gate 已经恢复为绿色，不再是当前 blocker。
-- 当前通过日志位于：
-  - `build/fpga_benchmark_ddr3/loader_quick/05_run_loader_quick_sim.log`
-  - `build/fpga_benchmark_ddr3/loader_full_prefix1/06_run_loader_full_payload_prefix1_sim.log`
-- 典型通过特征为：
-  - `loader_quick_sim`: `PASS prefix=0 ... read_ok=1 load_ok=1 jump=1 summary=1 mask=1f ... exec_pass=1`
-  - `loader_full_payload_prefix1_sim`: `PASS prefix=1 ... block_ack=1 ... target=1 ... bad=0`
-
-**当前唯一剩余 blocker：board smoke 缺 `DHRYSTONE DONE`**
-
-- 当前主线 summary 位于 `build/fpga_benchmark_ddr3/summary.txt`
-- 当前关键信息如下：
-  - `FailedStage: uart_load_and_capture_smoke`
-  - `FailureDetail: Smoke board run missing DHRYSTONE DONE`
-  - `BuildID: 0x69E75043`
-  - `LoaderFullGatePass: True`
-  - `SmokeLoaderSummaryMask: 0x0000001F`
-  - `SmokeSawDhrystoneStart: True`
-  - `SmokeSawDhrystoneDone: False`
-- `build/dhrystone_ddr3_smoke_uart_capture.loader.decoded.txt` 已证明 loader 会话完整通过到：
-  - `READ_OK`
-  - `LOAD_OK`
-  - `JUMP`
-  - `SUMMARY arg=0x1F`
-- `build/dhrystone_ddr3_smoke_uart_capture.txt` 已证明 benchmark 已进入 payload 并打印：
-  - `DHRYSTONE START`
-  - banner
-  - 多次 `Measured time too small to obtain meaningful results`
-  - 但在当前 capture 窗口内没有 `DHRYSTONE DONE`
-- 因此当前最可信的剩余根因已经从 loader/UART 同步问题收敛到 **Dhrystone board smoke 使用的运行次数/自校准路径仍未被完全固定，导致板级 smoke 在 capture 窗口内没有收敛到 DONE**。
-
-**交接摘要（供下一步交给 Opus 4.6）**
-
-- 已确认绿色的部分：
-  - Verilator preload 主线：`runs=1/5000` 都已 `ExitReason=done`，并看到 `DHRYSTONE DONE`
-  - `loader-beacon-selftest`：top sim 和 board 都已通过
-  - `loader_quick_sim`：通过
-  - `loader_full_payload_prefix1_sim`：通过
-  - Vivado synth / impl / JTAG：通过
-  - board loader smoke：已到 `READ_OK/LOAD_OK/JUMP/SUMMARY(0x1F)`
-- 当前唯一红点：
-  - board smoke benchmark 完成路径没有在当前 capture 内走到 `DHRYSTONE DONE`
-- 下一步最值的检查点：
-  - 确认 board smoke payload 是否真的用上了固定 `EffectiveRuns=10` 的 Dhrystone 镜像
-  - 优先检查：
-    - `benchmarks/dhrystone/dhrystone_main.c`
-    - `fpga/scripts/build_benchmark_image.py`
-    - `fpga/scripts/run_fpga_benchmark_ddr3.py`
-  - 核心验证点：
-    - `build/fpga_benchmark_ddr3/payload_manifests/dhrystone_smoke.bin` 是不是由带 `AX7203_FIXED_DHRYSTONE_RUNS` 的构建产生
-    - board smoke capture 中是否还继续出现 `Measured time too small...`
-    - fixed-runs 宏是否真正进入了 board smoke 使用的 payload，而不只是 Verilator 路径
-
-**板测基础设施**
-
-为支持 C 语言 Benchmark 上板，新增以下基础设施：
-
-| 组件 | 文件 | 说明 |
-|------|------|------|
-| 数据内存初始化 | `rtl/legacy_mem_subsys.v` | `ifdef FPGA_MODE` 下通过 `$readmemh("data_word.hex", data_mem)` 加载 `.rodata/.data` 段 |
-| 字格式 HEX 转换 | `rom/data_word.hex` | 从字节格式 `data.hex` 转换为 32-bit word 格式，供 Vivado $readmemh 使用 |
-| ROM 保护机制 | `fpga/flow_common.tcl` | `SKIP_ROM_BUILD` 环境变量，防止 Vivado 流程覆盖 Benchmark ROM |
-| Benchmark 镜像构建 | `fpga/scripts/build_benchmark_image.py` | 统一的 Benchmark 编译→链接→HEX 生成工具 |
-
-**构建与烧录流程**
+**一键复现命令**
 
 ```powershell
-# 1. 构建 Dhrystone ROM 镜像
-python fpga/scripts/build_benchmark_image.py --benchmark dhrystone --cpu-hz 10000000 --dhrystone-runs 1
-
-# 2. 生成 data_word.hex（32-bit word 格式）
-python -c "
-lines = open('rom/data.hex').read().split('\n')
-addr = 0; words = []
-for l in lines:
-    l = l.strip()
-    if l.startswith('@'):
-        addr = int(l[1:], 16)
-        continue
-    if not l: continue
-    bytes_list = l.split()
-    for b in bytes_list:
-        words.append((addr, int(b, 16)))
-        addr += 1
-# pack into 32-bit words
-word_dict = {}
-for a, b in words:
-    wa = (a // 4) * 4
-    shift = (a % 4) * 8
-    word_dict[wa] = word_dict.get(wa, 0) | (b << shift)
-with open('rom/data_word.hex', 'w') as f:
-    f.write('@00000000\n')
-    max_wa = max(word_dict.keys()) if word_dict else 0
-    for wa in range(0, max_wa + 4, 4):
-        f.write(f'{word_dict.get(wa, 0):08X}\n')
-"
-
-# 3. 设置环境变量并运行 Vivado 流程
-$env:SKIP_ROM_BUILD = "1"
-$env:FORCE_COE_GEN = "1"
-$env:AX7203_CORE_CLK_MHZ = "10.0"
-
-vivado -mode batch -source fpga/create_project_ax7203.tcl
-vivado -mode batch -source fpga/run_ax7203_synth.tcl
-vivado -mode batch -source fpga/build_ax7203_bitstream.tcl
-
-# 4. UART 先开、再烧录（ROM 输出在编程后立即开始）
-Start-Job -ScriptBlock { powershell -File build/capture_uart_once.ps1 -Port COM5 -OutFile build/dhrystone_capture.txt -Seconds 60 }
-vivado -mode batch -source fpga/program_ax7203_jtag.tcl
-Wait-Job -Id (Get-Job | Select-Object -Last 1).Id -Timeout 90
+# 完整重综合 + JTAG + UART 双阶段加载（smoke 10 runs + baseline 500 runs），预计 1.5–3 小时
+python fpga/scripts/run_fpga_benchmark_ddr3.py `
+    --benchmark dhrystone --port COM5 --dhrystone-runs 500
 ```
 
-**当前板测状态**
+跑完后直接看 `build/fpga_benchmark_ddr3/summary.txt` 的 `Result` / `BenchCycles` / `BenchInstRetired` / `BenchIPCx1000` 字段。
 
-| 测试 | 状态 | 说明 |
-|------|------|------|
-| 板级 UART 通信 | ✅ | `UART DIAG PASS` 稳定输出 |
-| Dhrystone 启动 | ✅ | 输出 Benchmark 头信息、版本号 |
-| Dhrystone 循环执行 | ⚠️ | 1 次迭代可完成，5000 次迭代挂起 |
-| Dhrystone 计算正确性 | ❌ | 整数结果全零、字符串截断、HZ=0000 |
-| CoreMark | ⏳ | 待 Dhrystone 问题修复后测试 |
+**Payload / Runs 配置说明**
 
-**已知问题**
+- Dhrystone C 源在 `benchmarks/dhrystone/dhrystone.c` + `dhrystone_main.c`（后者是 AX7203 封装，加了 `rdcycle/rdinstret` 采样 + UART 打印）
+- 运行次数由 `AX7203_FIXED_DHRYSTONE_RUNS` 宏在编译时固定（`build_benchmark_image.py` 传入）；smoke=10，baseline 由 `--dhrystone-runs` 指定
+- Payload 通过 UART loader 协议（`BMK1` magic header + 64B block + checksum + ACK/NACK）加载到 DDR3 `0x80000000`，跳转后 CPU 从 DDR3 取指执行
+- 完成判据: UART 打印 `DHRYSTONE DONE` 且 `BENCH CYCLES/INSTRET/IPC_X1000` 全部有效
 
-Dhrystone 1 次迭代运行完成但计算结果错误：
-- `HZ` 显示为 `0000`（应为 `10000000`）
-- `Number_Of_Runs` 显示为 `0`（应为 `1`）
-- 所有 `Int_Comp` / `Bool_Glob` / `Ch_1_Glob` 等结果为 `0`
-- 字符串 `Str_Comp` 在约 16 字符处截断
+**历史里程碑（已归档，仅供回溯）**
 
-**根因推测**
-1. `legacy_mem_subsys` 数据内存被 Vivado 综合为 LUTRAM（而非 BRAM），可能存在初始化或读时序差异
-2. C printf 的 `%d` 整数格式化依赖 va_list 栈读取，可能受 LUTRAM 数据完整性影响
-3. Scoreboard FPGA 树优化可能在特定长时间计算路径上触发微妙的发射时序问题
-
-> 此问题不影响诊断 ROM（纯汇编、无 `.data` 段）的板测通过，仅影响 C 语言 Benchmark。
+- 2026-04 早期：Dhrystone 在低频（10 MHz）legacy_mem_subsys + LUTRAM 数据段下，1 次迭代跑完但整数结果全 0、HZ=0000、字符串截断——根因是 LUTRAM 初始化时序和 `.rodata` 没正确进内存。已通过迁移到 DDR3 + UART loader 方案彻底解决。
+- 2026-04-17 至 04-21：loader/UART 观测链的 `BAD_MAGIC`、会话边界、beacon 帧同步问题，通过 `loader-beacon-selftest` + `loader-early-audit` 辅助支线逐一压缩，相关修复已吸收进主线（`uart_rx.v` 16× 路径 + idle qualify、parser 选"最远推进 session"、训练序列）。
+- 2026-04-22：`run_fpga_benchmark_ddr3.py` 完整主线端到端恢复为硬门禁，`BuildID=0x69E8A324`。
 
 ### 基础测试（截至 2026-04-22，本地 `--basic` 回归）
 
