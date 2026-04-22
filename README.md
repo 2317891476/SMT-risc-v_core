@@ -33,7 +33,8 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | 本地基础回归 | ✅ `28/28 PASS` | 默认 `--basic` 已纳入 2 条 divider 回归 |
 | FPGA 同配置基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic --fpga-config` |
 | Verilator Dhrystone | ✅ `ExitReason=done` | `BENCH CYCLES=40133`, `INSTRET=6208`, `IPC_X1000=154` |
-| FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`, `ConstraintsMet=True` |
+| FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`，主线验证 ROM 上板（`UART DIAG PASS` + DDR3 `DEADBEEF` 写回读） |
+| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8A324`（loader ROM bitstream），25MHz，`WNS=+0.426ns`，`WHS=+0.050ns`；UART loader 注入 7588B Dhrystone payload 至 DDR3 后跳转执行；500 runs 实测 `BENCH CYCLES=3,472,647`，`INSTRET=491,048`，`IPC_X1000=141`，`Dhrystones/sec≈3,599`（≈2.05 DMIPS, 0.082 DMIPS/MHz） |
 
 ---
 
@@ -673,7 +674,7 @@ rob_recover_en, rob_recover_prd_new
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
 | ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=1 / ENABLE_DDR3=1 / L2_PASSTHROUGH=1`，AX7203 板测通过，激进实现 `WNS=+0.426ns / WHS=+0.036ns`)   |
 | ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；当前主线抓包有效字符统计 `571862`，字符比例检查通过，并捕获 `CAL=1` / `DDR3 PASS`)       |
-| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | 🟡 Dhrystone 的 divider/helper-path 主线已恢复：Verilator `preload` 可稳定跑完并打印 `BENCH IPC_X1000: 154`；AX7203 官方主线签核也已恢复绿色。下一步是补 dedicated 板级 benchmark 跑分与 CoreMark。 |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | ✅ **板级 Dhrystone 已跑通**：`BuildID=0x69E8A324`（loader ROM bitstream），UART loader 注入 payload → DDR3 → CPU 执行，500 runs 实测 `BENCH CYCLES=3,472,647 / INSTRET=491,048 / IPC_X1000=141`（约 2.05 DMIPS @ 25MHz）。Verilator `preload` Dhrystone IPC=0.154。下一步：CoreMark 上板 + Embench。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
