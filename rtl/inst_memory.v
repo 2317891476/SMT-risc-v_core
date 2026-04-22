@@ -104,8 +104,9 @@ always @(posedge clk or negedge rstn) begin
 end
 
 // ICache instance - synchronous interface
+// 2026-04-22: enlarged from 2KB to 8KB to fit Dhrystone code (~7.5KB) → IPC boost
 icache #(
-    .CACHE_SIZE   (2048),
+    .CACHE_SIZE   (8192),
     .LINE_SIZE    (32),
     .WAYS         (1),
     .ADDR_WIDTH   (32),

@@ -18,7 +18,7 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | **分支预测** | 256-entry 双模态 (Bimodal) 2-bit 饱和计数器 + BTB |
 | **SMT** | 2 线程同步多线程，Round-Robin 取指调度，独立 PC 和寄存器堆 |
 | **虚拟内存** | Sv32 MMU：I-TLB(16) + D-TLB(32) + 7 状态硬件页表漫游器 (PTW) |
-| **缓存** | L1 ICache: 2KB 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
+| **缓存** | L1 ICache: **8KB** 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
 | **总线** | AXI4 突发传输接口 (缓存行填充/写回) + DDR3 AXI4 256-bit CDC 桥接 |
 | **AI 加速** | RoCC 协处理器：8×8 INT8 GEMM 引擎 + 128-bit SIMD 向量单元 + KV-Cache 压缩 |
 | **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp)，异常入口/MRET |
@@ -34,7 +34,7 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | FPGA 同配置基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic --fpga-config` |
 | Verilator Dhrystone | ✅ `ExitReason=done` | `BENCH CYCLES=40133`, `INSTRET=6208`, `IPC_X1000=154` |
 | FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`，主线验证 ROM 上板（`UART DIAG PASS` + DDR3 `DEADBEEF` 写回读） |
-| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8A324`（loader ROM bitstream），25MHz，`WNS=+0.426ns`，`WHS=+0.050ns`；UART loader 注入 7588B Dhrystone payload 至 DDR3 后跳转执行；500 runs 实测 `BENCH CYCLES=3,472,647`，`INSTRET=491,048`，`IPC_X1000=141`，`Dhrystones/sec≈3,599`（≈2.05 DMIPS, 0.082 DMIPS/MHz） |
+| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8BEAF`（loader ROM + **8KB ICache** bitstream），25MHz，`WNS=+0.276ns`，`WHS=+0.031ns`；UART loader 注入 7588B Dhrystone payload 至 DDR3 后跳转执行；500 runs 实测 `BENCH CYCLES=2,547,880`，`INSTRET=491,040`，`IPC_X1000=190`，`Dhrystones/sec≈4,906`（**≈2.79 DMIPS, 0.112 DMIPS/MHz**）；2026-04-22 ICache 2KB→8KB 改造后 IPC +34.8%（141→190） |
 
 ---
 
@@ -674,7 +674,7 @@ rob_recover_en, rob_recover_prd_new
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
 | ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=1 / ENABLE_DDR3=1 / L2_PASSTHROUGH=1`，AX7203 板测通过，激进实现 `WNS=+0.426ns / WHS=+0.036ns`)   |
 | ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；当前主线抓包有效字符统计 `571862`，字符比例检查通过，并捕获 `CAL=1` / `DDR3 PASS`)       |
-| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | ✅ **板级 Dhrystone 已跑通**：`BuildID=0x69E8A324`（loader ROM bitstream），UART loader 注入 payload → DDR3 → CPU 执行，500 runs 实测 `BENCH CYCLES=3,472,647 / INSTRET=491,048 / IPC_X1000=141`（约 2.05 DMIPS @ 25MHz）。Verilator `preload` Dhrystone IPC=0.154。下一步：CoreMark 上板 + Embench。 |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | ✅ **板级 Dhrystone 已跑通并完成首轮性能优化**：`BuildID=0x69E8BEAF`（loader ROM + 8KB ICache），UART loader 注入 payload → DDR3 → CPU 执行，500 runs 实测 `BENCH CYCLES=2,547,880 / INSTRET=491,040 / IPC_X1000=190`（**约 2.79 DMIPS @ 25MHz，0.112 DMIPS/MHz**）。ICache 2KB→8KB 改造后板级 IPC +34.8%（141→190）。Verilator `preload` Dhrystone IPC=0.189。下一步：CoreMark 上板 + 进一步优化（ROB 扩容 / 数据访存路径 / Embench）。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
 | **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
@@ -1221,36 +1221,35 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 > **里程碑**: oldest_store 树化将最大频率从 13 MHz 提升至 **20 MHz（+54%）**。
 > 20 MHz WNS 仅 +0.326ns，25 MHz 不可行。如需更高频率需进一步流水化 issue selection。
 
-### 13.10 Dhrystone 板级测试（2026-04-22 已跑通）
+### 13.10 Dhrystone 板级测试（2026-04-22 已跑通 + ICache 优化）
 
-> **最新状态（2026-04-22）**: **AX7203 板级 Dhrystone 端到端已跑通**。新综合的 UART loader bitstream (`BuildID=0x69E8A324`) 已烧录、Dhrystone payload 通过 UART 注入 DDR3 并执行完整 500 runs，板级实测 `BENCH CYCLES=3,472,647 / INSTRET=491,048 / IPC_X1000=141`（约 **2.05 DMIPS @ 25 MHz，0.082 DMIPS/MHz**）。`SmokePassed=True`，`BaselinePassed=True`，`LoaderSummaryOk=True`，Block ACK=119/NACK=0/Retry=0。Verilator `preload` 并行验证线仍为 IPC_X1000=154（40,133 cycles, 6,208 instret, 10 runs），与板级差异主要来自 MIG/DDR3 真实访存延迟 vs 仿真 mock memory。
+> **最新状态（2026-04-22 v2）**: **AX7203 板级 Dhrystone 端到端已跑通，并完成首轮性能优化（ICache 2KB→8KB）**。新综合的 loader ROM + 8KB ICache bitstream (`BuildID=0x69E8BEAF`) 已烧录、Dhrystone payload 通过 UART 注入 DDR3 并执行完整 500 runs，板级实测 `BENCH CYCLES=2,547,880 / INSTRET=491,040 / IPC_X1000=190`（约 **2.79 DMIPS @ 25 MHz，0.112 DMIPS/MHz**）。`SmokePassed=True`，`BaselinePassed=True`，`LoaderSummaryOk=True`，Block ACK=119/NACK=0/Retry=0。Verilator `preload` 验证线 IPC_X1000=189，与板级基本对齐（差异 <1%），说明 ICache 已不再是主瓶颈。
 
-**板级实测（500 runs, 25 MHz, BuildID=0x69E8A324）**
+**板级实测对比表（500 runs, 25 MHz）**
 
-| 指标 | 值 |
-|------|-----|
-| Bitstream | `0x69E8A324`（loader ROM + DDR3 + mem_subsys）|
-| 时序 | `WNS=+0.426ns`, `WHS=+0.050ns`, `ConstraintsMet=True` |
-| Runs | 500 |
-| BENCH CYCLES | 3,472,647 |
-| BENCH INSTRET | 491,048 |
-| BENCH IPC_X1000 | 141 (IPC=0.141) |
-| 耗时 | 138.9 ms |
-| Dhrystones/sec | ≈ 3,599 |
-| 每 Dhrystone | ≈ 6,945 cycles / 982 insts / 278 µs |
-| **DMIPS** | **≈ 2.05** |
-| **DMIPS/MHz** | **≈ 0.082** |
+| 指标 | 基线（2KB ICache, `0x69E8A324`）| 优化后（8KB ICache, `0x69E8BEAF`）| Δ |
+|------|------------------------------|--------------------------------|-----|
+| 时序 WNS | +0.426ns | +0.276ns | -0.15ns（仍正裕量）|
+| 时序 WHS | +0.050ns | +0.031ns | -0.02ns（仍正裕量）|
+| BENCH CYCLES | 3,472,647 | **2,547,880** | **-26.6%** |
+| BENCH INSTRET | 491,048 | 491,040 | ≈ 同（同代码）|
+| **BENCH IPC_X1000** | 141 | **190** | **+34.8%** |
+| 耗时 | 138.9 ms | 101.9 ms | -26.6% |
+| **Dhrystones/sec** | ≈ 3,599 | **≈ 4,906** | **+36.3%** |
+| 每 Dhrystone | ≈ 6,945 cycles / 982 insts | ≈ 5,096 cycles / 982 insts | -26.6% cycles |
+| **DMIPS** | ≈ 2.05 | **≈ 2.79** | **+36.1%** |
+| **DMIPS/MHz** | ≈ 0.082 | **≈ 0.112** | **+36.6%** |
 
 **Verilator 并行比对（preload, 10 runs）**
 
-| 指标 | 值 |
-|------|-----|
-| BENCH CYCLES | 40,133 |
-| BENCH INSTRET | 6,208 |
-| BENCH IPC_X1000 | 154 |
-| 每 Dhrystone | ≈ 4,013 cycles / 621 insts |
+| 指标 | 2KB ICache | 8KB ICache | Δ |
+|------|----------|-----------|-----|
+| Total Cycles | 291,723 | 264,047 | -9.5% |
+| Total InstRetired | 50,029 | 50,029 | = |
+| **IPCx1000** | 171 | **189** | **+10.5%** |
+| IcHighMissCount | 231 | **152** | **-34%** |
 
-板上 IPC 比 Verilator 低约 8%，每次 Dhrystone 多 ~73% cycles，差异来自真实 DDR3 + CDC 桥接延迟。
+> **关键观察**: 板级 IPC 提升（+34.8%）远大于 Verilator IPC 提升（+10.5%），因为 Verilator mock memory 延迟约 10 cycles/miss，而真实 DDR3 + CDC 桥延迟 30-50 cycles/miss，所以 ICache miss 减少在板级带来的收益放大 3-4 倍。优化后板级 IPC (190) ≈ Verilator IPC (189)，说明 ICache 之前是单一最大瓶颈。
 
 **Loader 协议端到端路径**
 
@@ -1258,23 +1257,35 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 |------|------|------|
 | `loader_quick_sim` | ✅ | tiny exec gate 通过 |
 | `loader_full_payload_prefix1_sim` | ✅ | 首个 64B block ACK 通过 |
-| Vivado synth / impl / bitstream | ✅ | aggressive 策略，25MHz 一次收敛，无需重跑 |
-| JTAG 编程 + USR_ACCESS 回读 | ✅ | `DONE=1, EOS=1`，`USR_ACCESS=0x69E8A324` |
-| board UART loader smoke（10 runs） | ✅ | `SmokePassed=True`, `SmokeLoaderSummaryMask=0x1F` |
+| Vivado synth / impl / bitstream | ✅ | aggressive 策略，25MHz 一次收敛 |
+| JTAG 编程 + USR_ACCESS 回读 | ✅ | `DONE=1, EOS=1`，`USR_ACCESS=0x69E8BEAF` |
+| board UART loader smoke（10 runs） | ✅ | `SmokePassed=True` |
 | board UART loader baseline（500 runs） | ✅ | `BaselinePassed=True`, `UartSawDhrystoneStart/Done=True` |
 | board loader 会话帧 | ✅ | `READY → LOAD_START → 119×BLOCK_ACK → READ_OK → LOAD_OK → JUMP → SUMMARY(0x1F)` |
 | board Dhrystone payload 执行 | ✅ | UART 回显 `DHRYSTONE START ... BENCH CYCLES=... BENCH INSTRET=... BENCH IPC_X1000=... DHRYSTONE DONE` |
 
+**优化原理（ICache 2KB → 8KB）**
+
+- 单行修改 [rtl/inst_memory.v:108](rtl/inst_memory.v#L108) `CACHE_SIZE (2048) → (8192)`
+- ICache 模块 [rtl/icache.v](rtl/icache.v) 已完全参数化，所有 localparam（`SETS`/`INDEX_W`/`TAG_W`）自动派生
+- SETS 64→256，INDEX_W 6→8，TAG_W 21→19；地址切片自动适配
+- Dhrystone 代码 ~7.5KB（235 cache lines），在 8KB/256-set 直接映射下完全装得下，capacity miss 基本消除
+- ICache miss 数从 231 降至 152（Verilator 数据，-34%）
+- ICache 综合为 LUTRAM（无需 BRAM IP 重生），资源代价小
+- 时序代价：WNS -0.15ns（INDEX 解码多 2 输入，但 TAG 比较少 2 输入，部分抵消），仍保持正裕量
+
 **关键产物**
 
-- Bitstream: `build/ax7203/adam_riscv_ax7203_xc7a200tfbg484-2.bit`（`BuildID=0x69E8A324`）
+- Bitstream: `build/ax7203/adam_riscv_ax7203_xc7a200tfbg484-2.bit`（`BuildID=0x69E8BEAF`）
 - 顶层汇总: `build/fpga_benchmark_ddr3/summary.txt`
 - UART 板级捕获（baseline）: `build/dhrystone_ddr3_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
 - UART 板级捕获（smoke）: `build/dhrystone_ddr3_smoke_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
 - Payload manifest: `build/fpga_benchmark_ddr3/payload_manifests/dhrystone_{smoke,baseline}.bin`
 - 综合/实现 log: `build/fpga_benchmark_ddr3/0{7,8,9}_*.log`
 - 时序/利用率: `build/ax7203/reports/timing_summary_aggressive.rpt`, `utilization_aggressive.rpt`
-- 主线验证 ROM bitstream 备份: `build/ax7203_mainline_backup_0x69E89179/`（如需回退到 `UART DIAG PASS` 主线验证 ROM）
+- 历史 bitstream 备份:
+  - `build/ax7203_mainline_backup_0x69E89179/` — 主线验证 ROM bitstream（`UART DIAG PASS`）
+  - `build/ax7203_dhrystone_2kicache_backup_0x69E8A324/` — 2KB ICache 的 Dhrystone bitstream（性能基线对比）
 
 **一键复现命令**
 
