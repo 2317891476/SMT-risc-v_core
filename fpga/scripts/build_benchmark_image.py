@@ -134,7 +134,7 @@ def ensure_coremark_sources() -> Path:
 
 def build_common_flags(cpu_hz: int) -> list[str]:
     return [
-        "-march=rv32im",
+        "-march=rv32im_zicsr",
         "-mabi=ilp32",
         "-msave-restore",
         "-msmall-data-limit=0",

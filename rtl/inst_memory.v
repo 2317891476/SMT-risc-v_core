@@ -46,7 +46,10 @@ module inst_memory #(
     output wire [7:0]  debug_ic_mem_req_count,
     output wire [7:0]  debug_ic_mem_resp_count,
     output wire [7:0]  debug_ic_cpu_resp_count,
-    output wire [7:0]  debug_ic_state_flags
+    output wire [7:0]  debug_ic_state_flags,
+
+    // HPM event
+    output wire        icache_miss_event
 );
 
 // Internal signals
@@ -146,7 +149,8 @@ icache #(
     .debug_mem_req_count  (debug_ic_mem_req_count),
     .debug_mem_resp_count (debug_ic_mem_resp_count),
     .debug_cpu_resp_count (debug_ic_cpu_resp_count),
-    .debug_state_flags    (debug_ic_state_flags)
+    .debug_state_flags    (debug_ic_state_flags),
+    .icache_miss_event   (icache_miss_event)
 );
 
 // External refill interface assignments

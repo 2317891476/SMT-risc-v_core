@@ -86,7 +86,10 @@ module store_buffer #(
     output wire                     load_hazard,         // Stall: unresolved/partial overlap
     output wire                     debug_empty,
     output wire [SB_IDX_W:0]        debug_count_t0,
-    output wire [SB_IDX_W:0]        debug_count_t1
+    output wire [SB_IDX_W:0]        debug_count_t1,
+
+    // HPM event
+    output wire                     sb_stall_event
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -115,6 +118,8 @@ wire sb_full_t0  = (sb_count[0] >= SB_DEPTH);
 wire sb_full_t1  = (sb_count[1] >= SB_DEPTH);
 wire sb_empty_t0 = (sb_count[0] == 0);
 wire sb_empty_t1 = (sb_count[1] == 0);
+
+assign sb_stall_event = sb_full_t0 || sb_full_t1;
 
 // Accept new stores only while one slot remains reserved for the oldest
 // not-yet-issued store. This buffer drains in FIFO issue order but only grants

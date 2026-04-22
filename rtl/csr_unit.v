@@ -73,6 +73,15 @@ module csr_unit #(
     input  wire               instr_retired,   // pulse: 1 instruction retired this cycle
     input  wire               instr_retired_1, // pulse: second instruction retired (dual-issue)
 
+    // ─── HPM Event Inputs ──────────────────────────────────────
+    input  wire               hpm_branch_mispredict,
+    input  wire               hpm_icache_miss,
+    input  wire               hpm_dcache_miss,
+    input  wire               hpm_l2_miss,
+    input  wire               hpm_sb_stall,
+    input  wire               hpm_issue_bubble,
+    input  wire               hpm_rocc_busy,
+
     // ─── External Interrupt Inputs ──────────────────────────────
     input  wire               ext_timer_irq,   // CLINT timer interrupt (MTIP)
     input  wire               ext_external_irq // PLIC external interrupt (MEIP)
@@ -89,6 +98,13 @@ reg [31:0] mtval;      // 0x343
 reg [31:0] mip;        // 0x344
 reg [63:0] mcycle;     // 0xB00 (64-bit)
 reg [63:0] minstret;   // 0xB02 (64-bit)
+reg [63:0] mhpmcounter3; // 0xB03 branch_mispredict
+reg [63:0] mhpmcounter4; // 0xB04 icache_miss
+reg [63:0] mhpmcounter5; // 0xB05 dcache_miss (placeholder)
+reg [63:0] mhpmcounter6; // 0xB06 l2_miss (placeholder)
+reg [63:0] mhpmcounter7; // 0xB07 sb_stall
+reg [63:0] mhpmcounter8; // 0xB08 issue_bubble
+reg [63:0] mhpmcounter9; // 0xB09 rocc_busy (placeholder)
 reg [31:0] satp;       // 0x180
 reg [1:0]  priv_mode;  // current privilege: 2'b11=M, 2'b01=S, 2'b00=U
 
@@ -166,10 +182,38 @@ always @(*) begin
         12'hB80: csr_rdata = mcycle[63:32];      // mcycleh
         12'hB02: csr_rdata = minstret[31:0];     // minstret
         12'hB82: csr_rdata = minstret[63:32];    // minstreth
+        12'hB03: csr_rdata = mhpmcounter3[31:0]; // branch_mispredict
+        12'hB83: csr_rdata = mhpmcounter3[63:32];
+        12'hB04: csr_rdata = mhpmcounter4[31:0]; // icache_miss
+        12'hB84: csr_rdata = mhpmcounter4[63:32];
+        12'hB05: csr_rdata = mhpmcounter5[31:0]; // dcache_miss
+        12'hB85: csr_rdata = mhpmcounter5[63:32];
+        12'hB06: csr_rdata = mhpmcounter6[31:0]; // l2_miss
+        12'hB86: csr_rdata = mhpmcounter6[63:32];
+        12'hB07: csr_rdata = mhpmcounter7[31:0]; // sb_stall
+        12'hB87: csr_rdata = mhpmcounter7[63:32];
+        12'hB08: csr_rdata = mhpmcounter8[31:0]; // issue_bubble
+        12'hB88: csr_rdata = mhpmcounter8[63:32];
+        12'hB09: csr_rdata = mhpmcounter9[31:0]; // rocc_busy
+        12'hB89: csr_rdata = mhpmcounter9[63:32];
         12'hC00: csr_rdata = mcycle[31:0];       // cycle (user-mode alias)
         12'hC80: csr_rdata = mcycle[63:32];      // cycleh
         12'hC02: csr_rdata = minstret[31:0];     // instret (user-mode alias)
         12'hC82: csr_rdata = minstret[63:32];    // instreth
+        12'hC03: csr_rdata = mhpmcounter3[31:0]; // user alias
+        12'hC83: csr_rdata = mhpmcounter3[63:32];
+        12'hC04: csr_rdata = mhpmcounter4[31:0];
+        12'hC84: csr_rdata = mhpmcounter4[63:32];
+        12'hC05: csr_rdata = mhpmcounter5[31:0];
+        12'hC85: csr_rdata = mhpmcounter5[63:32];
+        12'hC06: csr_rdata = mhpmcounter6[31:0];
+        12'hC86: csr_rdata = mhpmcounter6[63:32];
+        12'hC07: csr_rdata = mhpmcounter7[31:0];
+        12'hC87: csr_rdata = mhpmcounter7[63:32];
+        12'hC08: csr_rdata = mhpmcounter8[31:0];
+        12'hC88: csr_rdata = mhpmcounter8[63:32];
+        12'hC09: csr_rdata = mhpmcounter9[31:0];
+        12'hC89: csr_rdata = mhpmcounter9[63:32];
         12'h180: csr_rdata = satp;               // satp
         default: csr_rdata = 32'd0;
         endcase
@@ -205,6 +249,13 @@ always @(posedge clk or negedge rstn) begin
         mip       <= 32'd0;
         mcycle    <= 64'd0;
         minstret  <= 64'd0;
+        mhpmcounter3 <= 64'd0;
+        mhpmcounter4 <= 64'd0;
+        mhpmcounter5 <= 64'd0;
+        mhpmcounter6 <= 64'd0;
+        mhpmcounter7 <= 64'd0;
+        mhpmcounter8 <= 64'd0;
+        mhpmcounter9 <= 64'd0;
         satp      <= 32'd0;         // Bare mode (MODE=0)
         priv_mode <= 2'b11;         // Boot in Machine mode
     end
@@ -214,6 +265,15 @@ always @(posedge clk or negedge rstn) begin
 
         // ── Instruction retired counter ─────────────────────────
         minstret <= minstret + {63'd0, instr_retired} + {63'd0, instr_retired_1};
+
+        // ── HPM event counters ──────────────────────────────────
+        mhpmcounter3 <= mhpmcounter3 + {63'd0, hpm_branch_mispredict};
+        mhpmcounter4 <= mhpmcounter4 + {63'd0, hpm_icache_miss};
+        mhpmcounter5 <= mhpmcounter5 + {63'd0, hpm_dcache_miss};
+        mhpmcounter6 <= mhpmcounter6 + {63'd0, hpm_l2_miss};
+        mhpmcounter7 <= mhpmcounter7 + {63'd0, hpm_sb_stall};
+        mhpmcounter8 <= mhpmcounter8 + {63'd0, hpm_issue_bubble};
+        mhpmcounter9 <= mhpmcounter9 + {63'd0, hpm_rocc_busy};
 
         // ── Update mip from external interrupt sources ──────────
         // mip[7] = MTIP (timer interrupt pending)
@@ -262,6 +322,9 @@ always @(posedge clk or negedge rstn) begin
                 12'hB80: mcycle[63:32]  <= csr_wval;
                 12'hB02: minstret[31:0] <= csr_wval;
                 12'hB82: minstret[63:32]<= csr_wval;
+                /* HPM counters are read-only from CSR write path;
+                 * they are updated by the event counter logic above.
+                 * Avoid conflict where csrr (CSRRS x0,csr,x0) would rewrite back. */
                 12'h180: satp     <= csr_wval;
                 default: ;  // read-only or unimplemented
             endcase

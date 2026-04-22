@@ -50,7 +50,10 @@ module icache #(
     output wire [7:0]               debug_mem_req_count,
     output wire [7:0]               debug_mem_resp_count,
     output wire [7:0]               debug_cpu_resp_count,
-    output wire [7:0]               debug_state_flags
+    output wire [7:0]               debug_state_flags,
+
+    // HPM event
+    output wire                     icache_miss_event
 );
 
 localparam SETS           = CACHE_SIZE / (LINE_SIZE * WAYS);
@@ -126,6 +129,7 @@ assign debug_mem_req_count   = debug_mem_req_count_r;
 assign debug_mem_resp_count  = debug_mem_resp_count_r;
 assign debug_cpu_resp_count  = debug_cpu_resp_count_r;
 assign debug_state_flags     = {state, fill_cnt_r[2:0], mem_req_valid, mem_req_ready, mem_resp_valid};
+assign icache_miss_event     = req_valid_r && !hit;
 
 integer i;
 integer j;

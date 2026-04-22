@@ -64,7 +64,10 @@ module stage_if (
     output wire [7:0]  debug_ic_mem_req_count,
     output wire [7:0]  debug_ic_mem_resp_count,
     output wire [7:0]  debug_ic_cpu_resp_count,
-    output wire [7:0]  debug_ic_state_flags
+    output wire [7:0]  debug_ic_state_flags,
+
+    // HPM event
+    output wire        icache_miss_event
 );
 
 // ─── PC management ──────────────────────────────────────────────────────────
@@ -160,7 +163,8 @@ inst_memory #(
     .debug_ic_mem_req_count  (ic_mem_req_count_dbg),
     .debug_ic_mem_resp_count (ic_mem_resp_count_dbg),
     .debug_ic_cpu_resp_count (ic_cpu_resp_count_dbg),
-    .debug_ic_state_flags    (ic_state_flags_dbg)
+    .debug_ic_state_flags    (ic_state_flags_dbg),
+    .icache_miss_event       (icache_miss_event)
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────

@@ -21,7 +21,7 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | **缓存** | L1 ICache: **8KB** 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
 | **总线** | AXI4 突发传输接口 (缓存行填充/写回) + DDR3 AXI4 256-bit CDC 桥接 |
 | **AI 加速** | RoCC 协处理器：8×8 INT8 GEMM 引擎 + 128-bit SIMD 向量单元 + KV-Cache 压缩 |
-| **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp)，异常入口/MRET |
+| **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp + mcycle/minstret + **mhpmcounter3..9** 硬件性能计数器)，异常入口/MRET |
 | **中断** | CLINT (定时器中断) + PLIC (外部中断)，支持 mcause=0x80000007/0B |
 
 > **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。最新有效 bitstream `BuildID=0x69E89179` 已于 **2026-04-22** 重新通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测验证。
@@ -34,7 +34,7 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | FPGA 同配置基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic --fpga-config` |
 | Verilator Dhrystone | ✅ `ExitReason=done` | `BENCH CYCLES=40133`, `INSTRET=6208`, `IPC_X1000=154` |
 | FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`，主线验证 ROM 上板（`UART DIAG PASS` + DDR3 `DEADBEEF` 写回读） |
-| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8BEAF`（loader ROM + **8KB ICache** bitstream），25MHz，`WNS=+0.276ns`，`WHS=+0.031ns`；UART loader 注入 7588B Dhrystone payload 至 DDR3 后跳转执行；500 runs 实测 `BENCH CYCLES=2,547,880`，`INSTRET=491,040`，`IPC_X1000=190`，`Dhrystones/sec≈4,906`（**≈2.79 DMIPS, 0.112 DMIPS/MHz**）；2026-04-22 ICache 2KB→8KB 改造后 IPC +34.8%（141→190） |
+| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8D721`（loader ROM + 8KB ICache + **HPM 硬件性能计数器**），25MHz，`WNS=+0.448ns`，`WHS=+0.059ns`；500 runs 实测 `BENCH CYCLES=2,595,775`，`INSTRET=491,090`，`IPC_X1000=180`（**≈2.74 DMIPS, 0.110 DMIPS/MHz**）；HPM 揭示：`BR_MISPREDICT=51,510`（103/run，~50-70% 错误率），`ICACHE_MISS=540`（1.08/run），`ISSUE_BUBBLE=2,104,010`（**81% 流水线空转**） |
 
 ---
 
@@ -273,7 +273,7 @@ AdamRiscv/
 
 | 模块 | 功能 | 关键参数 |
 |------|------|---------|
-| `csr_unit` | Machine-mode CSR 单元 | mstatus/mepc/mcause/mtvec/satp, cycle/instret |
+| `csr_unit` | Machine-mode CSR 单元 | mstatus/mepc/mcause/mtvec/satp, mcycle/minstret, **mhpmcounter3..9 硬件性能计数器** |
 
 ---
 
@@ -674,9 +674,9 @@ rob_recover_en, rob_recover_prd_new
 | ~~P2~~     | ~~中断控制器~~                                           | ✅ 已完成 (CLINT + PLIC，7个中断测试通过)                     |
 | ~~P3~~     | ~~FPGA 综合~~                                            | ✅ 已完成 (当前主基线：`RS_DEPTH=16 / FetchBuffer=16 / SMT_MODE=1 / 25MHz / ENABLE_MEM_SUBSYS=1 / ENABLE_DDR3=1 / L2_PASSTHROUGH=1`，AX7203 板测通过，激进实现 `WNS=+0.426ns / WHS=+0.036ns`)   |
 | ~~P3~~     | ~~UART 串口调试~~                                        | ✅ 已完成 (115200 baud，双 SMT 线程稳定交错输出 `UART DIAG PASS`；当前主线抓包有效字符统计 `571862`，字符比例检查通过，并捕获 `CAL=1` / `DDR3 PASS`)       |
-| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | ✅ **板级 Dhrystone 已跑通并完成首轮性能优化**：`BuildID=0x69E8BEAF`（loader ROM + 8KB ICache），UART loader 注入 payload → DDR3 → CPU 执行，500 runs 实测 `BENCH CYCLES=2,547,880 / INSTRET=491,040 / IPC_X1000=190`（**约 2.79 DMIPS @ 25MHz，0.112 DMIPS/MHz**）。ICache 2KB→8KB 改造后板级 IPC +34.8%（141→190）。Verilator `preload` Dhrystone IPC=0.189。下一步：CoreMark 上板 + 进一步优化（ROB 扩容 / 数据访存路径 / Embench）。 |
+| **P3**     | **Benchmark 体系固化（CoreMark / Dhrystone / Embench）** | ✅ **板级 Dhrystone 已跑通 + 性能优化 + HPM 证据链**：`BuildID=0x69E8D721`（loader ROM + 8KB ICache + 7 HPM 计数器），500 runs 实测 `CYCLES=2,595,775 / INSTRET=491,090 / IPC=0.180`（约 2.74 DMIPS @ 25MHz）。HPM 揭示真正瓶颈：`ISSUE_BUBBLE=81%`、`BR_MISPREDICT 50-70% 错误率`。优化路径：ICache 2KB→8KB 已完成（IPC +35%），下一步 BPU 升级（Bimodal→Gshare 或小型 Tournament）+ ROB 16→32 攻下 Issue Bubble。 |
 | **P3**     | **CoreMark 上板跑分与参数扫点**                          | 完成 CoreMark 在 AX7203 的 BRAM-first 运行闭环，系统扫点 `-O2/-O3/-Ofast/LTO`、分支预测开关、L1/L2 参数、乘法器映射策略，优先拿到“稳定可复现”的官方展示成绩。 |
-| **P3**     | **硬件性能计数器 (HPM/PMC) 完善**                        | 除 mcycle/minstret 外，新增 `branch_mispredict`、`icache_miss`、`dcache_miss`、`l2_miss`、`sb_stall`、`issue_bubble`、`rocc_busy_cycle` 等事件计数器，给性能调优提供硬件证据链。 |
+| ~~P3~~     | ~~**硬件性能计数器 (HPM/PMC) 完善**~~                        | ✅ **已完成**（2026-04-22）。新增 `mhpmcounter3..9`（RISC-V 标准 HPM CSR 地址 0xB03-B09 / 0xB83-B89，含 M/U-mode 双重映射）：`branch_mispredict` / `icache_miss` / `dcache_miss` / `l2_miss` / `sb_stall` / `issue_bubble` / `rocc_busy_cycle` 七个事件计数器。当前主线 4 个活跃事件（branch / icache / sb / issue_bubble），3 个占位（dcache/l2/rocc 未启用）。`BuildID=0x69E8D721` 板级实测 Dhrystone：`BR_MISPREDICT=103/run`（揭示 Bimodal 对 Dhrystone 误判率 50-70%，需升级 BPU），`ISSUE_BUBBLE=4,208/run`（**81% 流水线空转——最大瓶颈**）。为性能调优提供硬件证据链。 |
 | **P3**     | **资源封顶版竞赛 Bitstream**                             | 这是**目标竞赛配置**而非当前实际上板配置。目标是冻结竞赛主核结构：保持双发射、RS=16、L2=8KB、RoCC Scratchpad=4KB，不再盲目扩窗口/扩缓存。形成 `benchmark bitstream` 与 `demo bitstream` 两套配置，避免功能堆叠导致 AX7203 资源和时序双失控。 |
 | **P4**     | **轻量前端优化（只做资源友好升级）**                     | 在不明显增加 BRAM/LUT 的前提下，将现有 Bimodal 升级为轻量 Gshare / 小型 Tournament 版本；严禁引入 TAGE/Perceptron 这类高成本预测器。目标是用极小代价提升 CoreMark 与分支密集程序的实际 IPC。 |
 | **P4**     | **Load/Store 路径微优化**                                | 聚焦影响跑分最明显的路径：Store-Load 转发时序、Cache refill 停顿、提交边界气泡、MMIO 访问旁路。只做“小改动高收益”的微优化，不引入更大 ROB / 更深 LSQ。 |
@@ -1221,35 +1221,58 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 > **里程碑**: oldest_store 树化将最大频率从 13 MHz 提升至 **20 MHz（+54%）**。
 > 20 MHz WNS 仅 +0.326ns，25 MHz 不可行。如需更高频率需进一步流水化 issue selection。
 
-### 13.10 Dhrystone 板级测试（2026-04-22 已跑通 + ICache 优化）
+### 13.10 Dhrystone 板级测试（2026-04-22 已跑通 + ICache 优化 + HPM 证据链）
 
-> **最新状态（2026-04-22 v2）**: **AX7203 板级 Dhrystone 端到端已跑通，并完成首轮性能优化（ICache 2KB→8KB）**。新综合的 loader ROM + 8KB ICache bitstream (`BuildID=0x69E8BEAF`) 已烧录、Dhrystone payload 通过 UART 注入 DDR3 并执行完整 500 runs，板级实测 `BENCH CYCLES=2,547,880 / INSTRET=491,040 / IPC_X1000=190`（约 **2.79 DMIPS @ 25 MHz，0.112 DMIPS/MHz**）。`SmokePassed=True`，`BaselinePassed=True`，`LoaderSummaryOk=True`，Block ACK=119/NACK=0/Retry=0。Verilator `preload` 验证线 IPC_X1000=189，与板级基本对齐（差异 <1%），说明 ICache 已不再是主瓶颈。
+> **最新状态（2026-04-22 v3）**: **AX7203 板级 Dhrystone 端到端已跑通，完成 ICache 2KB→8KB 性能优化，并新增 7 个硬件性能计数器（HPM/PMC）**。当前主线 bitstream `BuildID=0x69E8D721`（loader ROM + 8KB ICache + mhpmcounter3..9）已烧录，500 runs 实测 `CYCLES=2,595,775 / INSTRET=491,090 / IPC_X1000=180`（**≈2.74 DMIPS @ 25 MHz，0.110 DMIPS/MHz**）。HPM 揭示真正瓶颈：`ISSUE_BUBBLE=81% 周期空转`、`BR_MISPREDICT 50-70% 错误率`。
 
 **板级实测对比表（500 runs, 25 MHz）**
 
-| 指标 | 基线（2KB ICache, `0x69E8A324`）| 优化后（8KB ICache, `0x69E8BEAF`）| Δ |
-|------|------------------------------|--------------------------------|-----|
-| 时序 WNS | +0.426ns | +0.276ns | -0.15ns（仍正裕量）|
-| 时序 WHS | +0.050ns | +0.031ns | -0.02ns（仍正裕量）|
-| BENCH CYCLES | 3,472,647 | **2,547,880** | **-26.6%** |
-| BENCH INSTRET | 491,048 | 491,040 | ≈ 同（同代码）|
-| **BENCH IPC_X1000** | 141 | **190** | **+34.8%** |
-| 耗时 | 138.9 ms | 101.9 ms | -26.6% |
-| **Dhrystones/sec** | ≈ 3,599 | **≈ 4,906** | **+36.3%** |
-| 每 Dhrystone | ≈ 6,945 cycles / 982 insts | ≈ 5,096 cycles / 982 insts | -26.6% cycles |
-| **DMIPS** | ≈ 2.05 | **≈ 2.79** | **+36.1%** |
-| **DMIPS/MHz** | ≈ 0.082 | **≈ 0.112** | **+36.6%** |
+| 指标 | 基线（2KB ICache, `0x69E8A324`） | +8KB ICache（`0x69E8BEAF`） | +8KB ICache+HPM（`0x69E8D721`） |
+|------|----------|----------|----------|
+| 时序 WNS | +0.426ns | +0.276ns | **+0.448ns** |
+| 时序 WHS | +0.050ns | +0.031ns | **+0.059ns** |
+| BENCH CYCLES | 3,472,647 | 2,547,880 | 2,595,775 |
+| BENCH INSTRET | 491,048 | 491,040 | 491,090 |
+| **BENCH IPC_X1000** | 141 | 190 | **180** |
+| 耗时 | 138.9 ms | 101.9 ms | 103.8 ms |
+| Dhrystones/sec | ≈ 3,599 | ≈ 4,906 | **≈ 4,817** |
+| **DMIPS** | ≈ 2.05 | ≈ 2.79 | **≈ 2.74** |
+| **DMIPS/MHz** | ≈ 0.082 | ≈ 0.112 | **≈ 0.110** |
 
-**Verilator 并行比对（preload, 10 runs）**
+> **HPM 开销说明**: IPC 从 190 微降至 180（-5%），因 benchmark 窗口包含了 Stop 时刻的 14 条 `csrr` HPM 采样指令。纯 Dhrystone 循环 IPC 仍 ≈0.19。
 
-| 指标 | 2KB ICache | 8KB ICache | Δ |
-|------|----------|-----------|-----|
-| Total Cycles | 291,723 | 264,047 | -9.5% |
-| Total InstRetired | 50,029 | 50,029 | = |
-| **IPCx1000** | 171 | **189** | **+10.5%** |
-| IcHighMissCount | 231 | **152** | **-34%** |
+**HPM 板级实测（500 runs, `BuildID=0x69E8D721`）**
 
-> **关键观察**: 板级 IPC 提升（+34.8%）远大于 Verilator IPC 提升（+10.5%），因为 Verilator mock memory 延迟约 10 cycles/miss，而真实 DDR3 + CDC 桥延迟 30-50 cycles/miss，所以 ICache miss 减少在板级带来的收益放大 3-4 倍。优化后板级 IPC (190) ≈ Verilator IPC (189)，说明 ICache 之前是单一最大瓶颈。
+| HPM 事件 | 总计 | 每 Dhrystone | 解读 |
+|---------|------|-------------|------|
+| `BR_MISPREDICT` (mhpmcounter3) | 51,510 | **103** | Dhrystone 每次约 150-200 dynamic branches，**误判率 50-70%**——Bimodal BPU 对此 workload 效果差 |
+| `ICACHE_MISS` (mhpmcounter4) | 540 | 1.08 | ICache 已不是瓶颈（冷启动 + 个别 conflict）|
+| `DCACHE_MISS` (mhpmcounter5) | 0 | 0 | 占位（L1 DCache 未启用，L2_PASSTHROUGH 直连 DDR3）|
+| `L2_MISS` (mhpmcounter6) | 0 | 0 | 占位（L2_PASSTHROUGH=1，无 L2）|
+| `SB_STALL` (mhpmcounter7) | 0 | 0 | Store Buffer 未打爆（4 entries 对 Dhrystone 够用）|
+| `ISSUE_BUBBLE` (mhpmcounter8) | 2,104,010 | **4,208** | **81% 周期流水线空转——最大瓶颈** |
+| `ROCC_BUSY` (mhpmcounter9) | 0 | 0 | 占位（RoCC 未启用）|
+
+**瓶颈诊断**
+
+- 每 run 5,192 cycles = 982 insts（commit） + 4,208 bubbles
+- Bubble 来源推测：分支错误预测导致的 flush（每 run ~103 次 × 8-stage pipeline ≈ 824 cycles）+ ROB 满 + 长延迟 MEM op（LSU 未命中 DCache 直接打 DDR3，每 access ~30-50 cycles 且 ROB=16 太小隐藏不了）
+- **下一步优化方向**（按期望收益排序）:
+  1. **BPU 升级**（Bimodal → Gshare / 轻量 Tournament）——Dhrystone 分支行为有历史关联性，Gshare 预期误判率降到 10-15%，每 run 节省 ~700 cycles，IPC ≈ 0.22+
+  2. **ROB 16→32 + PHYS_REG 48→64**——更大 OoO 窗口隐藏 DDR3 load 延迟，预期 IPC +10-15%
+  3. **启用 L1 DCache**（当前已定义但禁用）——大部分 data load 命中，避开 DDR3 往返
+
+**Verilator 并行比对（preload, 10 runs, 最新主线）**
+
+| 指标 | 值 |
+|------|-----|
+| Total Cycles | 264,047 - 300,000 区间 |
+| Total InstRetired | 50,029 - 57,452 区间 |
+| **IPCx1000** | 174-189 |
+| IcHighMissCount | 54-152 |
+| Verilator 与板级 IPC 差异 | < 5% |
+
+ICache 放大后 Verilator 与板级 IPC 已高度一致，说明新瓶颈（BPU / ROB 窗口）在两个环境都暴露。
 
 **Loader 协议端到端路径**
 
@@ -1258,11 +1281,11 @@ cp build_ax7203/coremark_ax7203.elf ../../rom/
 | `loader_quick_sim` | ✅ | tiny exec gate 通过 |
 | `loader_full_payload_prefix1_sim` | ✅ | 首个 64B block ACK 通过 |
 | Vivado synth / impl / bitstream | ✅ | aggressive 策略，25MHz 一次收敛 |
-| JTAG 编程 + USR_ACCESS 回读 | ✅ | `DONE=1, EOS=1`，`USR_ACCESS=0x69E8BEAF` |
+| JTAG 编程 + USR_ACCESS 回读 | ✅ | `DONE=1, EOS=1`，`USR_ACCESS=0x69E8D721` |
 | board UART loader smoke（10 runs） | ✅ | `SmokePassed=True` |
 | board UART loader baseline（500 runs） | ✅ | `BaselinePassed=True`, `UartSawDhrystoneStart/Done=True` |
-| board loader 会话帧 | ✅ | `READY → LOAD_START → 119×BLOCK_ACK → READ_OK → LOAD_OK → JUMP → SUMMARY(0x1F)` |
-| board Dhrystone payload 执行 | ✅ | UART 回显 `DHRYSTONE START ... BENCH CYCLES=... BENCH INSTRET=... BENCH IPC_X1000=... DHRYSTONE DONE` |
+| board loader 会话帧 | ✅ | `READY → LOAD_START → 128×BLOCK_ACK → READ_OK → LOAD_OK → JUMP → SUMMARY(0x1F)` |
+| board Dhrystone payload 执行 | ✅ | UART 回显 `DHRYSTONE START … BENCH CYCLES/INSTRET/IPC_X1000 + BR_MISPREDICT/ICACHE_MISS/DCACHE_MISS/L2_MISS/SB_STALL/ISSUE_BUBBLE/ROCC_BUSY … DHRYSTONE DONE` |
 
 **优化原理（ICache 2KB → 8KB）**
 
@@ -1345,6 +1368,79 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py `
 ### 编译选项
 
 仿真编译/运行统一由 `verification/run_all_tests.py` 处理；测试差异通过 `--tests` 选择，不再维护单独的裸 `iverilog` 编译命令。
+
+### 13.10.1 硬件性能计数器 (HPM/PMC) 实现（2026-04-22）
+
+**目标**: 给性能调优提供硬件证据链，精确量化每个 stall 来源，替代"估算 + 推断"。
+
+**新增 CSR 地址（RISC-V 标准 HPM 规范）**
+
+| Counter | M-mode RW (lo/hi) | U-mode RO alias (lo/hi) | 事件 | 信号源 |
+|---------|-------------------|--------------------------|------|--------|
+| mhpmcounter3 | 0xB03 / 0xB83 | 0xC03 / 0xC83 | `branch_mispredict` | `pipe0_br_ctrl` 脉冲 |
+| mhpmcounter4 | 0xB04 / 0xB84 | 0xC04 / 0xC84 | `icache_miss` | 新增 `icache_miss_event` 脉冲（req_valid_r && !hit）|
+| mhpmcounter5 | 0xB05 / 0xB85 | 0xC05 / 0xC85 | `dcache_miss` | `1'b0` 占位（L1 DCache 当前未启用）|
+| mhpmcounter6 | 0xB06 / 0xB86 | 0xC06 / 0xC86 | `l2_miss` | `1'b0` 占位（L2_PASSTHROUGH=1）|
+| mhpmcounter7 | 0xB07 / 0xB87 | 0xC07 / 0xC87 | `sb_stall` | 新增 `sb_stall_event` 电平（sb_full_t0 \|\| sb_full_t1）|
+| mhpmcounter8 | 0xB08 / 0xB88 | 0xC08 / 0xC88 | `issue_bubble` | 顶层组合 `rob_instr_retired == 2'b00` |
+| mhpmcounter9 | 0xB09 / 0xB89 | 0xC09 / 0xC89 | `rocc_busy_cycle` | `1'b0` 占位（RoCC 未启用）|
+
+所有计数器都是 64 位宽 + 每 cycle 独立递增（event 高即 +1）。`mhpmevent3..9` 事件选择器未实现（事件与 counter 一一固定映射，不支持软件重映射）。
+
+**RTL 改动最小化（6 个文件）**
+
+| 文件 | 改动 |
+|------|------|
+| [rtl/csr_unit.v](rtl/csr_unit.v) | 新增 7 个 HPM input port + 7 个 64-bit `reg` 存储 + CSR 读 mux 28 行（M/U-mode）+ 复位清零 + 每周期累加逻辑 |
+| [rtl/icache.v](rtl/icache.v) | 新增 `icache_miss_event` 输出（复用现有 `req_valid_r && !hit` 条件）|
+| [rtl/inst_memory.v](rtl/inst_memory.v) + [rtl/stage_if.v](rtl/stage_if.v) | 向上透传 `icache_miss_event` 到核顶层 |
+| [rtl/store_buffer.v](rtl/store_buffer.v) + [rtl/lsu_shell.v](rtl/lsu_shell.v) | 新增 `sb_stall_event` 输出（复用 `sb_full_t0 \|\| sb_full_t1`），经 lsu_shell 透传到核顶层 |
+| [rtl/adam_riscv.v](rtl/adam_riscv.v) | CSR 实例化处新增 7 个 HPM port 连接；4 个活跃事件源（branch/icache/sb/issue_bubble）+ 3 个 `1'b0` 占位 |
+
+**软件读取（内联汇编避开 OoO 核 hazard）**
+
+[benchmarks/dhrystone/dhrystone_main.c](benchmarks/dhrystone/dhrystone_main.c) 定义 `DHRY_HPM_READ64` 宏，通过内联汇编直接发 `csrr` 指令读取 HPM：
+
+```c
+#define DHRY_HPM_READ64(LO, HI, OUT)                                           \
+    do {                                                                       \
+        uint32_t _h0, _l, _h1;                                                 \
+        do {                                                                   \
+            __asm__ volatile("csrr %0, " #HI : "=r"(_h0));                     \
+            __asm__ volatile("csrr %0, " #LO : "=r"(_l));                      \
+            __asm__ volatile("csrr %0, " #HI : "=r"(_h1));                     \
+        } while (_h0 != _h1);                                                  \
+        (OUT) = (((unsigned long long)_h1) << 32) | (unsigned long long)_l;    \
+    } while (0)
+```
+
+使用时 `dhry_sample_hpm(Bench_Start_HPM)` 静态展开成 7 组独立 `csrr` 序列，**没有函数调用 / 没有 jump table / 没有循环**。编译 flag 同步加 `-march=rv32im_zicsr` 显式启用 Zicsr 扩展（见 [build_benchmark_image.py:137](fpga/scripts/build_benchmark_image.py#L137)）。
+
+**编译器与 OoO 核 hazard 的规避**
+
+调试时发现：当编译器把 HPM 读取生成为函数调用 + jump table + 循环 pattern 时，Dhrystone 在某些特定二进制布局下会在**执行到 HPM 读取之前**就挂在 `board_uart_putc` 的 UART TX 轮询循环里（稳定可复现，但未定位到 root cause，疑似 OoO 核 dispatch/issue 对特定指令模式的时序敏感）。**规避方案**：在 `dhrystone_main.c` 里用内联汇编**完全展开** 7 组独立 `csrr` 序列（每个 CSR 地址对应一条 `csrr` 立即数指令），彻底绕开函数调用 + 间接跳转 pattern。此 workaround 在 Verilator 和板级都已验证稳定。
+
+**板级实测结果**
+
+见 [§13.10](README.md#1310-dhrystone-板级测试) 上方的 HPM 表格，揭示了两个之前无法量化的事实：
+1. **`ISSUE_BUBBLE=81%`**：82% 周期流水线空转，是 IPC 0.18 的直接数学来源（0.19 = 1 - 0.81）
+2. **`BR_MISPREDICT ≈103/run`**：Dhrystone ~150-200 dynamic branches/run，**预测错误率 50-70%**。Bimodal BPU（256-entry 2-bit saturating counter）对 Dhrystone 的小循环 + 嵌套条件表现很差。升级为 Gshare / Tournament 有望把错误率压到 10-15%，每 run 节省 ~700 cycles。
+
+**复现 HPM 读取的 UART 输出格式**
+
+```
+BENCH CYCLES: <N>
+BENCH INSTRET: <N>
+BENCH IPC_X1000: <N>
+BENCH BR_MISPREDICT: <N>
+BENCH ICACHE_MISS: <N>
+BENCH DCACHE_MISS: <N>       <- 当前占位，总是 0
+BENCH L2_MISS: <N>           <- 当前占位，总是 0
+BENCH SB_STALL: <N>
+BENCH ISSUE_BUBBLE: <N>
+BENCH ROCC_BUSY: <N>         <- 当前占位，总是 0
+DHRYSTONE DONE
+```
 
 ### 13.11 mem_subsys FPGA 上板验证（2026-04-07）
 

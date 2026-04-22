@@ -352,6 +352,37 @@ uint64_t board_read_minstret64(void) {
     return (((uint64_t)hi1) << 32) | (uint64_t)lo;
 }
 
+/* Read mhpmcounterN as 64-bit value via M-mode CSR addresses 0xB03..0xB09 (lo) / 0xB83..0xB89 (hi).
+ * Glitch-free read: re-sample hi if it changed across the 32-bit lo read.
+ * Surrounded with fence to drain the OoO pipeline and avoid CSR-vs-MMIO ordering hazards. */
+#define AX7203_HPM_READ64(LO_CSR, HI_CSR, OUT)                          \
+    do {                                                                \
+        uint32_t _hi0, _lo, _hi1;                                       \
+        __asm__ volatile("fence" ::: "memory");                         \
+        do {                                                            \
+            __asm__ volatile("csrr %0, " #HI_CSR : "=r"(_hi0));         \
+            __asm__ volatile("csrr %0, " #LO_CSR : "=r"(_lo));          \
+            __asm__ volatile("csrr %0, " #HI_CSR : "=r"(_hi1));         \
+        } while (_hi0 != _hi1);                                         \
+        __asm__ volatile("fence" ::: "memory");                         \
+        (OUT) = (((uint64_t)_hi1) << 32) | (uint64_t)_lo;               \
+    } while (0)
+
+uint64_t board_read_hpmcounter64(int idx) {
+    uint64_t v = 0ULL;
+    switch (idx) {
+        case 3: AX7203_HPM_READ64(0xB03, 0xB83, v); break;
+        case 4: AX7203_HPM_READ64(0xB04, 0xB84, v); break;
+        case 5: AX7203_HPM_READ64(0xB05, 0xB85, v); break;
+        case 6: AX7203_HPM_READ64(0xB06, 0xB86, v); break;
+        case 7: AX7203_HPM_READ64(0xB07, 0xB87, v); break;
+        case 8: AX7203_HPM_READ64(0xB08, 0xB88, v); break;
+        case 9: AX7203_HPM_READ64(0xB09, 0xB89, v); break;
+        default: v = 0ULL; break;
+    }
+    return v;
+}
+
 int board_vprintf(const char *fmt, va_list ap) {
     va_list aq;
     int count;

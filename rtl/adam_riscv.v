@@ -389,6 +389,8 @@ wire [7:0]  debug_ic_mem_req_count;
 wire [7:0]  debug_ic_mem_resp_count;
 wire [7:0]  debug_ic_cpu_resp_count;
 wire [7:0]  debug_ic_state_flags;
+wire        hpm_icache_miss_event;
+wire        hpm_sb_stall_event;
 
 // Fetch buffer backpressure
 wire fb_push_ready;
@@ -456,7 +458,8 @@ stage_if u_stage_if(
     .debug_ic_mem_req_count  (debug_ic_mem_req_count),
     .debug_ic_mem_resp_count (debug_ic_mem_resp_count),
     .debug_ic_cpu_resp_count (debug_ic_cpu_resp_count),
-    .debug_ic_state_flags    (debug_ic_state_flags)
+    .debug_ic_state_flags    (debug_ic_state_flags),
+    .icache_miss_event       (hpm_icache_miss_event)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2166,6 +2169,9 @@ lsu_shell #(
     // Load hazard output
     .load_hazard        (lsu_load_hazard      ),
 
+    // HPM event
+    .hpm_sb_stall_event (hpm_sb_stall_event   ),
+
     // Task 6: Mem_subsys M1 interface
     .use_mem_subsys     (use_mem_subsys       ),
     .m1_req_valid       (m1_req_valid         ),
@@ -2624,6 +2630,13 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .global_int_en   (global_int_en     ),
     .instr_retired   (rob_instr_retired[0]),
     .instr_retired_1 (rob_instr_retired[1]),
+    .hpm_branch_mispredict (pipe0_br_ctrl),
+    .hpm_icache_miss       (hpm_icache_miss_event),
+    .hpm_dcache_miss       (1'b0),
+    .hpm_l2_miss           (1'b0),
+    .hpm_sb_stall          (hpm_sb_stall_event),
+    .hpm_issue_bubble      (rob_instr_retired == 2'b00),
+    .hpm_rocc_busy         (1'b0),
     .ext_timer_irq   (ext_timer_irq     ),
     .ext_external_irq(ext_external_irq  )
 );

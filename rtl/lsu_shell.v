@@ -136,7 +136,10 @@ module lsu_shell #(
     // ═══════════════════════════════════════════════════════════════════════════
     // Load Hazard Output (to scoreboard for stalling)
     // ═══════════════════════════════════════════════════════════════════════════
-    output wire               load_hazard          // Load must be retried
+    output wire               load_hazard,          // Load must be retried
+
+    // HPM event
+    output wire               hpm_sb_stall_event
 );
 
 // =============================================================================
@@ -160,6 +163,7 @@ wire                     sb_load_hazard;
 wire                     sb_debug_empty;
 wire [2:0]               sb_debug_count_t0;
 wire [2:0]               sb_debug_count_t1;
+wire                     sb_stall_event;
 
 // Load vs Store classification
 wire is_load  = req_valid && !req_wen;
@@ -262,7 +266,8 @@ store_buffer #(
     .load_hazard            (sb_load_hazard),
     .debug_empty            (sb_debug_empty),
     .debug_count_t0         (sb_debug_count_t0),
-    .debug_count_t1         (sb_debug_count_t1)
+    .debug_count_t1         (sb_debug_count_t1),
+    .sb_stall_event         (sb_stall_event)
 );
 
 // Export Store Buffer memory interface
@@ -271,6 +276,7 @@ assign sb_mem_write_addr  = sb_mem_write_addr_int;
 assign sb_mem_write_data  = sb_mem_write_data_int;
 assign sb_mem_write_wen   = sb_mem_write_wen_int;
 assign debug_store_buffer_empty = sb_debug_empty;
+assign hpm_sb_stall_event = sb_stall_event;
 assign debug_store_buffer_count_t0 = sb_debug_count_t0;
 assign debug_store_buffer_count_t1 = sb_debug_count_t1;
 
