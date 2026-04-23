@@ -22,6 +22,10 @@ endfunction
 // test_id:
 //   1 -> rom/test1.s
 //   2 -> rom/test2.S
+//   26 -> rom/test_bpu_postfix.s
+//   27 -> rom/test_bpu_jal_loop.s
+//   28 -> rom/test_bpu_jalr_fixed_target.s
+//   29 -> rom/test_bpu_jalr_alt_target.s
 //   0 -> unknown image
 initial begin
     #1ns;
@@ -138,6 +142,68 @@ initial begin
         $display("P2 test_id=%0d detected", test_id);
         pass = pass && (`TUBE_STATUS === 8'h04);
     end
+    else if (test_id == 26) begin
+        // test_bpu_postfix.s
+        // Result words at 0x1000:
+        //   0x00 phaseA_total
+        //   0x04 phaseA_taken
+        //   0x08 phaseA_not_taken
+        //   0x0C phaseB_pass
+        //   0x10 phaseC_pass
+        //   0x14 overall_pass
+        //   0x18 fail_code
+        $display("BPU postfix regression test (test_id=26) detected");
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)
+            && (`TB_MEM_SUBSYS[1024] === 32'd160)
+            && (`TB_MEM_SUBSYS[1025] === 32'd128)
+            && (`TB_MEM_SUBSYS[1026] === 32'd32)
+            && (`TB_MEM_SUBSYS[1027] === 32'd1)
+            && (`TB_MEM_SUBSYS[1028] === 32'd1)
+            && (`TB_MEM_SUBSYS[1029] === 32'd1)
+            && (`TB_MEM_SUBSYS[1030] === 32'd0);
+    end
+    else if (test_id == 27) begin
+        // test_bpu_jal_loop.s
+        // Result words at 0x1000:
+        //   0x00 jal_hit_count
+        //   0x04 pass_flag
+        //   0x08 fail_code
+        $display("BPU JAL loop regression test (test_id=27) detected");
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)
+            && (`TB_MEM_SUBSYS[1024] === 32'd64)
+            && (`TB_MEM_SUBSYS[1025] === 32'd1)
+            && (`TB_MEM_SUBSYS[1026] === 32'd0);
+    end
+    else if (test_id == 28) begin
+        // test_bpu_jalr_fixed_target.s
+        // Result words at 0x1000:
+        //   0x00 jalr_hit_count
+        //   0x04 pass_flag
+        //   0x08 fail_code
+        $display("BPU JALR fixed-target regression test (test_id=28) detected");
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)
+            && (`TB_MEM_SUBSYS[1024] === 32'd64)
+            && (`TB_MEM_SUBSYS[1025] === 32'd1)
+            && (`TB_MEM_SUBSYS[1026] === 32'd0);
+    end
+    else if (test_id == 29) begin
+        // test_bpu_jalr_alt_target.s
+        // Result words at 0x1000:
+        //   0x00 hit_t0
+        //   0x04 hit_t1
+        //   0x08 pass_flag
+        //   0x0C fail_code
+        $display("BPU JALR alternating-target regression test (test_id=29) detected");
+        pass = pass
+            && (`TUBE_STATUS === 8'h04)
+            && (`TB_MEM_SUBSYS[1024] === 32'd32)
+            && (`TB_MEM_SUBSYS[1025] === 32'd32)
+            && (`TB_MEM_SUBSYS[1026] === 32'd1)
+            && (`TB_MEM_SUBSYS[1027] === 32'd0);
+    end
     else if (test_id == 12) begin
         // RoCC GEMM/Vector Test
         // Verifies RoCC GEMM.START and VEC.OP commands complete correctly
@@ -220,6 +286,16 @@ initial begin
     if (test_id == 12 || test_id == 13 || test_id == 14) begin
         // RoCC tests handled by extended timeout above
         #300us; // Wait for extended timeout to handle it
+    end
+    else if (test_id == 26) begin
+        // test_bpu_postfix needs a slightly longer window under the generic tb
+        // because the branch-training workload completes just after 200us.
+        #100us;
+        if (`TUBE_STATUS !== 8'h04) begin
+            $display("\n----------------------------------------\n");
+            $display("\t Timeout Error !!!!\n");
+            TEST_FAIL;
+        end
     end
     else begin
         $display("\n----------------------------------------\n");

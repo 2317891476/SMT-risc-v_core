@@ -14,6 +14,9 @@ module pc_mt #(
     input  wire [N_T-1:0] br_ctrl,          // [t] = branch taken for thread t
     input  wire [31:0]    br_addr_t0,       // branch target for thread 0
     input  wire [31:0]    br_addr_t1,       // branch target for thread 1
+    input  wire [N_T-1:0] pred_ctrl,        // [t] = predicted redirect for thread t
+    input  wire [31:0]    pred_addr_t0,     // predicted target for thread 0
+    input  wire [31:0]    pred_addr_t1,     // predicted target for thread 1
 
     // Per-thread stall / flush
     input  wire [N_T-1:0] pc_stall,         // [t] = stall PC of thread t
@@ -32,8 +35,11 @@ reg [31:0] pc      [0:N_T-1];
 reg [31:0] pc_next [0:N_T-1];
 
 wire [31:0] br_addr [0:N_T-1];
+wire [31:0] pred_addr [0:N_T-1];
 assign br_addr[0] = br_addr_t0;
 assign br_addr[1] = br_addr_t1;
+assign pred_addr[0] = pred_addr_t0;
+assign pred_addr[1] = pred_addr_t1;
 
 integer t;
 
@@ -52,6 +58,10 @@ always @(posedge clk or negedge rstn) begin
             if (br_ctrl[t]) begin
                 pc[t]      <= br_addr[t];
                 pc_next[t] <= br_addr[t] + 32'h4;
+            end
+            else if (pred_ctrl[t]) begin
+                pc[t]      <= pred_addr[t];
+                pc_next[t] <= pred_addr[t] + 32'h4;
             end
             else if (pc_stall[t]) begin
                 // hold

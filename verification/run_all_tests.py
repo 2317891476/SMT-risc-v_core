@@ -4,7 +4,7 @@ Unified test runner for AdamRiscv.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
-  --basic           : Core tests + Store Buffer tests + P2 L2/Interrupt tests (26 tests)
+  --basic           : Core tests + Store Buffer tests + P2 L2/Interrupt tests + BPU tests (30 tests)
                       - test1, test2, test_rv32i_full (core functionality)
                       - test_store_buffer_simple, test_store_buffer_commit,
                         test_store_buffer_forwarding, test_store_buffer_hazard,
@@ -74,6 +74,10 @@ BASIC_TEST_IDS = {
     "test_store_buffer_latest_write_wins": 23,
     "test_store_buffer_stream_multiline": 24,
     "test_l2_mmio_ping_pong": 25,
+    "test_bpu_postfix": 26,
+    "test_bpu_jal_loop": 27,
+    "test_bpu_jalr_fixed_target": 28,
+    "test_bpu_jalr_alt_target": 29,
 }
 
 
@@ -285,7 +289,11 @@ class TestRunner:
                 "test_interrupt_mask_mret.s",
                 "test_clint_timer_rearm.s",
                 "test_plic_retrigger.s",
-                # Branch Prediction tests (included in test_rv32i_full with 17 branch instructions)
+                # Branch Prediction tests
+                "test_bpu_postfix.s",
+                "test_bpu_jal_loop.s",
+                "test_bpu_jalr_fixed_target.s",
+                "test_bpu_jalr_alt_target.s",
             ]
             if self.enable_rocc:
                 tests.extend([
@@ -431,7 +439,7 @@ class TestRunner:
 
 def main():
     parser = argparse.ArgumentParser(description="AdamRiscv Unified Test Runner")
-    parser.add_argument("--basic", action="store_true", help="Run basic tests (test1, test2, test_rv32i_full)")
+    parser.add_argument("--basic", action="store_true", help="Run the basic regression suite")
     parser.add_argument("--riscv-tests", action="store_true", help="Run classic riscv-tests (auto-download)")
     parser.add_argument("--riscv-arch-test", action="store_true", help="Run official arch tests (auto-download)")
     parser.add_argument("--riscof", action="store_true", help="Run RISCOF framework tests")

@@ -29,6 +29,7 @@ module stage_if (
     input  wire [0:0]  bpu_update_tid,
     input  wire        bpu_update_taken,
     input  wire [31:0] bpu_update_target,
+    input  wire [1:0]  bpu_update_type,
 
     // ─── Thread scheduler ───────────────────────────────────────
     input  wire [0:0]  fetch_tid,
@@ -42,6 +43,9 @@ module stage_if (
     output wire [31:0] if_pc,          // instruction PC
     output wire [0:0]  if_tid,         // thread ID
     output wire        if_pred_taken,  // BPU prediction for this instruction
+    output wire [31:0] if_pred_target, // predicted target for this instruction
+    output wire        if_pred_hit,    // BTB hit for this instruction
+    output wire [1:0]  if_pred_type,   // conditional / jal / jalr
 
     // ─── External refill interface to mem_subsys (Task 5) ───────
     output wire        ext_mem_req_valid,
@@ -62,7 +66,10 @@ wire [0:0]  tid_out;
 reg         fetch_req_active;
 reg [31:0]  fetch_pc_pending;
 reg [0:0]   fetch_tid_pending;
-reg         fetch_pred_pending;
+reg [31:0]  fetch_pred_target_pending;
+reg         fetch_pred_taken_pending;
+reg         fetch_pred_hit_pending;
+reg [1:0]   fetch_pred_type_pending;
 
 // Stall PC when: pipeline stall, fetch buffer full, or a previous fetch
 // request is still waiting for its response.
@@ -70,6 +77,14 @@ wire pc_stall_combined;
 assign pc_stall_combined = pc_stall || !fb_ready || fetch_req_active;
 wire fetch_req_launch = rstn && !pc_stall && fb_ready && !fetch_req_active && (if_flush == 2'b00);
 wire [1:0] pc_advance = fetch_req_launch ? (tid_out == 1'b0 ? 2'b01 : 2'b10) : 2'b00;
+wire       bpu_pred_taken;
+wire [31:0] bpu_pred_target;
+wire       bpu_pred_hit;
+wire [1:0] bpu_pred_type;
+wire       pred_redirect_valid = fetch_req_launch && bpu_pred_taken;
+wire [1:0] pred_ctrl = pred_redirect_valid ? (tid_out == 1'b0 ? 2'b01 : 2'b10) : 2'b00;
+wire [31:0] pred_addr_t0 = pred_redirect_valid && (tid_out == 1'b0) ? bpu_pred_target : 32'd0;
+wire [31:0] pred_addr_t1 = pred_redirect_valid && (tid_out == 1'b1) ? bpu_pred_target : 32'd0;
 
 pc_mt #(
     .N_T             (2             ),
@@ -80,6 +95,9 @@ pc_mt #(
     .br_ctrl     (br_ctrl             ),
     .br_addr_t0  (br_addr_t0          ),
     .br_addr_t1  (br_addr_t1          ),
+    .pred_ctrl   (pred_ctrl           ),
+    .pred_addr_t0(pred_addr_t0        ),
+    .pred_addr_t1(pred_addr_t1        ),
     .pc_stall    ({pc_stall_combined, pc_stall_combined}),
     .flush       (if_flush            ),
     .pc_advance  (pc_advance          ),
@@ -141,7 +159,6 @@ inst_memory #(
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────
-wire bpu_pred_taken;
 
 bpu_bimodal #(
     .PHT_ENTRIES (256)
@@ -152,13 +169,16 @@ bpu_bimodal #(
     .pred_pc       (pc_out            ),
     .pred_tid      (tid_out           ),
     .pred_taken    (bpu_pred_taken    ),
-    .pred_target   (/* unused for now, target comes from EX */),
+    .pred_target   (bpu_pred_target   ),
+    .pred_hit      (bpu_pred_hit      ),
+    .pred_type     (bpu_pred_type     ),
     // Update port
-    .update_valid  (bpu_update_valid  ),
-    .update_pc     (bpu_update_pc     ),
-    .update_tid    (bpu_update_tid    ),
-    .update_taken  (bpu_update_taken  ),
-    .update_target (bpu_update_target )
+    .resolve_valid (bpu_update_valid  ),
+    .resolve_pc    (bpu_update_pc     ),
+    .resolve_tid   (bpu_update_tid    ),
+    .resolve_taken (bpu_update_taken  ),
+    .resolve_target(bpu_update_target ),
+    .resolve_type  (bpu_update_type   )
 );
 
 // Bypass address needs to be delayed by 1 cycle to match mem_subsys RAM read latency
@@ -167,21 +187,31 @@ bpu_bimodal #(
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        fetch_req_active   <= 1'b0;
-        fetch_pc_pending   <= 32'd0;
-        fetch_tid_pending  <= 1'b0;
-        fetch_pred_pending <= 1'b0;
+        fetch_req_active          <= 1'b0;
+        fetch_pc_pending          <= 32'd0;
+        fetch_tid_pending         <= 1'b0;
+        fetch_pred_target_pending <= 32'd0;
+        fetch_pred_taken_pending  <= 1'b0;
+        fetch_pred_hit_pending    <= 1'b0;
+        fetch_pred_type_pending   <= 2'd0;
     end
     else begin
         if (|if_flush) begin
-            fetch_req_active <= 1'b0;
+            fetch_req_active          <= 1'b0;
+            fetch_pred_target_pending <= 32'd0;
+            fetch_pred_taken_pending  <= 1'b0;
+            fetch_pred_hit_pending    <= 1'b0;
+            fetch_pred_type_pending   <= 2'd0;
         end
         else begin
             if (fetch_req_launch) begin
-                fetch_req_active   <= 1'b1;
-                fetch_pc_pending   <= pc_out;
-                fetch_tid_pending  <= tid_out;
-                fetch_pred_pending <= bpu_pred_taken;
+                fetch_req_active          <= 1'b1;
+                fetch_pc_pending          <= pc_out;
+                fetch_tid_pending         <= tid_out;
+                fetch_pred_target_pending <= bpu_pred_target;
+                fetch_pred_taken_pending  <= bpu_pred_taken;
+                fetch_pred_hit_pending    <= bpu_pred_hit;
+                fetch_pred_type_pending   <= bpu_pred_type;
             end
 
             if (fetch_req_active && resp_valid_from_mem) begin
@@ -212,6 +242,9 @@ assign if_pc         = fetch_pc_pending;
 assign if_tid        = fetch_tid_pending;
 assign if_valid      = final_valid;
 assign if_inst       = inst_from_mem;
-assign if_pred_taken = fetch_pred_pending;
+assign if_pred_taken = fetch_pred_taken_pending;
+assign if_pred_target = fetch_pred_target_pending;
+assign if_pred_hit    = fetch_pred_hit_pending;
+assign if_pred_type   = fetch_pred_type_pending;
 
 endmodule

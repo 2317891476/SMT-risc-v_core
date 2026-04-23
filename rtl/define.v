@@ -117,6 +117,9 @@
 `define BPU_WNT         2'b01  // Weakly Not Taken
 `define BPU_WT          2'b10  // Weakly Taken
 `define BPU_SNT         2'b11  // Strongly Taken
+`define BPU_TYPE_COND   2'b00
+`define BPU_TYPE_JAL    2'b01
+`define BPU_TYPE_JALR   2'b10
 
 // ─── Custom RoCC Opcodes ────────────────────────────────────────────────────
 `define OPC_CUSTOM0  7'b0001011  // custom-0 (opcode 0x0B)
