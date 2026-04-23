@@ -22,11 +22,19 @@ module decoder_dual (
     input  wire [31:0] inst0_word,      // instruction 0 (older in program order)
     input  wire [31:0] inst0_pc,
     input  wire [0:0]  inst0_tid,
+    input  wire        inst0_pred_taken,
+    input  wire [31:0] inst0_pred_target,
+    input  wire        inst0_pred_hit,
+    input  wire [1:0]  inst0_pred_type,
 
     input  wire        inst1_valid,
     input  wire [31:0] inst1_word,      // instruction 1 (younger)
     input  wire [31:0] inst1_pc,
     input  wire [0:0]  inst1_tid,
+    input  wire        inst1_pred_taken,
+    input  wire [31:0] inst1_pred_target,
+    input  wire        inst1_pred_hit,
+    input  wire [1:0]  inst1_pred_type,
 
     // ─── Output: Decoded instruction 0 ──────────────────────────
     output wire        dec0_valid,      // decoded & can be dispatched
@@ -50,6 +58,10 @@ module decoder_dual (
     output wire        dec0_rs2_used,
     output wire [2:0]  dec0_fu,
     output wire [0:0]  dec0_tid,
+    output wire        dec0_pred_taken,
+    output wire [31:0] dec0_pred_target,
+    output wire        dec0_pred_hit,
+    output wire [1:0]  dec0_pred_type,
 
     // ─── Output: Decoded instruction 1 ──────────────────────────
     output wire        dec1_valid,
@@ -73,6 +85,10 @@ module decoder_dual (
     output wire        dec1_rs2_used,
     output wire [2:0]  dec1_fu,
     output wire [0:0]  dec1_tid,
+    output wire        dec1_pred_taken,
+    output wire [31:0] dec1_pred_target,
+    output wire        dec1_pred_hit,
+    output wire [1:0]  dec1_pred_type,
 
     // ─── Backpressure: how many instructions consumed ───────────
     output wire        consume_0,      // decoder consumed inst0
@@ -272,6 +288,10 @@ assign dec0_rs1_used     = d0_rs1_used;
 assign dec0_rs2_used     = d0_rs2_used;
 assign dec0_fu           = d0_fu;
 assign dec0_tid          = inst0_tid;
+assign dec0_pred_taken   = inst0_pred_taken;
+assign dec0_pred_target  = inst0_pred_target;
+assign dec0_pred_hit     = inst0_pred_hit;
+assign dec0_pred_type    = inst0_pred_type;
 
 assign dec1_pc           = d1_pc_o;
 assign dec1_imm          = d1_imm;
@@ -293,6 +313,10 @@ assign dec1_rs1_used     = d1_rs1_used;
 assign dec1_rs2_used     = d1_rs2_used;
 assign dec1_fu           = d1_fu;
 assign dec1_tid          = inst1_tid;
+assign dec1_pred_taken   = inst1_pred_taken;
+assign dec1_pred_target  = inst1_pred_target;
+assign dec1_pred_hit     = inst1_pred_hit;
+assign dec1_pred_type    = inst1_pred_type;
 
 // ─── Consume signals (feedback to fetch_buffer) ─────────────────────────────
 // Hold fetch-buffer entries in place whenever the downstream pipeline stalls.

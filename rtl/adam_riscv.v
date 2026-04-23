@@ -177,6 +177,15 @@ wire [31:0] pipe0_br_pc;
 wire [0:0] pipe0_br_tid;
 wire [15:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
+wire       pipe0_br_resolve_valid;
+wire       pipe0_br_actual_taken;
+wire [31:0] pipe0_br_actual_target;
+wire [1:0] pipe0_br_resolve_type;
+wire       pipe0_br_pred_taken;
+wire [31:0] pipe0_br_pred_target;
+wire       pipe0_br_pred_hit;
+wire       pipe0_br_mispredict;
+wire [31:0] pipe0_br_redirect_pc;
 reg        pipe0_br_complete_hold_r;
 wire       scoreboard_br_complete;
 
@@ -226,9 +235,9 @@ wire        trap_return;
 wire [31:0] mepc_out;
 wire        global_int_en;
 
-assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
-assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
-assign flush_any    = pipe0_br_ctrl;
+assign smt_flush[0] = pipe0_br_mispredict && (pipe0_br_tid == 1'b0);
+assign smt_flush[1] = pipe0_br_mispredict && (pipe0_br_tid == 1'b1);
+assign flush_any    = pipe0_br_mispredict;
 
 // Stall from scoreboard / ROB. The ROB can fill before the scoreboard does;
 // if we don't reflect that backpressure to the front-end, the scoreboard may
@@ -281,7 +290,7 @@ always @(posedge clk or negedge rstn) begin
         epoch_t1   <= 8'd0;
     end else begin
         // Increment epoch on flush
-        if (pipe0_br_ctrl) begin
+        if (pipe0_br_mispredict) begin
             if (pipe0_br_tid == 1'b0)
                 epoch_t0 <= epoch_t0 + 8'd1;
             else
@@ -329,6 +338,9 @@ wire [31:0] if_inst;
 wire [31:0] if_pc;
 wire [0:0]  if_tid;
 wire        if_pred_taken;
+wire [31:0] if_pred_target;
+wire        if_pred_hit;
+wire [1:0]  if_pred_type;
 
 // Fetch buffer backpressure
 wire fb_push_ready;
@@ -353,17 +365,18 @@ stage_if u_stage_if(
     .pc_stall         (stall            ),
     .if_flush         (combined_flush   ),  // Use combined flush (trap > branch)
     .br_addr_t0       (trap_redirect_valid ? trap_redirect_pc :
-                        (pipe0_br_ctrl && (pipe0_br_tid==1'b0) ? pipe0_br_addr : 32'd0)),
+                        (pipe0_br_mispredict && (pipe0_br_tid==1'b0) ? pipe0_br_redirect_pc : 32'd0)),
     .br_addr_t1       (trap_redirect_valid ? trap_redirect_pc :
-                        (pipe0_br_ctrl && (pipe0_br_tid==1'b1) ? pipe0_br_addr : 32'd0)),
+                        (pipe0_br_mispredict && (pipe0_br_tid==1'b1) ? pipe0_br_redirect_pc : 32'd0)),
     .br_ctrl          (trap_redirect_valid ? {trap_redirect_tid == 1'b1, trap_redirect_tid == 1'b0} :
-                        {pipe0_br_ctrl && (pipe0_br_tid==1'b1),
-                         pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
-    .bpu_update_valid (pipe0_br_ctrl    ),
+                        {pipe0_br_mispredict && (pipe0_br_tid==1'b1),
+                         pipe0_br_mispredict && (pipe0_br_tid==1'b0)}),
+    .bpu_update_valid (pipe0_br_resolve_valid),
     .bpu_update_pc    (pipe0_br_pc      ),
     .bpu_update_tid   (pipe0_br_tid     ),
-    .bpu_update_taken (pipe0_br_ctrl    ),
-    .bpu_update_target(pipe0_br_addr    ),
+    .bpu_update_taken (pipe0_br_actual_taken),
+    .bpu_update_target(pipe0_br_actual_target),
+    .bpu_update_type  (pipe0_br_resolve_type),
     .fetch_tid        (fetch_tid        ),
     .fb_ready         (fb_push_ready    ),
     .if_valid         (if_valid         ),
@@ -371,6 +384,9 @@ stage_if u_stage_if(
     .if_pc            (if_pc            ),
     .if_tid           (if_tid           ),
     .if_pred_taken    (if_pred_taken    ),
+    .if_pred_target   (if_pred_target   ),
+    .if_pred_hit      (if_pred_hit      ),
+    .if_pred_type     (if_pred_type     ),
 
     // Task 5: External refill interface to mem_subsys M0
     .ext_mem_req_valid  (m0_req_valid),
@@ -392,6 +408,10 @@ wire        fb_pop0_valid, fb_pop1_valid;
 wire [31:0] fb_pop0_inst,  fb_pop1_inst;
 wire [31:0] fb_pop0_pc,    fb_pop1_pc;
 wire [0:0]  fb_pop0_tid,   fb_pop1_tid;
+wire        fb_pop0_pred_taken, fb_pop1_pred_taken;
+wire [31:0] fb_pop0_pred_target, fb_pop1_pred_target;
+wire        fb_pop0_pred_hit, fb_pop1_pred_hit;
+wire [1:0]  fb_pop0_pred_type, fb_pop1_pred_type;
 wire        fb_consume_0,  fb_consume_1;
 
 fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
@@ -402,15 +422,27 @@ fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
     .push_inst  (if_inst        ),
     .push_pc    (if_pc          ),
     .push_tid   (if_tid         ),
+    .push_pred_taken(if_pred_taken ),
+    .push_pred_target(if_pred_target),
+    .push_pred_hit(if_pred_hit   ),
+    .push_pred_type(if_pred_type ),
     .push_ready (fb_push_ready  ),
     .pop0_valid (fb_pop0_valid  ),
     .pop0_inst  (fb_pop0_inst   ),
     .pop0_pc    (fb_pop0_pc     ),
     .pop0_tid   (fb_pop0_tid    ),
+    .pop0_pred_taken(fb_pop0_pred_taken),
+    .pop0_pred_target(fb_pop0_pred_target),
+    .pop0_pred_hit(fb_pop0_pred_hit),
+    .pop0_pred_type(fb_pop0_pred_type),
     .pop1_valid (fb_pop1_valid  ),
     .pop1_inst  (fb_pop1_inst   ),
     .pop1_pc    (fb_pop1_pc     ),
     .pop1_tid   (fb_pop1_tid    ),
+    .pop1_pred_taken(fb_pop1_pred_taken),
+    .pop1_pred_target(fb_pop1_pred_target),
+    .pop1_pred_hit(fb_pop1_pred_hit),
+    .pop1_pred_type(fb_pop1_pred_type),
     .consume_0  (fb_consume_0   ),
     .consume_1  (fb_consume_1   )
 );
@@ -439,6 +471,10 @@ wire        dec0_rs1_used, dec1_rs1_used;
 wire        dec0_rs2_used, dec1_rs2_used;
 wire [2:0]  dec0_fu,    dec1_fu;
 wire [0:0]  dec0_tid,   dec1_tid;
+wire        dec0_pred_taken, dec1_pred_taken;
+wire [31:0] dec0_pred_target, dec1_pred_target;
+wire        dec0_pred_hit, dec1_pred_hit;
+wire [1:0]  dec0_pred_type, dec1_pred_type;
 wire        dec0_is_csr, dec1_is_csr;
 wire        dec0_is_mret, dec1_is_mret;
 wire [11:0] dec0_csr_addr, dec1_csr_addr;
@@ -451,10 +487,18 @@ decoder_dual u_decoder_dual(
     .inst0_word      (fb_pop0_inst     ),
     .inst0_pc        (fb_pop0_pc       ),
     .inst0_tid       (fb_pop0_tid      ),
+    .inst0_pred_taken(fb_pop0_pred_taken),
+    .inst0_pred_target(fb_pop0_pred_target),
+    .inst0_pred_hit  (fb_pop0_pred_hit ),
+    .inst0_pred_type (fb_pop0_pred_type),
     .inst1_valid     (fb_pop1_valid    ),
     .inst1_word      (fb_pop1_inst     ),
     .inst1_pc        (fb_pop1_pc       ),
     .inst1_tid       (fb_pop1_tid      ),
+    .inst1_pred_taken(fb_pop1_pred_taken),
+    .inst1_pred_target(fb_pop1_pred_target),
+    .inst1_pred_hit  (fb_pop1_pred_hit ),
+    .inst1_pred_type (fb_pop1_pred_type),
     .dec0_valid      (dec0_valid       ),
     .dec0_pc         (dec0_pc          ),
     .dec0_imm        (dec0_imm         ),
@@ -476,6 +520,10 @@ decoder_dual u_decoder_dual(
     .dec0_rs2_used   (dec0_rs2_used    ),
     .dec0_fu         (dec0_fu          ),
     .dec0_tid        (dec0_tid         ),
+    .dec0_pred_taken (dec0_pred_taken  ),
+    .dec0_pred_target(dec0_pred_target ),
+    .dec0_pred_hit   (dec0_pred_hit    ),
+    .dec0_pred_type  (dec0_pred_type   ),
     .dec0_is_csr     (dec0_is_csr      ),
     .dec0_is_mret    (dec0_is_mret     ),
     .dec0_csr_addr   (dec0_csr_addr    ),
@@ -500,6 +548,10 @@ decoder_dual u_decoder_dual(
     .dec1_rs2_used   (dec1_rs2_used    ),
     .dec1_fu         (dec1_fu          ),
     .dec1_tid        (dec1_tid         ),
+    .dec1_pred_taken (dec1_pred_taken  ),
+    .dec1_pred_target(dec1_pred_target ),
+    .dec1_pred_hit   (dec1_pred_hit    ),
+    .dec1_pred_type  (dec1_pred_type   ),
     .dec1_is_csr     (dec1_is_csr     ),
     .dec1_is_mret    (dec1_is_mret    ),
     .dec1_csr_addr   (dec1_csr_addr   ),
@@ -612,7 +664,7 @@ scoreboard #(
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),
     .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
-    .flush_order_valid(!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_valid(!trap_redirect_valid && pipe0_br_mispredict),
     .flush_order_id(pipe0_br_order_id),
 
     // Dispatch 0
@@ -804,6 +856,11 @@ integer    sys_meta_idx;
 reg        rs_is_rocc    [0:31];
 reg [6:0]  rs_rocc_funct7[0:31];
 integer    rocc_meta_idx;
+reg        rs_pred_taken [0:31];
+reg [31:0] rs_pred_target[0:31];
+reg        rs_pred_hit   [0:31];
+reg [1:0]  rs_pred_type  [0:31];
+integer    bpu_meta_idx;
 
 rob_lite #(
     .ROB_DEPTH      (8),
@@ -818,7 +875,7 @@ rob_lite #(
     .flush              (combined_flush_any),
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
     .flush_new_epoch    ((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
-    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_valid  (!trap_redirect_valid && pipe0_br_mispredict),
     .flush_order_id     (pipe0_br_order_id),
 
     // Dispatch Port 0
@@ -951,7 +1008,7 @@ wire disp1_accepted = disp1_valid_gated && !sb_disp_stall;
 // Prefer the oldest visible in-flight PC, and avoid overwriting it with
 // speculative control-flow fall-through PCs from decode/fetch.
 reg [31:0] trap_pc_r;
-wire trap_pc_speculative = sb_branch_pending_any || pipe0_br_ctrl || pipe0_br_complete;
+wire trap_pc_speculative = sb_branch_pending_any || pipe0_br_mispredict || pipe0_br_complete;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
 
 always @(posedge clk or negedge rstn) begin
@@ -979,6 +1036,12 @@ always @(posedge clk or negedge rstn) begin
             rs_is_rocc[rocc_meta_idx]     <= 1'b0;
             rs_rocc_funct7[rocc_meta_idx] <= 7'd0;
         end
+        for (bpu_meta_idx = 0; bpu_meta_idx < 32; bpu_meta_idx = bpu_meta_idx + 1) begin
+            rs_pred_taken[bpu_meta_idx]  <= 1'b0;
+            rs_pred_target[bpu_meta_idx] <= 32'd0;
+            rs_pred_hit[bpu_meta_idx]    <= 1'b0;
+            rs_pred_type[bpu_meta_idx]   <= 2'd0;
+        end
     end else begin
         if (disp0_accepted) begin
             rs_is_csr[sb_disp0_tag]   <= dec0_is_csr;
@@ -986,6 +1049,10 @@ always @(posedge clk or negedge rstn) begin
             rs_csr_addr[sb_disp0_tag] <= dec0_csr_addr;
             rs_is_rocc[sb_disp0_tag]     <= dec0_is_rocc;
             rs_rocc_funct7[sb_disp0_tag] <= dec0_rocc_funct7;
+            rs_pred_taken[sb_disp0_tag]  <= dec0_pred_taken;
+            rs_pred_target[sb_disp0_tag] <= dec0_pred_target;
+            rs_pred_hit[sb_disp0_tag]    <= dec0_pred_hit;
+            rs_pred_type[sb_disp0_tag]   <= dec0_pred_type;
         end
         if (disp1_accepted) begin
             rs_is_csr[sb_disp1_tag]   <= dec1_is_csr;
@@ -993,6 +1060,10 @@ always @(posedge clk or negedge rstn) begin
             rs_csr_addr[sb_disp1_tag] <= dec1_csr_addr;
             rs_is_rocc[sb_disp1_tag]     <= dec1_is_rocc;
             rs_rocc_funct7[sb_disp1_tag] <= dec1_rocc_funct7;
+            rs_pred_taken[sb_disp1_tag]  <= dec1_pred_taken;
+            rs_pred_target[sb_disp1_tag] <= dec1_pred_target;
+            rs_pred_hit[sb_disp1_tag]    <= dec1_pred_hit;
+            rs_pred_type[sb_disp1_tag]   <= dec1_pred_type;
         end
     end
 end
@@ -1008,6 +1079,14 @@ wire        iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
                            iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
 wire [11:0] iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                             iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
+wire        iss0_pred_taken = iss0_tag_hits_disp0 ? dec0_pred_taken :
+                              iss0_tag_hits_disp1 ? dec1_pred_taken : rs_pred_taken[iss0_tag];
+wire [31:0] iss0_pred_target = iss0_tag_hits_disp0 ? dec0_pred_target :
+                               iss0_tag_hits_disp1 ? dec1_pred_target : rs_pred_target[iss0_tag];
+wire        iss0_pred_hit = iss0_tag_hits_disp0 ? dec0_pred_hit :
+                            iss0_tag_hits_disp1 ? dec1_pred_hit : rs_pred_hit[iss0_tag];
+wire [1:0]  iss0_pred_type = iss0_tag_hits_disp0 ? dec0_pred_type :
+                             iss0_tag_hits_disp1 ? dec1_pred_type : rs_pred_type[iss0_tag];
 
 // Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
 // FPGA_MODE: RoCC not synthesized, hardwire to 0 to cut cross-module feedback path
@@ -1226,6 +1305,10 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .in_rs1_idx       (iss0_rs1         ),
     .in_imm           (iss0_imm         ),
     .in_order_id      (iss0_order_id    ),
+    .in_pred_taken    (iss0_pred_taken  ),
+    .in_pred_target   (iss0_pred_target ),
+    .in_pred_hit      (iss0_pred_hit    ),
+    .in_pred_type     (iss0_pred_type   ),
     .in_func3         (iss0_func3       ),
     .in_func7         (iss0_func7       ),
     .in_alu_op        (iss0_alu_op      ),
@@ -1258,7 +1341,16 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .br_pc            (pipe0_br_pc      ),
     .br_tid           (pipe0_br_tid     ),
     .br_order_id      (pipe0_br_order_id),
-    .br_complete      (pipe0_br_complete)
+    .br_complete      (pipe0_br_complete),
+    .br_resolve_valid (pipe0_br_resolve_valid),
+    .br_actual_taken  (pipe0_br_actual_taken),
+    .br_actual_target (pipe0_br_actual_target),
+    .br_resolve_type  (pipe0_br_resolve_type),
+    .br_pred_taken    (pipe0_br_pred_taken),
+    .br_pred_target   (pipe0_br_pred_target),
+    .br_pred_hit      (pipe0_br_pred_hit),
+    .br_mispredict    (pipe0_br_mispredict),
+    .br_redirect_pc   (pipe0_br_redirect_pc)
 );
 
 // ─── Execution Pipe 1 (INT + MUL + AGU) ────────────────────────────────────
@@ -1389,7 +1481,7 @@ lsu_shell #(
     .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
-    .flush_order_valid  (!trap_redirect_valid && pipe0_br_ctrl),
+    .flush_order_valid  (!trap_redirect_valid && pipe0_br_mispredict),
     .flush_order_id     (pipe0_br_order_id    ),
 
     // Request from exec_pipe1

@@ -24,6 +24,10 @@ module exec_pipe0 #(
     input  wire [4:0]         in_rs1_idx,    // rs1 index (used for CSR zimm ops)
     input  wire [31:0]        in_imm,
     input  wire [15:0]        in_order_id,   // per-thread order id for flush bookkeeping
+    input  wire               in_pred_taken,
+    input  wire [31:0]        in_pred_target,
+    input  wire               in_pred_hit,
+    input  wire [1:0]         in_pred_type,
     input  wire [2:0]         in_func3,
     input  wire               in_func7,
     input  wire [2:0]         in_alu_op,
@@ -64,7 +68,16 @@ module exec_pipe0 #(
     output wire [31:0]        br_pc,         // branch instruction PC
     output wire [0:0]         br_tid,        // which thread branched
     output wire [15:0]        br_order_id,   // branch order id when redirecting
-    output wire               br_complete    // branch execution complete (taken or not)
+    output wire               br_complete,   // branch execution complete (taken or not)
+    output wire               br_resolve_valid,
+    output wire               br_actual_taken,
+    output wire [31:0]        br_actual_target,
+    output wire [1:0]         br_resolve_type,
+    output wire               br_pred_taken,
+    output wire [31:0]        br_pred_target,
+    output wire               br_pred_hit,
+    output wire               br_mispredict,
+    output wire [31:0]        br_redirect_pc
 );
 
 // ─── ALU control ────────────────────────────────────────────────────────────
@@ -115,16 +128,41 @@ reg [31:0]        br_pc_r;
 reg [0:0]         br_tid_r;
 reg [15:0]        br_order_id_r;
 reg               br_complete_r;   // branch execution complete
+reg               br_resolve_valid_r;
+reg               br_actual_taken_r;
+reg [31:0]        br_actual_target_r;
+reg [1:0]         br_resolve_type_r;
+reg               br_pred_taken_r;
+reg [31:0]        br_pred_target_r;
+reg               br_pred_hit_r;
+reg               br_mispredict_r;
+reg [31:0]        br_redirect_pc_r;
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
 reg [31:0]        stored_imm;
 reg [31:0]        stored_op_a;     // for JALR
 reg [15:0]        stored_order_id;
+reg [0:0]         stored_tid;
 reg               stored_br;
 reg               stored_br_addr_mode;
 reg               stored_valid;
 reg               stored_br_mark;  // store the branch decision
+reg               stored_pred_taken;
+reg [31:0]        stored_pred_target;
+reg               stored_pred_hit;
+reg [1:0]         stored_resolve_type;
+wire [31:0]       br_actual_target_raw_w = (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+wire [31:0]       br_actual_target_w = (stored_resolve_type == `BPU_TYPE_JALR) ?
+                                       {br_actual_target_raw_w[31:1], 1'b0} :
+                                       br_actual_target_raw_w;
+wire              br_actual_taken_w = stored_br_mark;
+wire              br_resolve_valid_w = stored_valid && stored_br;
+wire              br_mispredict_w = br_resolve_valid_w &&
+                                    ((stored_pred_taken != br_actual_taken_w) ||
+                                     (stored_pred_taken && br_actual_taken_w &&
+                                      (stored_pred_target != br_actual_target_w)));
+wire [31:0]       br_redirect_pc_w = br_actual_taken_w ? br_actual_target_w : (stored_pc + 32'd4);
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -141,24 +179,45 @@ always @(posedge clk or negedge rstn) begin
         br_tid_r            <= 1'b0;
         br_order_id_r       <= 16'd0;
         br_complete_r       <= 1'b0;
+        br_resolve_valid_r  <= 1'b0;
+        br_actual_taken_r   <= 1'b0;
+        br_actual_target_r  <= 32'd0;
+        br_resolve_type_r   <= 2'd0;
+        br_pred_taken_r     <= 1'b0;
+        br_pred_target_r    <= 32'd0;
+        br_pred_hit_r       <= 1'b0;
+        br_mispredict_r     <= 1'b0;
+        br_redirect_pc_r    <= 32'd0;
         stored_pc           <= 32'd0;
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
         stored_order_id     <= 16'd0;
+        stored_tid          <= 1'b0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
         stored_valid        <= 1'b0;
         stored_br_mark      <= 1'b0;
+        stored_pred_taken   <= 1'b0;
+        stored_pred_target  <= 32'd0;
+        stored_pred_hit     <= 1'b0;
+        stored_resolve_type <= 2'd0;
     end else begin
         // Store issue-time values (including br_mark computed from current inputs)
         stored_pc           <= in_pc;
         stored_imm          <= in_imm;
         stored_op_a         <= op_A_pre;   // for JALR (rs1 value)
         stored_order_id     <= in_order_id;
+        stored_tid          <= in_tid;
         stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
         stored_valid        <= in_valid;
         stored_br_mark      <= br_mark;
+        stored_pred_taken   <= in_pred_taken;
+        stored_pred_target  <= in_pred_target;
+        stored_pred_hit     <= in_pred_hit;
+        stored_resolve_type <= !in_br ? `BPU_TYPE_COND :
+                               (in_alu_op == 3'b001) ? `BPU_TYPE_COND :
+                               (in_br_addr_mode == `J_REG) ? `BPU_TYPE_JALR : `BPU_TYPE_JAL;
 
         `ifndef SYNTHESIS
         if (in_valid) begin
@@ -176,12 +235,21 @@ always @(posedge clk or negedge rstn) begin
         out_tid_r        <= in_tid;
 
         // Branch resolution uses stored values from previous cycle
-        br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
-        br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+        br_ctrl_r     <= br_resolve_valid_w && br_actual_taken_w;
+        br_addr_r     <= br_actual_target_w;
         br_pc_r       <= stored_pc;
-        br_tid_r      <= out_tid_r;  // use output register's tid
+        br_tid_r      <= stored_tid;
         br_order_id_r <= stored_order_id;
-        br_complete_r <= stored_valid && stored_br;
+        br_complete_r <= br_resolve_valid_w;
+        br_resolve_valid_r <= br_resolve_valid_w;
+        br_actual_taken_r  <= br_actual_taken_w;
+        br_actual_target_r <= br_actual_target_w;
+        br_resolve_type_r  <= stored_resolve_type;
+        br_pred_taken_r    <= stored_pred_taken;
+        br_pred_target_r   <= stored_pred_target;
+        br_pred_hit_r      <= stored_pred_hit;
+        br_mispredict_r    <= br_mispredict_w;
+        br_redirect_pc_r   <= br_redirect_pc_w;
     end
 end
 
@@ -205,5 +273,14 @@ assign br_pc       = br_pc_r;
 assign br_tid      = br_tid_r;
 assign br_order_id = br_order_id_r;
 assign br_complete = br_complete_r;
+assign br_resolve_valid = br_resolve_valid_r;
+assign br_actual_taken  = br_actual_taken_r;
+assign br_actual_target = br_actual_target_r;
+assign br_resolve_type  = br_resolve_type_r;
+assign br_pred_taken    = br_pred_taken_r;
+assign br_pred_target   = br_pred_target_r;
+assign br_pred_hit      = br_pred_hit_r;
+assign br_mispredict    = br_mispredict_r;
+assign br_redirect_pc   = br_redirect_pc_r;
 
 endmodule
