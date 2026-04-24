@@ -13,6 +13,7 @@ module inst_memory #(
     input  wire       clk,
     input  wire       rstn,
     input  wire       req_valid,
+    output wire       req_ready,
     input  wire [31:0] inst_addr,
     input  wire [0:0]  req_tid,           // Thread ID for request
     output wire [31:0] inst_o,
@@ -57,6 +58,7 @@ wire [31:0] icache_resp_data;
 wire [0:0]  icache_resp_tid;
 wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
+wire        icache_req_ready;
 wire [31:0] backing_store_data_raw;
 wire [31:0] backing_store_data;
 reg  [0:0]  legacy_resp_tid_r;
@@ -120,6 +122,7 @@ icache #(
 
     // Synchronous interface
     .cpu_req_valid    (req_valid         ),
+    .cpu_req_ready    (icache_req_ready  ),
     .cpu_req_addr     (inst_addr         ),
     .cpu_req_tid      (req_tid           ),
     .cpu_resp_data    (icache_resp_data  ),
@@ -201,5 +204,6 @@ assign inst_o      = use_external_refill ? icache_resp_data  : backing_store_dat
 assign resp_tid    = use_external_refill ? icache_resp_tid   : legacy_resp_tid_r;
 assign resp_epoch  = use_external_refill ? icache_resp_epoch : legacy_resp_epoch_r;
 assign resp_valid  = use_external_refill ? icache_resp_valid : legacy_resp_valid_r;
+assign req_ready   = use_external_refill ? icache_req_ready  : 1'b1;
 
 endmodule

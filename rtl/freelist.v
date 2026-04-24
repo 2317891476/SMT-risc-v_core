@@ -68,9 +68,12 @@ module freelist #(
     // ═══ Alloc read ports (combinational) ═══
     wire [FL_IDX_W-1:0] head0_idx = fl_head[tid][FL_IDX_W-1:0];
     wire [FL_IDX_W-1:0] head1_idx = head0_idx + 1'b1;  // wraps naturally
+    wire [1:0]          alloc_count = {1'b0, alloc0_req} + {1'b0, alloc1_req};
 
     assign alloc0_prd = fl_mem[tid][head0_idx];
-    assign alloc1_prd = fl_mem[tid][head1_idx];
+    // Compress allocation ports: if only dispatch slot 1 needs a physical
+    // register, it must consume the current head rather than head+1.
+    assign alloc1_prd = fl_mem[tid][alloc0_req ? head1_idx : head0_idx];
 
     assign can_alloc_1 = (count[tid] >= 1);
     assign can_alloc_2 = (count[tid] >= 2);
@@ -97,11 +100,8 @@ module freelist #(
             end
             else begin
                 // ── Allocate: advance head ──
-                if (alloc0_req && alloc1_req) begin
-                    fl_head[tid] <= fl_head[tid] + 2;
-                end
-                else if (alloc0_req) begin
-                    fl_head[tid] <= fl_head[tid] + 1;
+                if (alloc_count != 2'd0) begin
+                    fl_head[tid] <= fl_head[tid] + alloc_count;
                 end
 
                 // ── Free at commit: push to tail ──

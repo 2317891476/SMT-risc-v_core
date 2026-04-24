@@ -121,7 +121,8 @@ module rob #(
     output wire [PHYS_REG_W-1:0]       recover_prd_old,
     output wire [PHYS_REG_W-1:0]       recover_prd_new,  // To push back to freelist
     output wire                        recover_regs_write,
-    output wire [0:0]                  recover_tid
+    output wire [0:0]                  recover_tid,
+    output wire                        debug_commit_suppressed
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -174,6 +175,7 @@ reg  [4:0]              recover_rd_r;
 reg  [PHYS_REG_W-1:0]  recover_prd_old_r;
 reg  [PHYS_REG_W-1:0]  recover_prd_new_r;
 reg                     recover_regs_write_r;
+reg                     debug_commit_suppressed_r;
 
 // ─── Commit Pipeline Stage 0 Registers ───────────────────────────
 // S0 reads the head entry and latches the commit decision + payload.
@@ -221,6 +223,18 @@ wire s1_advance_t0 = s0_commit_valid[0] || s0_commit_skip[0];
 wire s1_advance_t1 = s0_commit_valid[1] || s0_commit_skip[1];
 wire [ROB_IDX_W-1:0] eff_head_t0 = s1_advance_t0 ? (s0_head_idx[0] + 1) : rob_head[0];
 wire [ROB_IDX_W-1:0] eff_head_t1 = s1_advance_t1 ? (s0_head_idx[1] + 1) : rob_head[1];
+wire s0_flush_blocks_head_t0 =
+    flush && (flush_tid == 1'b0) && rob_valid[0][eff_head_t0] &&
+    (!flush_order_valid || (rob_order_id[0][eff_head_t0] > flush_order_id));
+wire s0_flush_blocks_head_t1 =
+    flush && (flush_tid == 1'b1) && rob_valid[1][eff_head_t1] &&
+    (!flush_order_valid || (rob_order_id[1][eff_head_t1] > flush_order_id));
+wire s1_flush_suppresses_t0 =
+    flush && (flush_tid == 1'b0) && s0_commit_valid[0] &&
+    (!flush_order_valid || (s0_order_id[0] > flush_order_id));
+wire s1_flush_suppresses_t1 =
+    flush && (flush_tid == 1'b1) && s0_commit_valid[1] &&
+    (!flush_order_valid || (s0_order_id[1] > flush_order_id));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Commit Output Wiring
@@ -256,6 +270,7 @@ assign recover_prd_old     = recover_prd_old_r;
 assign recover_prd_new     = recover_prd_new_r;
 assign recover_regs_write  = recover_regs_write_r;
 assign recover_tid         = recover_tid_r;
+assign debug_commit_suppressed = debug_commit_suppressed_r;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Sequential Logic
@@ -302,6 +317,7 @@ always @(posedge clk or negedge rstn) begin
         recover_prd_old_r  <= {PHYS_REG_W{1'b0}};
         recover_prd_new_r  <= {PHYS_REG_W{1'b0}};
         recover_regs_write_r <= 1'b0;
+        debug_commit_suppressed_r <= 1'b0;
 
         for (t = 0; t < NUM_THREAD; t = t + 1) begin
             s0_commit_valid[t] <= 1'b0;
@@ -347,6 +363,7 @@ always @(posedge clk or negedge rstn) begin
         commit0_is_mret_r <= 1'b0;
         commit1_is_mret_r <= 1'b0;
         recover_en_r    <= 1'b0;
+        debug_commit_suppressed_r <= 1'b0;
         s0_commit_valid[0] <= 1'b0;
         s0_commit_valid[1] <= 1'b0;
         s0_commit_skip[0]  <= 1'b0;
@@ -469,7 +486,8 @@ always @(posedge clk or negedge rstn) begin
 
         // Thread 0 — S0
         if (!recovering_r && rob_count[0] != {(ROB_IDX_W+1){1'b0}}
-            && !(s1_advance_t0 && rob_count[0] == {{ROB_IDX_W{1'b0}}, 1'b1})) begin
+            && !(s1_advance_t0 && rob_count[0] == {{ROB_IDX_W{1'b0}}, 1'b1})
+            && !s0_flush_blocks_head_t0) begin
             s0_head_idx[0] <= eff_head_t0;
             `ifdef VERBOSE_SIM_LOGS
             $display("[ROB S0] t0 eff_head=%0d valid=%0b complete=%0b flushed=%0b count=%0d s1adv=%0b @%0t",
@@ -496,7 +514,8 @@ always @(posedge clk or negedge rstn) begin
 
         // Thread 1 — S0
         if (!recovering_r && rob_count[1] != {(ROB_IDX_W+1){1'b0}}
-            && !(s1_advance_t1 && rob_count[1] == {{ROB_IDX_W{1'b0}}, 1'b1})) begin
+            && !(s1_advance_t1 && rob_count[1] == {{ROB_IDX_W{1'b0}}, 1'b1})
+            && !s0_flush_blocks_head_t1) begin
             s0_head_idx[1] <= eff_head_t1;
             if (!rob_valid[1][eff_head_t1]) begin
                 s0_commit_skip[1] <= 1'b1;
@@ -530,6 +549,9 @@ always @(posedge clk or negedge rstn) begin
 
             // ── S1 Apply ──
             if (s0_commit_valid[0]) begin
+                if (s1_flush_suppresses_t0) begin
+                    debug_commit_suppressed_r <= 1'b1;
+                end else begin
                 `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB S1] t0 COMMIT head_idx=%0d rd=%0d tag=%0d flushed=%0b data=%h @%0t",
                          s0_head_idx[0], s0_rd[0], s0_tag[0],
@@ -552,6 +574,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_result[0][s0_head_idx[0]]     <= 32'd0;
                 next_head = s0_head_idx[0] + 1;
                 next_count = next_count - 1;
+                end
             end else if (s0_commit_skip[0]) begin
                 `ifdef VERBOSE_SIM_LOGS
                 $display("[ROB S1] t0 SKIP head_idx=%0d valid=%0b flushed=%0b @%0t",
@@ -629,6 +652,9 @@ always @(posedge clk or negedge rstn) begin
 
             // ── S1 Apply ──
             if (s0_commit_valid[1]) begin
+                if (s1_flush_suppresses_t1) begin
+                    debug_commit_suppressed_r <= 1'b1;
+                end else begin
                 if (!rob_flushed[1][s0_head_idx[1]]) begin
                     commit1_valid_r      <= 1'b1;
                     commit1_rd_r         <= s0_rd[1];
@@ -646,6 +672,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_result[1][s0_head_idx[1]]     <= 32'd0;
                 next_head = s0_head_idx[1] + 1;
                 next_count = next_count - 1;
+                end
             end else if (s0_commit_skip[1]) begin
                 rob_valid[1][s0_head_idx[1]]      <= 1'b0;
                 rob_has_result[1][s0_head_idx[1]] <= 1'b0;

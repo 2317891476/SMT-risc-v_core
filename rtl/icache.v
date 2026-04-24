@@ -20,6 +20,7 @@ module icache #(
 
     // Synchronous fetch request/response
     input  wire                     cpu_req_valid,
+    output wire                     cpu_req_ready,
     input  wire [ADDR_WIDTH-1:0]    cpu_req_addr,
     input  wire [TID_WIDTH-1:0]     cpu_req_tid,
     output reg  [31:0]              cpu_resp_data,
@@ -114,8 +115,10 @@ wire [($clog2(WORDS_PER_LINE)-1):0] req_word_offset = req_offset_r[OFFSET_W-1:2]
 wire [($clog2(WORDS_PER_LINE)-1):0] miss_word_offset = miss_offset_r[OFFSET_W-1:2];
 wire high_latency_miss = req_addr_r[31];
 wire [3:0] miss_current_epoch = miss_tid_r == {TID_WIDTH{1'b0}} ? current_epoch_t0 : current_epoch_t1;
-wire replay_deferred_req = !flush && !cpu_req_valid && deferred_req_valid_r && (state == S_IDLE);
-wire capture_cpu_req = cpu_req_valid || replay_deferred_req;
+wire starting_high_miss = (state == S_IDLE) && req_valid_r && !hit && high_latency_miss;
+wire icache_busy_for_new_req = (state != S_IDLE) || starting_high_miss || deferred_req_valid_r;
+wire replay_deferred_req = !flush && !cpu_req_valid && deferred_req_valid_r && (state == S_IDLE) && !starting_high_miss;
+wire capture_cpu_req = (cpu_req_valid && !icache_busy_for_new_req) || replay_deferred_req;
 wire [ADDR_WIDTH-1:0] cpu_req_addr_mux = replay_deferred_req ? deferred_req_addr_r : cpu_req_addr;
 wire [INDEX_W-1:0] cpu_req_index_mux = replay_deferred_req ? deferred_req_index_r : req_index;
 wire [TAG_W-1:0] cpu_req_tag_mux = replay_deferred_req ? deferred_req_tag_r : req_tag;
@@ -124,6 +127,7 @@ wire [TID_WIDTH-1:0] cpu_req_tid_mux = replay_deferred_req ? deferred_req_tid_r 
 wire [3:0] cpu_req_epoch_mux = replay_deferred_req ? deferred_req_epoch_r : current_epoch;
 
 assign mem_resp_ready = 1'b1;
+assign cpu_req_ready = !flush && !icache_busy_for_new_req;
 assign debug_high_miss_count = debug_high_miss_count_r;
 assign debug_mem_req_count   = debug_mem_req_count_r;
 assign debug_mem_resp_count  = debug_mem_resp_count_r;
@@ -203,7 +207,7 @@ always @(posedge clk or negedge rstn) begin
 
         if (flush) begin
             deferred_req_valid_r <= 1'b0;
-        end else if (cpu_req_valid && (state != S_IDLE)) begin
+        end else if (cpu_req_valid && icache_busy_for_new_req) begin
             // stage_if allows only one outstanding fetch; keep a single deferred
             // request so a new high-address fetch arriving during refill does
             // not get dropped before the FSM returns to S_IDLE.

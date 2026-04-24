@@ -12,6 +12,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -48,6 +49,8 @@ struct Summary {
     std::string exit_reason = "timeout";
     bool entry_reached = false;
     bool benchmark_start_seen = false;
+    bool benchmark_try_seen = false;
+    bool benchmark_result_seen = false;
     bool benchmark_done_seen = false;
     bool loader_semantic_pass = false;
     bool trap_seen = false;
@@ -67,6 +70,40 @@ struct Summary {
     uint32_t ic_mem_resp_count = 0;
     uint32_t ic_cpu_resp_count = 0;
     uint32_t instr_retired_count = 0;
+    uint64_t bench_profile_cycles = 0;
+    uint64_t bench_retire0_cycles = 0;
+    uint64_t bench_retire1_cycles = 0;
+    uint64_t bench_retire2_cycles = 0;
+    uint64_t bench_branch_pending_cycles = 0;
+    uint64_t bench_no_retire_branch_pending_cycles = 0;
+    uint64_t bench_frontend_empty_cycles = 0;
+    uint64_t bench_no_retire_frontend_empty_cycles = 0;
+    uint64_t bench_decode_valid_cycles = 0;
+    uint64_t bench_dispatch_stall_cycles = 0;
+    uint64_t bench_sb_stall_cycles = 0;
+    uint64_t bench_rob_stall_cycles = 0;
+    uint64_t bench_freelist_stall_cycles = 0;
+    uint64_t bench_system_stall_cycles = 0;
+    uint64_t bench_disp1_blocked_cycles = 0;
+    uint64_t bench_dispatch_accept_cycles = 0;
+    uint64_t bench_dispatch0_accept_count = 0;
+    uint64_t bench_dispatch1_accept_count = 0;
+    uint64_t bench_issue0_cycles = 0;
+    uint64_t bench_issue1_cycles = 0;
+    uint64_t bench_no_retire_rob_empty_cycles = 0;
+    uint64_t bench_no_retire_rob_head_wait_cycles = 0;
+    uint64_t bench_no_retire_rob_recovering_cycles = 0;
+    uint64_t bench_no_retire_lsu_busy_cycles = 0;
+    uint64_t bench_no_retire_wb_active_cycles = 0;
+    uint64_t bench_flush_cycles = 0;
+    uint64_t bench_no_retire_flush_cycles = 0;
+    uint64_t bench_dcache_miss_cycles = 0;
+    uint64_t bench_branch_redirect_cycles = 0;
+    uint64_t bench_spec_dispatch_count = 0;
+    uint64_t bench_branch_gated_mem_issue_cycles = 0;
+    uint64_t bench_flush_killed_speculative_cycles = 0;
+    uint64_t bench_commit_suppressed_count = 0;
+    std::string bench_branch_redirect_top_pcs;
     uint32_t rob_commit0_seen_count = 0;
     uint32_t rob_commit1_seen_count = 0;
     uint32_t last_rob_commit0_order_id = 0;
@@ -368,6 +405,8 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"ExitReason\": \"" << json_escape(summary.exit_reason) << "\",\n";
     ofs << "  \"EntryReached\": " << (summary.entry_reached ? "true" : "false") << ",\n";
     ofs << "  \"BenchmarkStartSeen\": " << (summary.benchmark_start_seen ? "true" : "false") << ",\n";
+    ofs << "  \"BenchmarkTrySeen\": " << (summary.benchmark_try_seen ? "true" : "false") << ",\n";
+    ofs << "  \"BenchmarkResultSeen\": " << (summary.benchmark_result_seen ? "true" : "false") << ",\n";
     ofs << "  \"BenchmarkDoneSeen\": " << (summary.benchmark_done_seen ? "true" : "false") << ",\n";
     ofs << "  \"LoaderSemanticPass\": " << (summary.loader_semantic_pass ? "true" : "false") << ",\n";
     ofs << "  \"TrapSeen\": " << (summary.trap_seen ? "true" : "false") << ",\n";
@@ -387,6 +426,40 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"IcMemRespCount\": " << summary.ic_mem_resp_count << ",\n";
     ofs << "  \"IcCpuRespCount\": " << summary.ic_cpu_resp_count << ",\n";
     ofs << "  \"InstrRetiredCount\": " << summary.instr_retired_count << ",\n";
+    ofs << "  \"BenchProfileCycles\": " << summary.bench_profile_cycles << ",\n";
+    ofs << "  \"BenchRetire0Cycles\": " << summary.bench_retire0_cycles << ",\n";
+    ofs << "  \"BenchRetire1Cycles\": " << summary.bench_retire1_cycles << ",\n";
+    ofs << "  \"BenchRetire2Cycles\": " << summary.bench_retire2_cycles << ",\n";
+    ofs << "  \"BenchBranchPendingCycles\": " << summary.bench_branch_pending_cycles << ",\n";
+    ofs << "  \"BenchNoRetireBranchPendingCycles\": " << summary.bench_no_retire_branch_pending_cycles << ",\n";
+    ofs << "  \"BenchFrontendEmptyCycles\": " << summary.bench_frontend_empty_cycles << ",\n";
+    ofs << "  \"BenchNoRetireFrontendEmptyCycles\": " << summary.bench_no_retire_frontend_empty_cycles << ",\n";
+    ofs << "  \"BenchDecodeValidCycles\": " << summary.bench_decode_valid_cycles << ",\n";
+    ofs << "  \"BenchDispatchStallCycles\": " << summary.bench_dispatch_stall_cycles << ",\n";
+    ofs << "  \"BenchSbStallCycles\": " << summary.bench_sb_stall_cycles << ",\n";
+    ofs << "  \"BenchRobStallCycles\": " << summary.bench_rob_stall_cycles << ",\n";
+    ofs << "  \"BenchFreelistStallCycles\": " << summary.bench_freelist_stall_cycles << ",\n";
+    ofs << "  \"BenchSystemStallCycles\": " << summary.bench_system_stall_cycles << ",\n";
+    ofs << "  \"BenchDisp1BlockedCycles\": " << summary.bench_disp1_blocked_cycles << ",\n";
+    ofs << "  \"BenchDispatchAcceptCycles\": " << summary.bench_dispatch_accept_cycles << ",\n";
+    ofs << "  \"BenchDispatch0AcceptCount\": " << summary.bench_dispatch0_accept_count << ",\n";
+    ofs << "  \"BenchDispatch1AcceptCount\": " << summary.bench_dispatch1_accept_count << ",\n";
+    ofs << "  \"BenchIssue0Cycles\": " << summary.bench_issue0_cycles << ",\n";
+    ofs << "  \"BenchIssue1Cycles\": " << summary.bench_issue1_cycles << ",\n";
+    ofs << "  \"BenchNoRetireRobEmptyCycles\": " << summary.bench_no_retire_rob_empty_cycles << ",\n";
+    ofs << "  \"BenchNoRetireRobHeadWaitCycles\": " << summary.bench_no_retire_rob_head_wait_cycles << ",\n";
+    ofs << "  \"BenchNoRetireRobRecoveringCycles\": " << summary.bench_no_retire_rob_recovering_cycles << ",\n";
+    ofs << "  \"BenchNoRetireLsuBusyCycles\": " << summary.bench_no_retire_lsu_busy_cycles << ",\n";
+    ofs << "  \"BenchNoRetireWbActiveCycles\": " << summary.bench_no_retire_wb_active_cycles << ",\n";
+    ofs << "  \"BenchFlushCycles\": " << summary.bench_flush_cycles << ",\n";
+    ofs << "  \"BenchNoRetireFlushCycles\": " << summary.bench_no_retire_flush_cycles << ",\n";
+    ofs << "  \"BenchDcacheMissCycles\": " << summary.bench_dcache_miss_cycles << ",\n";
+    ofs << "  \"BenchBranchRedirectCycles\": " << summary.bench_branch_redirect_cycles << ",\n";
+    ofs << "  \"BenchSpecDispatchCount\": " << summary.bench_spec_dispatch_count << ",\n";
+    ofs << "  \"BenchBranchGatedMemIssueCycles\": " << summary.bench_branch_gated_mem_issue_cycles << ",\n";
+    ofs << "  \"BenchFlushKilledSpeculativeCycles\": " << summary.bench_flush_killed_speculative_cycles << ",\n";
+    ofs << "  \"BenchCommitSuppressedCount\": " << summary.bench_commit_suppressed_count << ",\n";
+    ofs << "  \"BenchBranchRedirectTopPcs\": \"" << json_escape(summary.bench_branch_redirect_top_pcs) << "\",\n";
     ofs << "  \"RobCommit0SeenCount\": " << summary.rob_commit0_seen_count << ",\n";
     ofs << "  \"RobCommit1SeenCount\": " << summary.rob_commit1_seen_count << ",\n";
     ofs << "  \"LastRobCommit0OrderId\": " << summary.last_rob_commit0_order_id << ",\n";
@@ -1023,6 +1096,8 @@ int main(int argc, char** argv) {
     uint64_t same_pc_counter = 0;
     uint64_t small_window_counter = 0;
     bool prev_uart_tx_byte_valid = false;
+    bool prev_core_clk = false;
+    std::map<uint32_t, uint64_t> bench_redirect_pc_counts;
 
     top->sys_rstn = 0;
     top->fast_uart_rx_byte_valid = 0;
@@ -1069,6 +1144,10 @@ int main(int argc, char** argv) {
             , trace.get(), trace_active
 #endif
         );
+
+        const bool core_clk_now = top->debug_core_clk != 0;
+        const bool core_clk_rise = core_clk_now && !prev_core_clk;
+        prev_core_clk = core_clk_now;
 
         const bool uart_byte_fire = (top->debug_uart_tx_byte_valid != 0) && !prev_uart_tx_byte_valid;
         prev_uart_tx_byte_valid = top->debug_uart_tx_byte_valid != 0;
@@ -1398,12 +1477,151 @@ int main(int argc, char** argv) {
         if (!summary.benchmark_start_seen && uart_ascii.find("DHRYSTONE START") != std::string::npos) {
             summary.benchmark_start_seen = true;
         }
+        if (!summary.benchmark_try_seen &&
+            uart_ascii.find("Trying 10 runs through Dhrystone:") != std::string::npos) {
+            summary.benchmark_try_seen = true;
+        }
+        if (!summary.benchmark_result_seen && uart_ascii.find("BENCH CYCLES") != std::string::npos) {
+            summary.benchmark_result_seen = true;
+        }
         if (!summary.benchmark_done_seen && uart_ascii.find("DHRYSTONE DONE") != std::string::npos) {
             summary.benchmark_done_seen = true;
         }
         if (!summary.trap_seen && top->debug_trap_seen) {
             summary.trap_seen = true;
             summary.trap_cause = top->debug_trap_cause;
+        }
+
+        const bool benchmark_profile_active =
+            summary.benchmark_try_seen &&
+            !summary.benchmark_result_seen &&
+            !summary.benchmark_done_seen;
+        if (benchmark_profile_active && core_clk_rise) {
+            const uint32_t retired_this_cycle = top->debug_instr_retired_count & 0x3u;
+            const bool no_retire = retired_this_cycle == 0;
+            const bool branch_pending = top->debug_branch_pending_any != 0;
+            const bool frontend_empty =
+                top->debug_if_valid == 0 &&
+                top->debug_fb_pop0_valid == 0 &&
+                top->debug_fb_pop1_valid == 0 &&
+                top->debug_dec0_valid == 0 &&
+                top->debug_dec1_valid == 0;
+            const bool decode_valid = (top->debug_dec0_valid != 0) || (top->debug_dec1_valid != 0);
+            const bool dispatch_accept = (top->debug_disp0_accepted != 0) || (top->debug_disp1_accepted != 0);
+            const bool dispatch_stall = top->debug_stall != 0;
+            const bool rob_empty = (top->debug_rob_count_t0 == 0) && (top->debug_rob_count_t1 == 0);
+            const bool rob_head_wait =
+                ((top->debug_rob_count_t0 != 0) && (top->debug_rob_head_valid_t0 != 0) &&
+                 (top->debug_rob_head_complete_t0 == 0)) ||
+                ((top->debug_rob_count_t1 != 0) && (top->debug_rob_head_valid_t1 != 0) &&
+                 (top->debug_rob_head_complete_t1 == 0));
+            const bool lsu_busy =
+                (top->debug_mem_fu_busy != 0) ||
+                (top->debug_lsu_pending_valid != 0) ||
+                (top->debug_lsu_req_valid != 0) ||
+                (top->debug_lsu_state != 0) ||
+                (top->debug_store_buffer_empty == 0);
+            const bool wb_active = (top->debug_wb0_valid != 0) || (top->debug_wb1_valid != 0);
+
+            ++summary.bench_profile_cycles;
+            if (retired_this_cycle == 0) {
+                ++summary.bench_retire0_cycles;
+            } else if (retired_this_cycle == 1) {
+                ++summary.bench_retire1_cycles;
+            } else {
+                ++summary.bench_retire2_cycles;
+            }
+            if (branch_pending) {
+                ++summary.bench_branch_pending_cycles;
+            }
+            if (no_retire && branch_pending) {
+                ++summary.bench_no_retire_branch_pending_cycles;
+            }
+            if (frontend_empty) {
+                ++summary.bench_frontend_empty_cycles;
+            }
+            if (no_retire && frontend_empty) {
+                ++summary.bench_no_retire_frontend_empty_cycles;
+            }
+            if (decode_valid) {
+                ++summary.bench_decode_valid_cycles;
+            }
+            if (dispatch_stall) {
+                ++summary.bench_dispatch_stall_cycles;
+            }
+            if (top->debug_sb_disp_stall) {
+                ++summary.bench_sb_stall_cycles;
+            }
+            if (top->debug_rob_disp_stall) {
+                ++summary.bench_rob_stall_cycles;
+            }
+            if (top->debug_fl_disp_stall) {
+                ++summary.bench_freelist_stall_cycles;
+            }
+            if (top->debug_sys_disp_stall) {
+                ++summary.bench_system_stall_cycles;
+            }
+            if (top->debug_sb_disp1_blocked) {
+                ++summary.bench_disp1_blocked_cycles;
+            }
+            if (dispatch_accept) {
+                ++summary.bench_dispatch_accept_cycles;
+            }
+            if (top->debug_disp0_accepted) {
+                ++summary.bench_dispatch0_accept_count;
+            }
+            if (top->debug_disp1_accepted) {
+                ++summary.bench_dispatch1_accept_count;
+            }
+            if (top->debug_iss0_valid) {
+                ++summary.bench_issue0_cycles;
+            }
+            if (top->debug_p1_winner_valid) {
+                ++summary.bench_issue1_cycles;
+            }
+            if (no_retire && rob_empty) {
+                ++summary.bench_no_retire_rob_empty_cycles;
+            }
+            if (no_retire && rob_head_wait) {
+                ++summary.bench_no_retire_rob_head_wait_cycles;
+            }
+            if (no_retire && top->debug_rob_recovering) {
+                ++summary.bench_no_retire_rob_recovering_cycles;
+            }
+            if (no_retire && lsu_busy) {
+                ++summary.bench_no_retire_lsu_busy_cycles;
+            }
+            if (no_retire && wb_active) {
+                ++summary.bench_no_retire_wb_active_cycles;
+            }
+            if (top->debug_flush) {
+                ++summary.bench_flush_cycles;
+            }
+            if (no_retire && top->debug_flush) {
+                ++summary.bench_no_retire_flush_cycles;
+            }
+            if (top->debug_dcache_miss_event) {
+                ++summary.bench_dcache_miss_cycles;
+            }
+            if (top->debug_br_redirect_valid) {
+                ++summary.bench_branch_redirect_cycles;
+                ++bench_redirect_pc_counts[static_cast<uint32_t>(top->debug_br_redirect_pc)];
+            }
+            if (top->debug_spec_dispatch0) {
+                ++summary.bench_spec_dispatch_count;
+            }
+            if (top->debug_spec_dispatch1) {
+                ++summary.bench_spec_dispatch_count;
+            }
+            if (top->debug_branch_gated_mem_issue) {
+                ++summary.bench_branch_gated_mem_issue_cycles;
+            }
+            if (top->debug_flush_killed_speculative) {
+                ++summary.bench_flush_killed_speculative_cycles;
+            }
+            if (top->debug_commit_suppressed) {
+                ++summary.bench_commit_suppressed_count;
+            }
         }
 
         const bool progress_armed = summary.entry_reached && summary.instret > 1024ULL;
@@ -1555,6 +1773,27 @@ int main(int argc, char** argv) {
 
     if (summary.cycles != 0) {
         summary.ipcx1000 = static_cast<uint32_t>((summary.instret * 1000ULL) / summary.cycles);
+    }
+    if (!bench_redirect_pc_counts.empty()) {
+        std::vector<std::pair<uint32_t, uint64_t>> redirect_pcs(
+            bench_redirect_pc_counts.begin(), bench_redirect_pc_counts.end());
+        std::sort(redirect_pcs.begin(), redirect_pcs.end(),
+                  [](const auto& a, const auto& b) {
+                      if (a.second != b.second) {
+                          return a.second > b.second;
+                      }
+                      return a.first < b.first;
+                  });
+        std::ostringstream oss;
+        const size_t limit = std::min<size_t>(redirect_pcs.size(), 12);
+        for (size_t i = 0; i < limit; ++i) {
+            if (i != 0) {
+                oss << ",";
+            }
+            oss << "0x" << std::hex << std::setw(8) << std::setfill('0')
+                << redirect_pcs[i].first << std::dec << ":" << redirect_pcs[i].second;
+        }
+        summary.bench_branch_redirect_top_pcs = oss.str();
     }
     if (summary.exit_reason == "timeout" && summary.benchmark_done_seen) {
         summary.exit_reason = "done";

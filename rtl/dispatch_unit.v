@@ -55,6 +55,8 @@ module dispatch_unit #(
     input  wire [2:0]  disp0_fu,
     input  wire [0:0]  disp0_tid,
     input  wire        disp0_is_mret,
+    input  wire        disp0_is_csr,
+    input  wire        disp0_is_rocc,
 
     // ─── Dispatch Port 1 ────────────────────────────────────────
     input  wire        disp1_valid,
@@ -79,6 +81,8 @@ module dispatch_unit #(
     input  wire [2:0]  disp1_fu,
     input  wire [0:0]  disp1_tid,
     input  wire        disp1_is_mret,
+    input  wire        disp1_is_csr,
+    input  wire        disp1_is_rocc,
 
     // ─── Stall ───────────────────────────────────────────────────
     output wire        disp_stall,
@@ -229,6 +233,10 @@ module dispatch_unit #(
     output wire [15:0] debug_rs_qj_flat,
     output wire [15:0] debug_rs_qk_flat,
     output wire [31:0] debug_rs_seq_lo_flat,
+    output wire        debug_spec_dispatch0,
+    output wire        debug_spec_dispatch1,
+    output wire        debug_branch_gated_mem_issue,
+    output wire        debug_flush_killed_speculative,
 
     // ─── Writeback Ports ────────────────────────────────────────
     input  wire        wb0_valid,
@@ -312,6 +320,7 @@ reg [`METADATA_ORDER_ID_W-1:0] reg_result_order [0:NUM_THREAD-1][0:31];
 reg  [0:RS_DEPTH]  tag_live_valid_v;
 reg [`METADATA_ORDER_ID_W-1:0] tag_live_seq [0:RS_DEPTH];
 reg [`METADATA_ORDER_ID_W-1:0] tag_ready_seq [0:RS_DEPTH];
+reg  [0:0] tag_live_tid [0:RS_DEPTH];
 
 // ═════════════════════════════════════════════════════════════════
 // 3. Dependency Lookup (combinational)
@@ -503,6 +512,9 @@ reg br_found_t0_r, br_found_t1_r; // registered version
 // Branch found: any INT IQ entry is valid, not issued, is branch
 // (We cannot easily scan IQ internals, so we track at dispatch)
 reg br_pending_cnt_t0, br_pending_cnt_t1;
+reg [`METADATA_ORDER_ID_W-1:0] pending_branch_order_id_t0;
+reg [`METADATA_ORDER_ID_W-1:0] pending_branch_order_id_t1;
+reg spec_mem_after_branch_t0, spec_mem_after_branch_t1;
 
 wire pending_branch_t0 = branch_in_flight_t0 || br_pending_cnt_t0;
 wire pending_branch_t1 = branch_in_flight_t1 || br_pending_cnt_t1;
@@ -521,6 +533,10 @@ always @(posedge clk or negedge rstn) begin
         branch_in_flight_t1 <= 1'b0;
         br_pending_cnt_t0   <= 1'b0;
         br_pending_cnt_t1   <= 1'b0;
+        pending_branch_order_id_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+        pending_branch_order_id_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
+        spec_mem_after_branch_t0 <= 1'b0;
+        spec_mem_after_branch_t1 <= 1'b0;
     end else begin
         // Branch in flight cleared by br_complete or flush
         if (br_complete || (flush && !flush_tid))
@@ -538,8 +554,15 @@ always @(posedge clk or negedge rstn) begin
         // Increment on dispatch, decrement on INT issue of branch
         // Simplified: just track any branch in IQs
         if (flush) begin
-            if (!flush_tid) br_pending_cnt_t0 <= 1'b0;
-            else            br_pending_cnt_t1 <= 1'b0;
+            if (!flush_tid) begin
+                br_pending_cnt_t0 <= 1'b0;
+                pending_branch_order_id_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+                spec_mem_after_branch_t0 <= 1'b0;
+            end else begin
+                br_pending_cnt_t1 <= 1'b0;
+                pending_branch_order_id_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
+                spec_mem_after_branch_t1 <= 1'b0;
+            end
         end
 
         // Update pending count based on dispatch/issue of branches
@@ -550,12 +573,22 @@ always @(posedge clk or negedge rstn) begin
             dec_t0 = 1'b0; dec_t1 = 1'b0;
 
             if (disp0_valid && disp0_br && !disp_stall) begin
-                if (disp0_tid == 1'b0) inc_t0 = 1'b1;
-                else                   inc_t1 = 1'b1;
+                if (disp0_tid == 1'b0) begin
+                    inc_t0 = 1'b1;
+                    pending_branch_order_id_t0 <= disp0_order_id;
+                end else begin
+                    inc_t1 = 1'b1;
+                    pending_branch_order_id_t1 <= disp0_order_id;
+                end
             end
             if (d1_go && disp1_br) begin
-                if (disp1_tid == 1'b0) inc_t0 = 1'b1;
-                else                   inc_t1 = 1'b1;
+                if (disp1_tid == 1'b0) begin
+                    inc_t0 = 1'b1;
+                    pending_branch_order_id_t0 <= disp1_order_id;
+                end else begin
+                    inc_t1 = 1'b1;
+                    pending_branch_order_id_t1 <= disp1_order_id;
+                end
             end
             if (int_iss_valid && int_iss_br) begin
                 if (int_iss_tid == 1'b0) dec_t0 = 1'b1;
@@ -563,12 +596,31 @@ always @(posedge clk or negedge rstn) begin
             end
 
             if (!flush || flush_tid) begin
-                if (inc_t0 && !dec_t0) br_pending_cnt_t0 <= 1'b1;
-                else if (dec_t0 && !inc_t0) br_pending_cnt_t0 <= 1'b0;
+                if (inc_t0 && !dec_t0) begin
+                    br_pending_cnt_t0 <= 1'b1;
+                end
+                else if (dec_t0 && !inc_t0) begin
+                    br_pending_cnt_t0 <= 1'b0;
+                    spec_mem_after_branch_t0 <= 1'b0;
+                end
             end
             if (!flush || !flush_tid) begin
-                if (inc_t1 && !dec_t1) br_pending_cnt_t1 <= 1'b1;
-                else if (dec_t1 && !inc_t1) br_pending_cnt_t1 <= 1'b0;
+                if (inc_t1 && !dec_t1) begin
+                    br_pending_cnt_t1 <= 1'b1;
+                end
+                else if (dec_t1 && !inc_t1) begin
+                    br_pending_cnt_t1 <= 1'b0;
+                    spec_mem_after_branch_t1 <= 1'b0;
+                end
+            end
+
+            if (d0_go && d0_is_mem && d0_after_branch) begin
+                if (disp0_tid == 1'b0) spec_mem_after_branch_t0 <= 1'b1;
+                else                   spec_mem_after_branch_t1 <= 1'b1;
+            end
+            if (d1_go && d1_is_mem && d1_after_branch) begin
+                if (disp1_tid == 1'b0) spec_mem_after_branch_t0 <= 1'b1;
+                else                   spec_mem_after_branch_t1 <= 1'b1;
             end
         end
     end
@@ -585,9 +637,26 @@ wire iq_mem_full, iq_mem_almost_full;
 wire iq_mul_full, iq_mul_almost_full;
 wire iq_div_full, iq_div_almost_full;
 
-// d0: branch stall for d0's thread
-wire d0_br_stall = (disp0_tid == 1'b0 && pending_branch_t0) ||
-                   (disp0_tid == 1'b1 && pending_branch_t1);
+// Control/system operations are blocked behind the one unresolved branch.
+// Plain ALU/MUL/DIV can allocate safely.  MEM may allocate only once per
+// unresolved branch window; issue remains order-gated below so it cannot reach
+// the LSU until the older branch has issued/resolved.
+wire d0_pending_branch = (disp0_tid == 1'b0) ? pending_branch_t0 : pending_branch_t1;
+wire d1_pending_branch = (disp1_tid == 1'b0) ? pending_branch_t0 : pending_branch_t1;
+wire d0_after_branch = d0_pending_branch;
+wire d1_after_branch = d1_pending_branch ||
+                       (d0_go && disp0_br && (disp0_tid == disp1_tid));
+wire d0_control_barrier = disp0_br || disp0_is_mret || disp0_is_csr || disp0_is_rocc;
+wire d1_control_barrier = disp1_br || disp1_is_mret || disp1_is_csr || disp1_is_rocc;
+wire d0_spec_mem_full = ((disp0_tid == 1'b0) ? spec_mem_after_branch_t0 :
+                                              spec_mem_after_branch_t1);
+wire d1_spec_mem_full = ((disp1_tid == 1'b0) ? spec_mem_after_branch_t0 :
+                                              spec_mem_after_branch_t1) ||
+                        (d0_go && d0_is_mem && d0_after_branch &&
+                         (disp0_tid == disp1_tid));
+wire d0_branch_barrier = d0_control_barrier || (d0_is_mem && d0_spec_mem_full);
+wire d1_branch_barrier = d1_control_barrier || (d1_is_mem && d1_spec_mem_full);
+wire d0_br_stall = d0_after_branch && d0_branch_barrier;
 
 // d0: target IQ has capacity?
 wire d0_cap_ok = (!d0_is_int || !iq_int_full) &&
@@ -603,9 +672,10 @@ assign disp_stall = disp0_valid && (!d0_cap_ok || d0_br_stall || !d0_tag_ok);
 
 wire d0_go = disp0_valid && !disp_stall;
 
-// d1: branch stall for d1's thread
-wire d1_br_stall = (disp1_tid == 1'b0 && pending_branch_t0) ||
-                   (disp1_tid == 1'b1 && pending_branch_t1);
+// d1: branch stall for d1's thread.  A branch in disp0 also blocks disp1 in
+// the same decode pair, otherwise a fall-through instruction can allocate a
+// younger rename/ROB entry before the branch redirect is known.
+wire d1_br_stall = d1_after_branch && d1_branch_barrier;
 
 // d1: target IQ has capacity (after d0 may have taken a slot)?
 wire d1_int_ok = !d1_is_int || ((d0_is_int && d0_go) ? !iq_int_almost_full : !iq_int_full);
@@ -676,6 +746,14 @@ wire                            mem_oldest_store_valid_t0;
 wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t0;
 wire                            mem_oldest_store_valid_t1;
 wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t1;
+wire                            iq_int_order_blocked_any;
+wire                            iq_mem_order_blocked_any;
+wire                            iq_mul_order_blocked_any;
+wire                            iq_div_order_blocked_any;
+wire                            iq_int_flush_killed_any;
+wire                            iq_mem_flush_killed_any;
+wire                            iq_mul_flush_killed_any;
+wire                            iq_div_flush_killed_any;
 
 // MUL IQ issue wires
 wire        mul_iss_valid;
@@ -853,10 +931,16 @@ issue_queue #(
     // Issue inhibit
     .issue_inhibit_t0(issue_inhibit_t0),
     .issue_inhibit_t1(issue_inhibit_t1),
+    .issue_after_order_block_valid_t0(1'b0),
+    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_after_order_block_valid_t1(1'b0),
+    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .oldest_store_valid_t0(),
     .oldest_store_order_id_t0(),
     .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1()
+    .oldest_store_order_id_t1(),
+    .debug_order_blocked_any(iq_int_order_blocked_any),
+    .debug_flush_killed_any(iq_int_flush_killed_any)
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -992,10 +1076,16 @@ issue_queue #(
     .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .issue_inhibit_t0(mem_issue_inhibit),
     .issue_inhibit_t1(mem_issue_inhibit),
+    .issue_after_order_block_valid_t0(pending_branch_t0),
+    .issue_after_order_block_id_t0(pending_branch_order_id_t0),
+    .issue_after_order_block_valid_t1(pending_branch_t1),
+    .issue_after_order_block_id_t1(pending_branch_order_id_t1),
     .oldest_store_valid_t0   (mem_oldest_store_valid_t0),
     .oldest_store_order_id_t0(mem_oldest_store_order_id_t0),
     .oldest_store_valid_t1   (mem_oldest_store_valid_t1),
-    .oldest_store_order_id_t1(mem_oldest_store_order_id_t1)
+    .oldest_store_order_id_t1(mem_oldest_store_order_id_t1),
+    .debug_order_blocked_any(iq_mem_order_blocked_any),
+    .debug_flush_killed_any(iq_mem_flush_killed_any)
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -1130,10 +1220,16 @@ issue_queue #(
     .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .issue_inhibit_t0(mul_issue_inhibit),
     .issue_inhibit_t1(mul_issue_inhibit),
+    .issue_after_order_block_valid_t0(1'b0),
+    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_after_order_block_valid_t1(1'b0),
+    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .oldest_store_valid_t0(),
     .oldest_store_order_id_t0(),
     .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1()
+    .oldest_store_order_id_t1(),
+    .debug_order_blocked_any(iq_mul_order_blocked_any),
+    .debug_flush_killed_any(iq_mul_flush_killed_any)
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -1268,10 +1364,16 @@ issue_queue #(
     .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .issue_inhibit_t0(div_issue_inhibit),
     .issue_inhibit_t1(div_issue_inhibit),
+    .issue_after_order_block_valid_t0(1'b0),
+    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_after_order_block_valid_t1(1'b0),
+    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
     .oldest_store_valid_t0(),
     .oldest_store_order_id_t0(),
     .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1()
+    .oldest_store_order_id_t1(),
+    .debug_order_blocked_any(iq_div_order_blocked_any),
+    .debug_flush_killed_any(iq_div_flush_killed_any)
 );
 
 // ═════════════════════════════════════════════════════════════════
@@ -1287,7 +1389,9 @@ issue_queue #(
 reg mem_fu_busy, mul_fu_busy, div_fu_busy;
 reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
 reg [0:0]                      mem_fu_tid;
-wire mem_issue_inhibit = mem_fu_busy ||
+wire mem_fu_wb_clear = wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE);
+wire mem_fu_blocks_issue = mem_fu_busy && !mem_fu_wb_clear;
+wire mem_issue_inhibit = mem_fu_blocks_issue ||
                          (p1_mem_cand_valid &&
                           !(p1_winner_valid && p1_winner == 2'b10));
 wire mul_issue_inhibit = mul_fu_busy ||
@@ -1333,7 +1437,7 @@ wire div_raw_issue_flush_kill = flush &&
                                  (div_iss_order_id > flush_order_id));
 wire p1_mem_cand_arb_valid = p1_mem_cand_valid &&
                              !p1_mem_cand_flush_kill &&
-                             !mem_fu_busy;
+                             !mem_fu_blocks_issue;
 wire p1_mul_cand_arb_valid = p1_mul_cand_valid &&
                              !p1_mul_cand_flush_kill &&
                              !mul_fu_busy;
@@ -1684,6 +1788,7 @@ always @(posedge clk or negedge rstn) begin
             tag_live_valid_v[ti] <= 1'b0;
             tag_live_seq[ti]   <= {`METADATA_ORDER_ID_W{1'b0}};
             tag_ready_seq[ti]  <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_live_tid[ti]   <= 1'b0;
         end
         for (ti = 0; ti < NUM_THREAD; ti = ti + 1)
             for (ri = 0; ri < 32; ri = ri + 1) begin
@@ -1713,6 +1818,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[commit0_tag]   <= 1'b0;
             tag_live_valid_v[commit0_tag]<= 1'b0;
             tag_ready_seq[commit0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_live_tid[commit0_tag]  <= 1'b0;
             // Clear reg_result if still pointing to this tag
             for (ri = 0; ri < 32; ri = ri + 1) begin
                 if (reg_result[commit0_tid][ri] == commit0_tag &&
@@ -1727,6 +1833,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[commit1_tag]   <= 1'b0;
             tag_live_valid_v[commit1_tag]<= 1'b0;
             tag_ready_seq[commit1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_live_tid[commit1_tag]  <= 1'b0;
             for (ri = 0; ri < 32; ri = ri + 1) begin
                 if (reg_result[commit1_tid][ri] == commit1_tag &&
                     reg_result_order[commit1_tid][ri] == commit1_order_id) begin
@@ -1738,6 +1845,18 @@ always @(posedge clk or negedge rstn) begin
 
         // ── Flush: clear reg_result for flushed thread ──
         if (flush) begin
+            for (ti = 1; ti <= RS_DEPTH; ti = ti + 1) begin
+                if (tag_live_valid_v[ti] && (tag_live_tid[ti] == flush_tid) &&
+                    (!flush_order_valid || (tag_live_seq[ti] > flush_order_id))) begin
+                    tag_in_use[ti]       <= 1'b0;
+                    tag_ready_v[ti]      <= 1'b0;
+                    tag_just_ready[ti]   <= 1'b0;
+                    tag_live_valid_v[ti] <= 1'b0;
+                    tag_live_seq[ti]     <= {`METADATA_ORDER_ID_W{1'b0}};
+                    tag_ready_seq[ti]    <= {`METADATA_ORDER_ID_W{1'b0}};
+                    tag_live_tid[ti]     <= 1'b0;
+                end
+            end
             for (ri = 0; ri < 32; ri = ri + 1) begin
                 if (!flush_order_valid ||
                     (reg_result_order[flush_tid][ri] > flush_order_id)) begin
@@ -1753,6 +1872,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[free0_tag]   <= 1'b0;
             tag_live_valid_v[free0_tag]<= 1'b1;
             tag_live_seq[free0_tag]  <= disp0_order_id;
+            tag_live_tid[free0_tag]  <= disp0_tid;
             tag_ready_seq[free0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             if (disp0_regs_write && disp0_rd != 5'd0) begin
                 reg_result[disp0_tid][disp0_rd]       <= free0_tag;
@@ -1764,6 +1884,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[free1_tag]   <= 1'b0;
             tag_live_valid_v[free1_tag]<= 1'b1;
             tag_live_seq[free1_tag]  <= disp1_order_id;
+            tag_live_tid[free1_tag]  <= disp1_tid;
             tag_ready_seq[free1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             if (disp1_regs_write && disp1_rd != 5'd0) begin
                 reg_result[disp1_tid][disp1_rd]       <= free1_tag;
@@ -1798,6 +1919,14 @@ assign debug_rs_fu_flat         = 16'd0;
 assign debug_rs_qj_flat         = 16'd0;
 assign debug_rs_qk_flat         = 16'd0;
 assign debug_rs_seq_lo_flat     = 32'd0;
+assign debug_spec_dispatch0     = d0_go && d0_after_branch && !d0_control_barrier;
+assign debug_spec_dispatch1     = d1_go && d1_after_branch && !d1_control_barrier;
+assign debug_branch_gated_mem_issue = iq_mem_order_blocked_any;
+assign debug_flush_killed_speculative =
+    iq_int_flush_killed_any || iq_mem_flush_killed_any ||
+    iq_mul_flush_killed_any || iq_div_flush_killed_any ||
+    p1_mem_cand_flush_kill || p1_mul_cand_flush_kill || p1_div_cand_flush_kill ||
+    mem_raw_issue_flush_kill || mul_raw_issue_flush_kill || div_raw_issue_flush_kill;
 
 // RoCC (unused in FPGA mode)
 assign iss0_is_rocc = 1'b0;

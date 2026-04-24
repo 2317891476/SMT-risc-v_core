@@ -68,6 +68,11 @@ module adam_riscv(
     output wire [15:0] debug_rs_qj_flat,
     output wire [15:0] debug_rs_qk_flat,
     output wire [31:0] debug_rs_seq_lo_flat,
+    output wire       debug_spec_dispatch0,
+    output wire       debug_spec_dispatch1,
+    output wire       debug_branch_gated_mem_issue,
+    output wire       debug_flush_killed_speculative,
+    output wire       debug_commit_suppressed,
     output wire [7:0] debug_branch_issue_count,
     output wire [7:0] debug_branch_complete_count,
     output wire [383:0] debug_ddr3_fetch_bus
@@ -205,6 +210,12 @@ wire [31:0] pipe0_br_addr;
 wire [0:0] pipe0_br_tid;
 wire [`METADATA_ORDER_ID_W-1:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
+wire       pipe0_br_update_valid;
+wire [31:0] pipe0_br_update_pc;
+wire       pipe0_br_update_taken;
+wire [31:0] pipe0_br_update_target;
+wire       pipe0_br_update_is_call;
+wire       pipe0_br_update_is_return;
 reg        pipe0_br_complete_hold_r;
 wire       scoreboard_br_complete;
 
@@ -267,8 +278,9 @@ wire sb_disp_stall;
 wire sb_disp1_blocked;  // d1 valid but IQ-blocked (d0 went through)
 wire rob_disp_stall;
 wire fl_disp_stall;
+wire sys_disp_stall;
 wire stall;
-assign stall       = sb_disp_stall || rob_disp_stall || fl_disp_stall;
+assign stall       = sb_disp_stall || rob_disp_stall || fl_disp_stall || sys_disp_stall;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn)
@@ -307,6 +319,8 @@ wire [7:0] flush_new_epoch_t1 = epoch_t1 + 8'd1;
 reg [`METADATA_ORDER_ID_W-1:0] order_id_t0, order_id_t1;
 reg        mret_pending_t0, mret_pending_t1;
 reg [`METADATA_ORDER_ID_W-1:0] mret_pending_order_t0, mret_pending_order_t1;
+reg        csr_pending_t0, csr_pending_t1;
+reg [`METADATA_ORDER_ID_W-1:0] csr_pending_order_t0, csr_pending_order_t1;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -319,9 +333,9 @@ always @(posedge clk or negedge rstn) begin
         // epoch after the redirect boundary.
         if (trap_enter || trap_return || pipe0_br_ctrl) begin
             if ((trap_enter || trap_return) ? 1'b0 : pipe0_br_tid)
-                epoch_t0 <= epoch_t0 + 8'd1;
-            else
                 epoch_t1 <= epoch_t1 + 8'd1;
+            else
+                epoch_t0 <= epoch_t0 + 8'd1;
         end
     end
 end
@@ -363,6 +377,7 @@ wire [4:0]  rob_recover_rd;
 wire [5:0]  rob_recover_prd_old, rob_recover_prd_new;
 wire        rob_recover_regs_write;
 wire [0:0]  rob_recover_tid;
+wire        rob_debug_commit_suppressed;
 wire [3:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
 wire [4:0]  sb_disp0_tag, sb_disp1_tag;
 wire        iss0_is_csr;
@@ -370,6 +385,8 @@ wire        iss0_is_mret;
 wire [11:0] iss0_csr_addr;
 wire        iss0_is_rocc;
 wire [6:0]  iss0_rocc_funct7;
+wire        iss0_pred_taken;
+wire [31:0] iss0_pred_target;
 reg         retire_seen_r;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -380,6 +397,7 @@ wire [31:0] if_inst;
 wire [31:0] if_pc;
 wire [0:0]  if_tid;
 wire        if_pred_taken;
+wire [31:0] if_pred_target;
 wire [31:0] debug_fetch_pc_pending;
 wire [31:0] debug_fetch_pc_out;
 wire [31:0] debug_fetch_if_inst;
@@ -426,11 +444,13 @@ stage_if u_stage_if(
     .br_ctrl          (trap_redirect_valid ? {trap_redirect_tid == 1'b1, trap_redirect_tid == 1'b0} :
                         {pipe0_br_ctrl && (pipe0_br_tid==1'b1),
                          pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
-    .bpu_update_valid (pipe0_br_ctrl    ),
-    .bpu_update_pc    (pipe0_br_addr    ),  // simplified
-    .bpu_update_tid   (pipe0_br_tid     ),
-    .bpu_update_taken (pipe0_br_ctrl    ),
-    .bpu_update_target(pipe0_br_addr    ),
+    .bpu_update_valid (pipe0_br_update_valid),
+    .bpu_update_pc    (pipe0_br_update_pc),
+    .bpu_update_tid   (pipe0_br_tid),
+    .bpu_update_taken (pipe0_br_update_taken),
+    .bpu_update_target(pipe0_br_update_target),
+    .bpu_update_is_call(pipe0_br_update_is_call),
+    .bpu_update_is_return(pipe0_br_update_is_return),
     .fetch_tid        (fetch_tid        ),
     .fb_ready         (fb_push_ready    ),
     .if_valid         (if_valid         ),
@@ -438,6 +458,7 @@ stage_if u_stage_if(
     .if_pc            (if_pc            ),
     .if_tid           (if_tid           ),
     .if_pred_taken    (if_pred_taken    ),
+    .if_pred_target   (if_pred_target   ),
 
     // Task 5: External refill interface to mem_subsys M0
     .ext_mem_req_valid  (m0_req_valid),
@@ -469,6 +490,8 @@ wire        fb_pop0_valid, fb_pop1_valid;
 wire [31:0] fb_pop0_inst,  fb_pop1_inst;
 wire [31:0] fb_pop0_pc,    fb_pop1_pc;
 wire [0:0]  fb_pop0_tid,   fb_pop1_tid;
+wire        fb_pop0_pred_taken, fb_pop1_pred_taken;
+wire [31:0] fb_pop0_pred_target, fb_pop1_pred_target;
 wire        fb_consume_0,  fb_consume_1;
 
 fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
@@ -479,15 +502,21 @@ fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
     .push_inst  (if_inst        ),
     .push_pc    (if_pc          ),
     .push_tid   (if_tid         ),
+    .push_pred_taken (if_pred_taken),
+    .push_pred_target(if_pred_target),
     .push_ready (fb_push_ready  ),
     .pop0_valid (fb_pop0_valid  ),
     .pop0_inst  (fb_pop0_inst   ),
     .pop0_pc    (fb_pop0_pc     ),
     .pop0_tid   (fb_pop0_tid    ),
+    .pop0_pred_taken (fb_pop0_pred_taken),
+    .pop0_pred_target(fb_pop0_pred_target),
     .pop1_valid (fb_pop1_valid  ),
     .pop1_inst  (fb_pop1_inst   ),
     .pop1_pc    (fb_pop1_pc     ),
     .pop1_tid   (fb_pop1_tid    ),
+    .pop1_pred_taken (fb_pop1_pred_taken),
+    .pop1_pred_target(fb_pop1_pred_target),
     .consume_0  (fb_consume_0   ),
     .consume_1  (fb_consume_1   )
 );
@@ -603,15 +632,19 @@ assign fl_disp_stall = (d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
 // Never dispatch in the same cycle as a redirect/flush. The IQ flush logic
 // runs before dispatch allocation, so allowing same-cycle dispatch can leak
 // wrong-path entries into the IQs after branch/trap redirects.
-wire dec0_blocked_by_pending_mret =
-    (dec0_tid ? mret_pending_t1 : mret_pending_t0) && !dec0_is_mret;
-wire dec1_blocked_by_pending_mret =
-    ((dec1_tid ? mret_pending_t1 : mret_pending_t0) && !dec1_is_mret) ||
-    (disp0_valid_pre_rob && dec0_is_mret && (dec0_tid == dec1_tid));
+wire dec0_system_pending = dec0_tid ? (mret_pending_t1 || csr_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0);
+wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0);
+wire dec0_blocked_by_pending_system = dec0_system_pending;
+wire dec1_blocked_by_pending_system =
+    dec1_system_pending ||
+    (disp0_valid_pre_rob && (dec0_is_mret || dec0_is_csr) && (dec0_tid == dec1_tid));
+assign sys_disp_stall = disp0_valid_pre_rob && dec0_blocked_by_pending_system;
 wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
-                         !combined_flush_any && !dec0_blocked_by_pending_mret;
+                         !combined_flush_any && !dec0_blocked_by_pending_system;
 wire disp1_valid_gated = disp1_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
-                         !combined_flush_any && !dec1_blocked_by_pending_mret;
+                         !combined_flush_any && !dec1_blocked_by_pending_system;
 
 // Order ID and epoch assignments for dispatch ports (using decoder tid)
 // disp0 gets current order_id for its thread
@@ -775,6 +808,10 @@ wire [15:0] sb_debug_rs_fu_flat;
 wire [15:0] sb_debug_rs_qj_flat;
 wire [15:0] sb_debug_rs_qk_flat;
 wire [31:0] sb_debug_rs_seq_lo_flat;
+wire        sb_debug_spec_dispatch0;
+wire        sb_debug_spec_dispatch1;
+wire        sb_debug_branch_gated_mem_issue;
+wire        sb_debug_flush_killed_speculative;
 
 // Issue metadata wires
 wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id;
@@ -824,6 +861,8 @@ dispatch_unit #(
     .disp0_fu          (dec0_fu           ),
     .disp0_tid         (dec0_tid          ),
     .disp0_is_mret     (dec0_is_mret      ),
+    .disp0_is_csr      (dec0_is_csr       ),
+    .disp0_is_rocc     (dec0_is_rocc      ),
 
     // Dispatch 1
     .disp1_valid       (disp1_valid_gated ),
@@ -848,6 +887,8 @@ dispatch_unit #(
     .disp1_fu          (dec1_fu           ),
     .disp1_tid         (dec1_tid          ),
     .disp1_is_mret     (dec1_is_mret      ),
+    .disp1_is_csr      (dec1_is_csr       ),
+    .disp1_is_rocc     (dec1_is_rocc      ),
 
     .disp_stall  (sb_disp_stall    ),
     .disp1_blocked(sb_disp1_blocked ),
@@ -997,6 +1038,10 @@ dispatch_unit #(
     .debug_rs_qj_flat(sb_debug_rs_qj_flat),
     .debug_rs_qk_flat(sb_debug_rs_qk_flat),
     .debug_rs_seq_lo_flat(sb_debug_rs_seq_lo_flat),
+    .debug_spec_dispatch0(sb_debug_spec_dispatch0),
+    .debug_spec_dispatch1(sb_debug_spec_dispatch1),
+    .debug_branch_gated_mem_issue(sb_debug_branch_gated_mem_issue),
+    .debug_flush_killed_speculative(sb_debug_flush_killed_speculative),
 
     // Writeback ports
     .wb0_valid       (wb0_valid       ),
@@ -1051,6 +1096,8 @@ wire disp1_is_store = (dec1_fu == `FU_STORE);
 reg        rs_is_csr  [0:31];
 reg        rs_is_mret [0:31];
 reg [11:0] rs_csr_addr[0:31];
+reg        rs_pred_taken [0:31];
+reg [31:0] rs_pred_target[0:31];
 integer    sys_meta_idx;
 
 // Per-tag RoCC metadata (decoder → scoreboard issue sideband)
@@ -1159,7 +1206,8 @@ rob #(
     .recover_prd_old     (rob_recover_prd_old),
     .recover_prd_new     (rob_recover_prd_new),
     .recover_regs_write  (rob_recover_regs_write),
-    .recover_tid         (rob_recover_tid)
+    .recover_tid         (rob_recover_tid),
+    .debug_commit_suppressed(rob_debug_commit_suppressed)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1368,6 +1416,8 @@ reg  [2:0]  p0_pre_ro_fu;
 reg  [0:0]  p0_pre_ro_tid;
 reg  [`METADATA_ORDER_ID_W-1:0] p0_pre_ro_order_id;
 reg  [`METADATA_EPOCH_W-1:0]    p0_pre_ro_epoch;
+reg         p0_pre_ro_pred_taken;
+reg  [31:0] p0_pre_ro_pred_target;
 reg  [5:0]  p0_pre_ro_prs1, p0_pre_ro_prs2;
 reg         p0_pre_ro_is_csr, p0_pre_ro_is_mret;
 reg  [11:0] p0_pre_ro_csr_addr;
@@ -1427,6 +1477,8 @@ always @(posedge clk or negedge rstn) begin
             p0_pre_ro_tid          <= iss0_tid;
             p0_pre_ro_order_id     <= iss0_order_id;
             p0_pre_ro_epoch        <= iss0_epoch;
+            p0_pre_ro_pred_taken   <= iss0_pred_taken;
+            p0_pre_ro_pred_target  <= iss0_pred_target;
             p0_pre_ro_prs1         <= tag_prs1_map[iss0_tag];
             p0_pre_ro_prs2         <= tag_prs2_map[iss0_tag];
             p0_pre_ro_is_csr       <= iss0_is_csr;
@@ -1555,13 +1607,20 @@ always @(posedge clk or negedge rstn) begin
         mret_pending_t1       <= 1'b0;
         mret_pending_order_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
         mret_pending_order_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
+        csr_pending_t0        <= 1'b0;
+        csr_pending_t1        <= 1'b0;
+        csr_pending_order_t0  <= {`METADATA_ORDER_ID_W{1'b0}};
+        csr_pending_order_t1  <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         if (combined_flush_any) begin
             if (!flush_is_order_based) begin
-                if (flush_tid_mux == 1'b0)
+                if (flush_tid_mux == 1'b0) begin
                     mret_pending_t0 <= 1'b0;
-                else
+                    csr_pending_t0  <= 1'b0;
+                end else begin
                     mret_pending_t1 <= 1'b0;
+                    csr_pending_t1  <= 1'b0;
+                end
             end else begin
                 if (mret_pending_t0 && flush_tid_mux == 1'b0 &&
                     mret_pending_order_t0 > flush_order_id_mux)
@@ -1569,6 +1628,12 @@ always @(posedge clk or negedge rstn) begin
                 if (mret_pending_t1 && flush_tid_mux == 1'b1 &&
                     mret_pending_order_t1 > flush_order_id_mux)
                     mret_pending_t1 <= 1'b0;
+                if (csr_pending_t0 && flush_tid_mux == 1'b0 &&
+                    csr_pending_order_t0 > flush_order_id_mux)
+                    csr_pending_t0 <= 1'b0;
+                if (csr_pending_t1 && flush_tid_mux == 1'b1 &&
+                    csr_pending_order_t1 > flush_order_id_mux)
+                    csr_pending_t1 <= 1'b0;
             end
         end
 
@@ -1577,6 +1642,13 @@ always @(posedge clk or negedge rstn) begin
                 mret_pending_t0 <= 1'b0;
             else
                 mret_pending_t1 <= 1'b0;
+        end
+
+        if (pipe0_csr_valid) begin
+            if (p0_pre_ro_tid == 1'b0)
+                csr_pending_t0 <= 1'b0;
+            else
+                csr_pending_t1 <= 1'b0;
         end
 
         if (disp0_accepted && dec0_is_mret) begin
@@ -1597,6 +1669,25 @@ always @(posedge clk or negedge rstn) begin
                 mret_pending_order_t1 <= disp1_order_id;
             end
         end
+
+        if (disp0_accepted && dec0_is_csr) begin
+            if (dec0_tid == 1'b0) begin
+                csr_pending_t0       <= 1'b1;
+                csr_pending_order_t0 <= disp0_order_id;
+            end else begin
+                csr_pending_t1       <= 1'b1;
+                csr_pending_order_t1 <= disp0_order_id;
+            end
+        end
+        if (disp1_accepted && dec1_is_csr) begin
+            if (dec1_tid == 1'b0) begin
+                csr_pending_t0       <= 1'b1;
+                csr_pending_order_t0 <= disp1_order_id;
+            end else begin
+                csr_pending_t1       <= 1'b1;
+                csr_pending_order_t1 <= disp1_order_id;
+            end
+        end
     end
 end
 
@@ -1609,6 +1700,8 @@ wire trap_pc_speculative = sb_branch_pending_any ||
                            pipe0_br_complete ||
                            mret_pending_t0 ||
                            mret_pending_t1 ||
+                           csr_pending_t0 ||
+                           csr_pending_t1 ||
                            (p0_pre_ro_valid && p0_pre_ro_is_mret) ||
                            pipe0_mret_valid;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
@@ -1633,6 +1726,8 @@ always @(posedge clk or negedge rstn) begin
             rs_is_csr[sys_meta_idx]   <= 1'b0;
             rs_is_mret[sys_meta_idx]  <= 1'b0;
             rs_csr_addr[sys_meta_idx] <= 12'd0;
+            rs_pred_taken[sys_meta_idx]  <= 1'b0;
+            rs_pred_target[sys_meta_idx] <= 32'd0;
         end
         for (rocc_meta_idx = 0; rocc_meta_idx < 32; rocc_meta_idx = rocc_meta_idx + 1) begin
             rs_is_rocc[rocc_meta_idx]     <= 1'b0;
@@ -1643,6 +1738,8 @@ always @(posedge clk or negedge rstn) begin
             rs_is_csr[sb_disp0_tag]   <= dec0_is_csr;
             rs_is_mret[sb_disp0_tag]  <= dec0_is_mret;
             rs_csr_addr[sb_disp0_tag] <= dec0_csr_addr;
+            rs_pred_taken[sb_disp0_tag]  <= fb_pop0_pred_taken;
+            rs_pred_target[sb_disp0_tag] <= fb_pop0_pred_target;
             rs_is_rocc[sb_disp0_tag]     <= dec0_is_rocc;
             rs_rocc_funct7[sb_disp0_tag] <= dec0_rocc_funct7;
         end
@@ -1650,6 +1747,8 @@ always @(posedge clk or negedge rstn) begin
             rs_is_csr[sb_disp1_tag]   <= dec1_is_csr;
             rs_is_mret[sb_disp1_tag]  <= dec1_is_mret;
             rs_csr_addr[sb_disp1_tag] <= dec1_csr_addr;
+            rs_pred_taken[sb_disp1_tag]  <= fb_pop1_pred_taken;
+            rs_pred_target[sb_disp1_tag] <= fb_pop1_pred_target;
             rs_is_rocc[sb_disp1_tag]     <= dec1_is_rocc;
             rs_rocc_funct7[sb_disp1_tag] <= dec1_rocc_funct7;
         end
@@ -1667,6 +1766,12 @@ assign iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
                       iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
 assign iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                        iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
+assign iss0_pred_taken = iss0_tag_hits_disp0 ? fb_pop0_pred_taken :
+                         iss0_tag_hits_disp1 ? fb_pop1_pred_taken :
+                         rs_pred_taken[iss0_tag];
+assign iss0_pred_target = iss0_tag_hits_disp0 ? fb_pop0_pred_target :
+                          iss0_tag_hits_disp1 ? fb_pop1_pred_target :
+                          rs_pred_target[iss0_tag];
 
 // Issue-time RoCC metadata reconstructed from the dispatched tag (same bypass pattern)
 // FPGA_MODE: RoCC not synthesized, hardwire to 0 to cut cross-module feedback path
@@ -1892,6 +1997,8 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .in_alu_src2      (p0_pre_ro_alu_src2),
     .in_br_addr_mode  (p0_pre_ro_br_addr_mode),
     .in_br            (p0_pre_ro_br     ),
+    .in_pred_taken    (p0_pre_ro_pred_taken),
+    .in_pred_target   (p0_pre_ro_pred_target),
     .in_rd            (p0_pre_ro_rd     ),
     .in_regs_write    (p0_pre_ro_regs_write),
     .in_fu            (p0_pre_ro_fu     ),
@@ -1917,7 +2024,13 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .br_addr          (pipe0_br_addr    ),
     .br_tid           (pipe0_br_tid     ),
     .br_order_id      (pipe0_br_order_id),
-    .br_complete      (pipe0_br_complete)
+    .br_complete      (pipe0_br_complete),
+    .br_update_valid  (pipe0_br_update_valid),
+    .br_update_pc     (pipe0_br_update_pc),
+    .br_update_taken  (pipe0_br_update_taken),
+    .br_update_target (pipe0_br_update_target),
+    .br_update_is_call(pipe0_br_update_is_call),
+    .br_update_is_return(pipe0_br_update_is_return)
 );
 
 // ─── Execution Pipe 1 (INT + MUL + AGU) ────────────────────────────────────
@@ -3367,6 +3480,11 @@ assign debug_rs_fu_flat = sb_debug_rs_fu_flat;
 assign debug_rs_qj_flat = sb_debug_rs_qj_flat;
 assign debug_rs_qk_flat = sb_debug_rs_qk_flat;
 assign debug_rs_seq_lo_flat = sb_debug_rs_seq_lo_flat;
+assign debug_spec_dispatch0 = sb_debug_spec_dispatch0;
+assign debug_spec_dispatch1 = sb_debug_spec_dispatch1;
+assign debug_branch_gated_mem_issue = sb_debug_branch_gated_mem_issue;
+assign debug_flush_killed_speculative = sb_debug_flush_killed_speculative;
+assign debug_commit_suppressed = rob_debug_commit_suppressed;
 assign debug_branch_issue_count = debug_branch_issue_count_r;
 assign debug_branch_complete_count = debug_branch_complete_count_r;
 assign debug_ddr3_fetch_bus = {

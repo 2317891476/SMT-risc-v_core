@@ -25,6 +25,29 @@ module verilator_mainline_top (
     output wire [7:0]  debug_ic_mem_resp_count,
     output wire [7:0]  debug_ic_cpu_resp_count,
     output wire [1:0]  debug_instr_retired_count,
+    output wire        debug_branch_pending_any,
+    output wire        debug_spec_dispatch0,
+    output wire        debug_spec_dispatch1,
+    output wire        debug_branch_gated_mem_issue,
+    output wire        debug_flush_killed_speculative,
+    output wire        debug_commit_suppressed,
+    output wire        debug_if_valid,
+    output wire        debug_fb_pop0_valid,
+    output wire        debug_fb_pop1_valid,
+    output wire        debug_dec0_valid,
+    output wire        debug_dec1_valid,
+    output wire        debug_disp0_accepted,
+    output wire        debug_disp1_accepted,
+    output wire        debug_iss0_valid,
+    output wire        debug_br_redirect_valid,
+    output wire [31:0] debug_br_redirect_pc,
+    output wire [31:0] debug_br_redirect_target,
+    output wire        debug_stall,
+    output wire        debug_sb_disp_stall,
+    output wire        debug_rob_disp_stall,
+    output wire        debug_fl_disp_stall,
+    output wire        debug_sys_disp_stall,
+    output wire        debug_sb_disp1_blocked,
     output wire        debug_rob_commit0_valid,
     output wire        debug_rob_commit1_valid,
     output wire [15:0] debug_rob_commit0_order_id,
@@ -321,6 +344,11 @@ module verilator_mainline_top (
     wire [15:0] debug_rs_qj_flat_unused;
     wire [15:0] debug_rs_qk_flat_unused;
     wire [31:0] debug_rs_seq_lo_flat_unused;
+    wire        debug_spec_dispatch0_unused;
+    wire        debug_spec_dispatch1_unused;
+    wire        debug_branch_gated_mem_issue_unused;
+    wire        debug_flush_killed_speculative_unused;
+    wire        debug_commit_suppressed_unused;
     wire [7:0]  debug_branch_issue_count_unused;
     wire [7:0]  debug_branch_complete_count_unused;
     wire [3:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
@@ -373,6 +401,11 @@ module verilator_mainline_top (
         .debug_rs_qj_flat(debug_rs_qj_flat_unused),
         .debug_rs_qk_flat(debug_rs_qk_flat_unused),
         .debug_rs_seq_lo_flat(debug_rs_seq_lo_flat_unused),
+        .debug_spec_dispatch0(debug_spec_dispatch0_unused),
+        .debug_spec_dispatch1(debug_spec_dispatch1_unused),
+        .debug_branch_gated_mem_issue(debug_branch_gated_mem_issue_unused),
+        .debug_flush_killed_speculative(debug_flush_killed_speculative_unused),
+        .debug_commit_suppressed(debug_commit_suppressed_unused),
         .debug_branch_issue_count(debug_branch_issue_count_unused),
         .debug_branch_complete_count(debug_branch_complete_count_unused),
         .debug_ddr3_fetch_bus(debug_ddr3_fetch_bus),
@@ -421,6 +454,29 @@ module verilator_mainline_top (
     assign debug_ic_mem_resp_count = u_dut.debug_ic_mem_resp_count;
     assign debug_ic_cpu_resp_count = u_dut.debug_ic_cpu_resp_count;
     assign debug_instr_retired_count = u_dut.rob_instr_retired;
+    assign debug_branch_pending_any = debug_branch_pending_any_unused;
+    assign debug_spec_dispatch0 = debug_spec_dispatch0_unused;
+    assign debug_spec_dispatch1 = debug_spec_dispatch1_unused;
+    assign debug_branch_gated_mem_issue = debug_branch_gated_mem_issue_unused;
+    assign debug_flush_killed_speculative = debug_flush_killed_speculative_unused;
+    assign debug_commit_suppressed = debug_commit_suppressed_unused;
+    assign debug_if_valid = u_dut.if_valid;
+    assign debug_fb_pop0_valid = u_dut.fb_pop0_valid;
+    assign debug_fb_pop1_valid = u_dut.fb_pop1_valid;
+    assign debug_dec0_valid = u_dut.dec0_valid;
+    assign debug_dec1_valid = u_dut.dec1_valid;
+    assign debug_disp0_accepted = u_dut.disp0_accepted;
+    assign debug_disp1_accepted = u_dut.disp1_accepted;
+    assign debug_iss0_valid = u_dut.iss0_valid;
+    assign debug_br_redirect_valid = u_dut.pipe0_br_ctrl;
+    assign debug_br_redirect_pc = u_dut.pipe0_br_update_pc;
+    assign debug_br_redirect_target = u_dut.pipe0_br_addr;
+    assign debug_stall = u_dut.stall;
+    assign debug_sb_disp_stall = u_dut.sb_disp_stall;
+    assign debug_rob_disp_stall = u_dut.rob_disp_stall;
+    assign debug_fl_disp_stall = u_dut.fl_disp_stall;
+    assign debug_sys_disp_stall = u_dut.sys_disp_stall;
+    assign debug_sb_disp1_blocked = u_dut.sb_disp1_blocked;
     assign debug_rob_commit0_valid = u_dut.rob_commit0_valid;
     assign debug_rob_commit1_valid = u_dut.rob_commit1_valid;
     assign debug_rob_commit0_order_id = u_dut.rob_commit0_order_id;

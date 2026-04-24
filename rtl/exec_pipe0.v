@@ -31,6 +31,8 @@ module exec_pipe0 #(
     input  wire [1:0]         in_alu_src2,
     input  wire               in_br_addr_mode,
     input  wire               in_br,         // is branch / jump
+    input  wire               in_pred_taken,
+    input  wire [31:0]        in_pred_target,
     input  wire [4:0]         in_rd,
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
@@ -64,7 +66,13 @@ module exec_pipe0 #(
     output wire [31:0]        br_addr,       // branch target address
     output wire [0:0]         br_tid,        // which thread branched
     output wire [`METADATA_ORDER_ID_W-1:0] br_order_id,   // branch order id when redirecting
-    output wire               br_complete    // branch execution complete (taken or not)
+    output wire               br_complete,   // branch execution complete (taken or not)
+    output wire               br_update_valid,
+    output wire [31:0]        br_update_pc,
+    output wire               br_update_taken,
+    output wire [31:0]        br_update_target,
+    output wire               br_update_is_call,
+    output wire               br_update_is_return
 );
 
 // ─── ALU control ────────────────────────────────────────────────────────────
@@ -114,6 +122,12 @@ reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
 reg [`METADATA_ORDER_ID_W-1:0] br_order_id_r;
 reg               br_complete_r;   // branch execution complete
+reg               br_update_valid_r;
+reg [31:0]        br_update_pc_r;
+reg               br_update_taken_r;
+reg [31:0]        br_update_target_r;
+reg               br_update_is_call_r;
+reg               br_update_is_return_r;
 
 // Store issue-time values for branch resolution (these are used 1 cycle later)
 reg [31:0]        stored_pc;
@@ -123,8 +137,39 @@ reg [`METADATA_ORDER_ID_W-1:0] stored_order_id;
 reg [0:0]         stored_tid;
 reg               stored_br;
 reg               stored_br_addr_mode;
+reg               stored_pred_taken;
+reg [31:0]        stored_pred_target;
 reg               stored_valid;
 reg               stored_br_mark;  // store the branch decision
+reg               stored_is_call;
+reg               stored_is_return;
+
+wire in_link_rd = (in_rd == 5'd1) || (in_rd == 5'd5);
+wire in_link_rs1 = (in_rs1_idx == 5'd1) || (in_rs1_idx == 5'd5);
+wire in_is_call = in_br && in_regs_write && in_link_rd;
+wire in_is_return = in_br && (in_br_addr_mode == `J_REG) &&
+                    (in_rd == 5'd0) && in_link_rs1;
+
+wire [31:0] branch_actual_target = (stored_br_addr_mode == `J_REG) ?
+                                   (stored_op_a + stored_imm) :
+                                   (stored_pc + stored_imm);
+wire        branch_actual_taken = stored_valid && stored_br && stored_br_mark;
+wire [31:0] branch_correct_next = branch_actual_taken ? branch_actual_target :
+                                                        (stored_pc + 32'd4);
+wire        branch_target_mismatch = stored_pred_taken &&
+                                     branch_actual_taken &&
+                                     (stored_pred_target != branch_actual_target);
+wire        branch_redirect_needed = stored_valid && stored_br &&
+                                     ((stored_pred_taken != branch_actual_taken) ||
+                                      branch_target_mismatch);
+wire        nonbranch_pred_redirect = stored_valid && !stored_br && stored_pred_taken;
+wire        redirect_needed = branch_redirect_needed || nonbranch_pred_redirect;
+wire [31:0] redirect_target = nonbranch_pred_redirect ? (stored_pc + 32'd4) :
+                                                       branch_correct_next;
+wire        bpu_update_needed = (stored_valid && stored_br) || nonbranch_pred_redirect;
+wire        bpu_update_taken = stored_br && branch_actual_taken;
+wire [31:0] bpu_update_target = stored_br ? branch_actual_target :
+                                             (stored_pc + 32'd4);
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -140,6 +185,12 @@ always @(posedge clk or negedge rstn) begin
         br_tid_r            <= 1'b0;
         br_order_id_r       <= {`METADATA_ORDER_ID_W{1'b0}};
         br_complete_r       <= 1'b0;
+        br_update_valid_r   <= 1'b0;
+        br_update_pc_r      <= 32'd0;
+        br_update_taken_r   <= 1'b0;
+        br_update_target_r  <= 32'd0;
+        br_update_is_call_r <= 1'b0;
+        br_update_is_return_r <= 1'b0;
         stored_pc           <= 32'd0;
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
@@ -147,8 +198,12 @@ always @(posedge clk or negedge rstn) begin
         stored_tid          <= 1'b0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
+        stored_pred_taken   <= 1'b0;
+        stored_pred_target  <= 32'd0;
         stored_valid        <= 1'b0;
         stored_br_mark      <= 1'b0;
+        stored_is_call      <= 1'b0;
+        stored_is_return    <= 1'b0;
     end else begin
         // Store issue-time values (including br_mark computed from current inputs)
         stored_pc           <= in_pc;
@@ -158,8 +213,12 @@ always @(posedge clk or negedge rstn) begin
         stored_tid          <= in_tid;
         stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
+        stored_pred_taken   <= in_pred_taken;
+        stored_pred_target  <= in_pred_target;
         stored_valid        <= in_valid;
         stored_br_mark      <= br_mark;
+        stored_is_call      <= in_is_call;
+        stored_is_return    <= in_is_return;
 
         `ifdef VERBOSE_SIM_LOGS
         if (in_valid) begin
@@ -177,11 +236,17 @@ always @(posedge clk or negedge rstn) begin
         out_tid_r        <= in_tid;
 
         // Branch resolution uses stored values from previous cycle
-        br_ctrl_r     <= stored_valid && stored_br && stored_br_mark;
-        br_addr_r     <= (stored_br_addr_mode == `J_REG) ? (stored_op_a + stored_imm) : (stored_pc + stored_imm);
+        br_ctrl_r     <= redirect_needed;
+        br_addr_r     <= redirect_target;
         br_tid_r      <= stored_tid;
         br_order_id_r <= stored_order_id;
         br_complete_r <= stored_valid && stored_br;
+        br_update_valid_r  <= bpu_update_needed;
+        br_update_pc_r     <= stored_pc;
+        br_update_taken_r  <= bpu_update_taken;
+        br_update_target_r <= bpu_update_target;
+        br_update_is_call_r   <= stored_valid && stored_is_call;
+        br_update_is_return_r <= stored_valid && stored_is_return;
     end
 end
 
@@ -205,5 +270,11 @@ assign br_addr     = br_addr_r;
 assign br_tid      = br_tid_r;
 assign br_order_id = br_order_id_r;
 assign br_complete = br_complete_r;
+assign br_update_valid  = br_update_valid_r;
+assign br_update_pc     = br_update_pc_r;
+assign br_update_taken  = br_update_taken_r;
+assign br_update_target = br_update_target_r;
+assign br_update_is_call = br_update_is_call_r;
+assign br_update_is_return = br_update_is_return_r;
 
 endmodule

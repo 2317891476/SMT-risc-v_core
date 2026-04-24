@@ -74,6 +74,10 @@ BASIC_TEST_IDS = {
     "test_store_buffer_latest_write_wins": 23,
     "test_store_buffer_stream_multiline": 24,
     "test_l2_mmio_ping_pong": 25,
+    "test_branch_spec_alu_flush": 26,
+    "test_branch_spec_mem_sideeffect": 27,
+    "test_branch_spec_system_block": 28,
+    "test_branch_spec_correct_path_alu": 29,
 }
 
 
@@ -274,6 +278,10 @@ class TestRunner:
                 "test_rv32i_full.s",
                 "test_div_basic.s",
                 "test_div_helper_path.s",
+                "test_branch_spec_alu_flush.s",
+                "test_branch_spec_mem_sideeffect.s",
+                "test_branch_spec_system_block.s",
+                "test_branch_spec_correct_path_alu.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
@@ -323,7 +331,7 @@ class TestRunner:
             
             # Build ROM
             # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
-            march_flag = "rv32i_zicsr" if "csr" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
+            march_flag = "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
             ret, out, err = self.build_basic_rom(test, test_name, march_flag)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))

@@ -157,10 +157,16 @@ module issue_queue #(
     // ─── External issue inhibit (e.g. branch_in_flight) ─────────
     input  wire        issue_inhibit_t0,
     input  wire        issue_inhibit_t1,
+    input  wire                             issue_after_order_block_valid_t0,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t0,
+    input  wire                             issue_after_order_block_valid_t1,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t1,
     output wire                            oldest_store_valid_t0,
     output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t0,
     output wire                            oldest_store_valid_t1,
-    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t1
+    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t1,
+    output wire                            debug_order_blocked_any,
+    output reg                             debug_flush_killed_any
 );
 
     // ═══ Entry Storage ═══
@@ -336,6 +342,7 @@ module issue_queue #(
 
     // Step 1: Per-entry parallel eligibility + candidate packing
     wire [CAND_W-1:0] cand [0:TREE_N-1];
+    wire [TREE_N-1:0] order_blocked_vec;
     reg  [ISSUE_BUNDLE_W-1:0] sel_bundle;
 
     genvar ci;
@@ -344,6 +351,11 @@ module issue_queue #(
             if (ci < IQ_DEPTH) begin : real_entry
                 wire inhibited = (e_tid[ci] == 1'b0 && issue_inhibit_t0) ||
                                  (e_tid[ci] == 1'b1 && issue_inhibit_t1);
+                wire order_blocked = (e_tid[ci] == 1'b0) ?
+                    (issue_after_order_block_valid_t0 &&
+                     (e_order_id[ci] > issue_after_order_block_id_t0)) :
+                    (issue_after_order_block_valid_t1 &&
+                     (e_order_id[ci] > issue_after_order_block_id_t1));
                 wire is_load_no_store = CHECK_LOAD_STORE_ORDER &&
                                         e_mem_read[ci] && !e_mem_write[ci];
                 wire is_store_ordered = CHECK_LOAD_STORE_ORDER &&
@@ -365,15 +377,22 @@ module issue_queue #(
                     );
                 wire eligible = e_valid[ci] && !e_issued[ci] && e_ready[ci]
                                 && !e_just_woke[ci] && !inhibited
+                                && !order_blocked
                                 && !older_store_blocks
                                 && !older_store_blocks_store
                                 && !older_store_blocks_mret;
+                assign order_blocked_vec[ci] = e_valid[ci] && !e_issued[ci] &&
+                                               e_ready[ci] && !e_just_woke[ci] &&
+                                               order_blocked;
                 assign cand[ci] = {eligible, e_seq[ci], ci[IQ_IDX_W-1:0]};
             end else begin : pad_entry
                 assign cand[ci] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}, {IQ_IDX_W{1'b0}}};
+                assign order_blocked_vec[ci] = 1'b0;
             end
         end
     endgenerate
+
+    assign debug_order_blocked_any = |order_blocked_vec;
 
     // Step 2: Binary tournament tree reduction (log2 levels)
     wire [CAND_W-1:0] tree [0:2*TREE_N-2];  // flat array: leaves=[TREE_N-1 .. 2*TREE_N-2], root=[0]
@@ -460,16 +479,20 @@ module issue_queue #(
                 e_wake_hold[i] <= 2'd0;
             end
             alloc_seq <= {`METADATA_ORDER_ID_W{1'b0}};
+            debug_flush_killed_any <= 1'b0;
         end
         else begin
+            debug_flush_killed_any <= 1'b0;
             // ── Epoch-based flush ──
             if (flush) begin
                 for (i = 0; i < IQ_DEPTH; i = i + 1) begin
                     if (e_valid[i] && (e_tid[i] == flush_tid)) begin
                         if (!flush_order_valid) begin
                             e_valid[i] <= 1'b0;
+                            debug_flush_killed_any <= 1'b1;
                         end else if (e_order_id[i] > flush_order_id) begin
                             e_valid[i] <= 1'b0;
+                            debug_flush_killed_any <= 1'b1;
                         end
                     end
                 end
