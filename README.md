@@ -18,23 +18,33 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 | **分支预测** | 256-entry 双模态 (Bimodal) 2-bit 饱和计数器 + BTB |
 | **SMT** | 2 线程同步多线程，Round-Robin 取指调度，独立 PC 和寄存器堆 |
 | **虚拟内存** | Sv32 MMU：I-TLB(16) + D-TLB(32) + 7 状态硬件页表漫游器 (PTW) |
-| **缓存** | L1 ICache: **8KB** 直接映射, 32B 行<br>L1 DCache: 4-way 非阻塞 (已定义，当前未启用)<br>L2: 仿真走 8KB 4-way 缓存 / FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
+| **缓存** | L1 ICache: **8KB** 直接映射, 32B 行<br>L1 DCache: **4KB 4-way write-back/write-allocate**（M1-native，DDR3 `0x8000_0000+` cached）<br>MMIO (`DEBUG_BEACON_EVT_ADDR` / UART / CLINT / PLIC) uncached bypass<br>L2: FPGA 主线走 `L2_PASSTHROUGH` + `mem_subsys` + DDR3 |
 | **总线** | AXI4 突发传输接口 (缓存行填充/写回) + DDR3 AXI4 256-bit CDC 桥接 |
 | **AI 加速** | RoCC 协处理器：8×8 INT8 GEMM 引擎 + 128-bit SIMD 向量单元 + KV-Cache 压缩 |
 | **特权态** | Machine-mode CSR (mstatus/mepc/mcause/mtvec/satp + mcycle/minstret + **mhpmcounter3..9** 硬件性能计数器)，异常入口/MRET |
 | **中断** | CLINT (定时器中断) + PLIC (外部中断)，支持 mcause=0x80000007/0B |
 
-> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。最新有效 bitstream `BuildID=0x69E89179` 已于 **2026-04-22** 重新通过 `run_fpga_mainline_validation.py` 主线自动验收、JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测验证。
+> **当前已验证 AX7203 主基线**: OoO 后端 + `FPGA_MODE=1` + `ENABLE_MEM_SUBSYS=1` + `ENABLE_DDR3=1` + `L2_PASSTHROUGH=1` + `ENABLE_ROCC_ACCEL=0` + `SMT_MODE=1` + `RS_DEPTH=16` + `FetchBuffer=16` + `25MHz`。最新真实上板 bitstream 仍为 **2026-04-22** 的 `BuildID=0x69E89179`（JTAG 回读、DDR3 `DEADBEEF` 写回读和 UART 板测通过）。**2026-04-24 已完成 OoO + L1DCache 的 Verilator / FPGA top-sim 级集成验证；本轮未重新跑真实 AX7203 上板。**
 
-### 最新验证快照（2026-04-22）
+### 最新验证快照（2026-04-24）
 
 | 项目 | 当前结果 | 说明 |
 |------|------|------|
-| 本地基础回归 | ✅ `28/28 PASS` | 默认 `--basic` 已纳入 2 条 divider 回归 |
+| 本地基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic` |
 | FPGA 同配置基础回归 | ✅ `28/28 PASS` | `python verification/run_all_tests.py --basic --fpga-config` |
-| Verilator Dhrystone | ✅ `ExitReason=done` | `BENCH CYCLES=40133`, `INSTRET=6208`, `IPC_X1000=154` |
-| FPGA 主线自动签核 | ✅ `PASS` | `BuildID=0x69E89179`, `WNS=+0.329ns`, `WHS=+0.056ns`，主线验证 ROM 上板（`UART DIAG PASS` + DDR3 `DEADBEEF` 写回读） |
-| **FPGA 板级 Dhrystone** | ✅ **PASS** | `BuildID=0x69E8D721`（loader ROM + 8KB ICache + **HPM 硬件性能计数器**），25MHz，`WNS=+0.448ns`，`WHS=+0.059ns`；500 runs 实测 `BENCH CYCLES=2,595,775`，`INSTRET=491,090`，`IPC_X1000=180`（**≈2.74 DMIPS, 0.110 DMIPS/MHz**）；HPM 揭示：`BR_MISPREDICT=51,510`（103/run，~50-70% 错误率），`ICACHE_MISS=540`（1.08/run），`ISSUE_BUBBLE=2,104,010`（**81% 流水线空转**） |
+| OoO 活锁复现门禁 | ✅ `ExitReason=done` | `DCache=PASSTHROUGH`, `mock-latency=7`；无 UART mismatch，无 bad UART store |
+| Verilator Dhrystone（完整 L1D, latency=1） | ✅ `ExitReason=done` | `BENCH CYCLES=30,416`, `INSTRET=6,255`, `IPC_X1000=205`，约 **8,219 Dhrystones/s / 4.68 DMIPS** |
+| Verilator Dhrystone（完整 L1D, latency=7） | ✅ `ExitReason=done` | `BENCH CYCLES=33,445`, `INSTRET=6,255`, `IPC_X1000=187`，约 **7,475 Dhrystones/s / 4.25 DMIPS**，`DCacheMissEventCount=3790` |
+| Verilator Dhrystone（passthrough 定位模式） | ✅ `ExitReason=done` | `mock-latency=7`, `BENCH CYCLES=51,547`, `IPC_X1000=121`；仅用于定位，不作为最终性能 |
+| Beacon ROM / MMIO event mailbox | ✅ `PASS` | `python fpga/scripts/run_fpga_benchmark_ddr3.py --loader-beacon-selftest --skip-vivado --rs-depth 16 --fetch-buffer-depth 16 --core-clk-mhz 25`；14 个事件顺序有效，bad frame=0 |
+| 真实 AX7203 上板 Dhrystone | ✅ 上一版已通过 | `BuildID=0x69E8D721`，25MHz，500 runs 实测约 **2.74 DMIPS / 0.110 DMIPS/MHz**；本轮 L1DCache 变更尚未重新 bitstream 上板 |
+
+### OoO + L1DCache 调试结论（2026-04-24）
+
+- `mock-latency >= 7` 下的失败根因不在 DCache，而在 OoO 控制链：order-based branch redirect 曾错误清掉 older live producer 的 `reg_result`，使目标路径 consumer 在 producer 写回前被误判 ready。
+- 修复点：`dispatch_unit` 的 flush 仅清 younger-than-flush 映射；IQ wakeup / commit dealloc 增加 `tag + tid + order_id` 匹配；`exec_pipe1` 在 MEM request 未 accept 时保持旧请求，避免覆盖。
+- L1DCache 最终路径为完整 4KB 4-way write-back/write-allocate；`DEBUG_BEACON_EVT_ADDR`、UART、CLINT、PLIC 继续 uncached bypass，MMIO store 保持单 side-effect / 单 LSU completion。
+- `--dcache-mode {full,passthrough,registered-pt,read-only}` 已加入 Verilator 主线脚本，默认 `full`；`passthrough` 仅保留为诊断工具。
 
 ---
 
@@ -133,6 +143,7 @@ AdamRiscv/
 │  │  ── 存储子系统 ──
 │  ├─ tlb.v                         # ★ 参数化全相联 TLB
 │  ├─ mmu_sv32.v                    # ★ Sv32 MMU + 硬件 PTW
+│  ├─ l1_dcache_m1.v                # ★ M1-native L1 DCache (4KB 4-way WB/WA, DDR3 cached)
 │  ├─ l1_dcache_nb.v                # ★ 4-way 非阻塞 DCache + AXI4
 │  ├─ mem_subsys.v                  # ★ 统一内存子系统 (L2缓存 + 仲裁器 + MMIO)
 │  ├─ l2_cache.v                    # ★ 8KB 4路 L2 缓存 (32B 行，PLRU，阻塞设计)
@@ -217,7 +228,9 @@ AdamRiscv/
 |------|------|---------|
 | `tlb` | 参数化全相联 TLB | ENTRIES=16/32, mega-page, SFENCE.VMA |
 | `mmu_sv32` | Sv32 MMU + hardware 页表漫游器 | I-TLB(16) + D-TLB(32), 7-state PTW FSM |
-| `l1_dcache_nb` | 非阻塞 L1 数据缓存 | 4KB, 4-way, 32B line, PLRU, AXI4 burst |
+| `l1_dcache_m1` | 当前主线 L1 数据缓存 | 4KB, 4-way, 32B line, write-back/write-allocate, M1-native, only DDR3 `0x8000_0000+` cached |
+| `l1_dcache_nb` | AXI4 非阻塞 L1 数据缓存 | 4KB, 4-way, 32B line, PLRU, AXI4 burst（保留为后续 AXI4 路径） |
+| `mem_subsys` | M0/M1 内存子系统 | I-side M0 + D-side M1 仲裁；M1 DDR3 流量经 `l1_dcache_m1`，MMIO/CLINT/PLIC uncached bypass |
 
 ### 4.4 L2 缓存与中断控制器 (P2 Implementation)
 

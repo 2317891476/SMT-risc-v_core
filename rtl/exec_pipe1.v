@@ -236,7 +236,7 @@ always @(posedge clk or negedge rstn) begin
             dbg_beacon_wait_reported_r <= 1'b0;
         end
 
-        if (in_valid && is_mem_op) begin
+        if (in_valid && is_mem_op && (!mem_req_valid_r || mem_req_accept)) begin
 `ifdef VERBOSE_SIM_LOGS
             if (in_mem_write && (eff_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                 $display("[DBG_EP1_STORE] t=%0t pc=%h order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
@@ -257,6 +257,11 @@ always @(posedge clk or negedge rstn) begin
             mem_req_order_id_r   <= in_order_id;
             mem_req_epoch_r      <= in_epoch;
             dbg_beacon_wait_reported_r <= 1'b0;
+        end else if (in_valid && is_mem_op && mem_req_valid_r && !mem_req_accept) begin
+`ifdef VERBOSE_SIM_LOGS
+            $display("[EP1_MEM_HOLD] t=%0t held_order=%0d held_addr=%h new_order=%0d new_addr=%h",
+                     $time, mem_req_order_id_r, mem_req_addr_r, in_order_id, eff_addr);
+`endif
         end else if (mem_req_valid_r && !mem_req_accept &&
                      mem_req_wen_r && (mem_req_addr_r == `DEBUG_BEACON_EVT_ADDR) &&
                      !dbg_beacon_wait_reported_r) begin

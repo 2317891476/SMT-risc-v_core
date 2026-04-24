@@ -193,6 +193,7 @@ def build_verilator_command(
     harness_cpp: Path,
     top_sv: Path,
     mock_sv: Path,
+    dcache_mode: str,
     preload_direct_boot: bool,
     enable_trace: bool,
 ) -> str:
@@ -233,6 +234,12 @@ def build_verilator_command(
         "-DSMT_MODE=1",
         "-DENABLE_ROCC_ACCEL=0",
     ]
+    if dcache_mode == "passthrough":
+        parts.append("-DDCACHE_PASSTHROUGH=1")
+    elif dcache_mode == "registered-pt":
+        parts.append("-DDCACHE_REGISTERED_PT=1")
+    elif dcache_mode == "read-only":
+        parts.append("-DDCACHE_READ_ONLY=1")
     if enable_trace:
         parts.append("--trace-fst")
     if preload_direct_boot:
@@ -321,6 +328,8 @@ def format_summary(
     global_ipc_vs_budget = (instret / budget_cycles) if budget_cycles else 0.0
     lines = [
         f"Mode: {mode}",
+        f"DCacheMode: {summary.get('DCacheMode', 'full')}",
+        f"MockLatency: {summary.get('MockLatency', 1)}",
         f"Benchmark: {benchmark}",
         f"Runs: {runs}",
         f"ConfiguredRuns: {summary.get('ConfiguredRuns', runs)}",
@@ -355,10 +364,80 @@ def format_summary(
         f"LastRobCommit1OrderId: {summary.get('LastRobCommit1OrderId', 0)}",
         f"LastRobCountT0: {summary.get('LastRobCountT0', 0)}",
         f"LastRobCountT1: {summary.get('LastRobCountT1', 0)}",
+        f"LastRobHeadFlushedT0: {summary.get('LastRobHeadFlushedT0', False)}",
+        f"LastRobHeadFlushedT1: {summary.get('LastRobHeadFlushedT1', False)}",
+        f"LastRobRecovering: {summary.get('LastRobRecovering', False)}",
+        f"LastRobRecoverTid: {summary.get('LastRobRecoverTid', 0)}",
+        f"LastRobRecoverPtr: {summary.get('LastRobRecoverPtr', 0)}",
+        f"MemIssSeenCount: {summary.get('MemIssSeenCount', 0)}",
+        f"P1WinnerCount: {summary.get('P1WinnerCount', 0)}",
+        f"P1MemWinnerCount: {summary.get('P1MemWinnerCount', 0)}",
+        f"Wb1MemCount: {summary.get('Wb1MemCount', 0)}",
+        f"LastP1WinnerValid: {summary.get('LastP1WinnerValid', False)}",
+        f"LastP1Winner: {summary.get('LastP1Winner', 0)}",
+        f"LastMemFuBusy: {summary.get('LastMemFuBusy', False)}",
+        f"LastMemFuOrderId: {summary.get('LastMemFuOrderId', 0)}",
+        f"LastMemFuTid: {summary.get('LastMemFuTid', 0)}",
+        f"LastMemIssueInhibit: {summary.get('LastMemIssueInhibit', False)}",
+        f"LastP1MemCandValid: {summary.get('LastP1MemCandValid', False)}",
+        f"LastP1MemCandOrderId: {summary.get('LastP1MemCandOrderId', 0)}",
+        f"LastP1MemCandTag: {summary.get('LastP1MemCandTag', 0)}",
+        f"LastP1MemCandRead: {summary.get('LastP1MemCandRead', False)}",
+        f"LastP1MemCandWrite: {summary.get('LastP1MemCandWrite', False)}",
+        f"LastMemCandRawValid: {summary.get('LastMemCandRawValid', False)}",
+        f"LastMemCandClear: {summary.get('LastMemCandClear', False)}",
+        f"LastMemCandSet: {summary.get('LastMemCandSet', False)}",
+        f"LastIqMemSelFound: {summary.get('LastIqMemSelFound', False)}",
+        f"LastIqMemSelIdx: {summary.get('LastIqMemSelIdx', 0)}",
+        f"LastIqMemOldestStoreValidT0: {summary.get('LastIqMemOldestStoreValidT0', False)}",
+        f"LastIqMemOldestStoreValidT1: {summary.get('LastIqMemOldestStoreValidT1', False)}",
+        f"LastIqMemOldestStoreOrderIdT0: {summary.get('LastIqMemOldestStoreOrderIdT0', 0)}",
+        f"LastIqMemOldestStoreOrderIdT1: {summary.get('LastIqMemOldestStoreOrderIdT1', 0)}",
+        f"LastIqMemStoreCountT0: {summary.get('LastIqMemStoreCountT0', 0)}",
+        f"LastIqMemStoreCountT1: {summary.get('LastIqMemStoreCountT1', 0)}",
+        f"LastFlush: {summary.get('LastFlush', False)}",
+        f"LastFlushTid: {summary.get('LastFlushTid', 0)}",
+        f"LastFlushOrderValid: {summary.get('LastFlushOrderValid', False)}",
+        f"LastFlushOrderId: {summary.get('LastFlushOrderId', 0)}",
+        f"LastWb0Valid: {summary.get('LastWb0Valid', False)}",
+        f"LastWb0Tag: {summary.get('LastWb0Tag', 0)}",
+        f"LastWb0RegsWrite: {summary.get('LastWb0RegsWrite', False)}",
+        f"LastWb1Valid: {summary.get('LastWb1Valid', False)}",
+        f"LastWb1Tag: {summary.get('LastWb1Tag', 0)}",
+        f"LastWb1RegsWrite: {summary.get('LastWb1RegsWrite', False)}",
+        f"LastWb1Fu: {summary.get('LastWb1Fu', 0)}",
         f"UartStatusLoadCount: {summary.get('UartStatusLoadCount', 0)}",
         f"UartTxStoreCount: {summary.get('UartTxStoreCount', 0)}",
         f"UartTxByteSeenCount: {summary.get('UartTxByteSeenCount', 0)}",
         f"LastUartTxByte: 0x{int(summary.get('LastUartTxByte', 0)):02X}",
+        f"UnexpectedUartSeen: {summary.get('UnexpectedUartSeen', False)}",
+        f"UnexpectedUartCycle: {summary.get('UnexpectedUartCycle', 0)}",
+        f"UnexpectedUartIndex: {summary.get('UnexpectedUartIndex', 0)}",
+        f"UnexpectedUartExpected: 0x{int(summary.get('UnexpectedUartExpected', 0)):02X}",
+        f"UnexpectedUartActual: 0x{int(summary.get('UnexpectedUartActual', 0)):02X}",
+        f"UnexpectedUartPcT0: 0x{int(summary.get('UnexpectedUartPcT0', 0)):08X}",
+        f"UnexpectedUartLsuReq: valid={summary.get('UnexpectedUartLsuReqValid', False)} accept={summary.get('UnexpectedUartLsuReqAccept', False)} order={summary.get('UnexpectedUartLsuReqOrderId', 0)} tag={summary.get('UnexpectedUartLsuReqTag', 0)} addr=0x{int(summary.get('UnexpectedUartLsuReqAddr', 0)):08X} wdata=0x{int(summary.get('UnexpectedUartLsuReqWdata', 0)):08X} func3={summary.get('UnexpectedUartLsuReqFunc3', 0)} wen={summary.get('UnexpectedUartLsuReqWen', False)}",
+        f"UnexpectedUartM1Req: valid={summary.get('UnexpectedUartM1ReqValid', False)} ready={summary.get('UnexpectedUartM1ReqReady', False)} addr=0x{int(summary.get('UnexpectedUartM1ReqAddr', 0)):08X} wdata=0x{int(summary.get('UnexpectedUartM1ReqWdata', 0)):08X} wen=0x{int(summary.get('UnexpectedUartM1ReqWen', 0)):X} write={summary.get('UnexpectedUartM1ReqWrite', False)}",
+        f"UnexpectedUartWB: wb0_valid={summary.get('UnexpectedUartWb0Valid', False)} wb0_tag={summary.get('UnexpectedUartWb0Tag', 0)} wb0_data=0x{int(summary.get('UnexpectedUartWb0Data', 0)):08X} wb1_valid={summary.get('UnexpectedUartWb1Valid', False)} wb1_tag={summary.get('UnexpectedUartWb1Tag', 0)} wb1_fu={summary.get('UnexpectedUartWb1Fu', 0)} wb1_data=0x{int(summary.get('UnexpectedUartWb1Data', 0)):08X}",
+        f"BadUartStoreSeen: {summary.get('BadUartStoreSeen', False)}",
+        f"BadUartStoreCycle: {summary.get('BadUartStoreCycle', 0)}",
+        f"BadUartStore: pc=0x{int(summary.get('BadUartStorePc', 0)):08X} addr=0x{int(summary.get('BadUartStoreAddr', 0)):08X} op_a=0x{int(summary.get('BadUartStoreOpA', 0)):08X} op_b=0x{int(summary.get('BadUartStoreOpB', 0)):08X} imm=0x{int(summary.get('BadUartStoreImm', 0)):08X} order={summary.get('BadUartStoreOrderId', 0)} tag={summary.get('BadUartStoreTag', 0)} func3={summary.get('BadUartStoreFunc3', 0)} tid={summary.get('BadUartStoreTid', 0)}",
+        f"BadUartStoreSrc: rd=x{summary.get('BadUartStoreRd', 0)} rs1=x{summary.get('BadUartStoreRs1', 0)}/p{summary.get('BadUartStorePrs1', 0)}/tag{summary.get('BadUartStoreSrc1Tag', 0)} rs2=x{summary.get('BadUartStoreRs2', 0)}/p{summary.get('BadUartStorePrs2', 0)}/tag{summary.get('BadUartStoreSrc2Tag', 0)}",
+        f"BadUartStoreDataSrc: prf_a=0x{int(summary.get('BadUartStorePrfA', 0)):08X} prf_b=0x{int(summary.get('BadUartStorePrfB', 0)):08X} tagbuf_a={summary.get('BadUartStoreTagbufAValid', False)}:0x{int(summary.get('BadUartStoreTagbufAData', 0)):08X} tagbuf_b={summary.get('BadUartStoreTagbufBValid', False)}:0x{int(summary.get('BadUartStoreTagbufBData', 0)):08X} fwd_a={summary.get('BadUartStoreFwdA', 0)} fwd_b={summary.get('BadUartStoreFwdB', 0)}",
+        f"StrcpyMvSeen: {summary.get('StrcpyMvSeen', False)}",
+        f"StrcpyMvCycle: {summary.get('StrcpyMvCycle', 0)}",
+        f"StrcpyMv: pc=0x{int(summary.get('StrcpyMvPc', 0)):08X} op_a=0x{int(summary.get('StrcpyMvOpA', 0)):08X} op_b=0x{int(summary.get('StrcpyMvOpB', 0)):08X} order={summary.get('StrcpyMvOrderId', 0)} tag={summary.get('StrcpyMvTag', 0)} tid={summary.get('StrcpyMvTid', 0)} rd=x{summary.get('StrcpyMvRd', 0)}/p{summary.get('StrcpyMvPrd', 0)}",
+        f"StrcpyMvSrc: rs1=x{summary.get('StrcpyMvRs1', 0)}/p{summary.get('StrcpyMvPrs1', 0)}/tag{summary.get('StrcpyMvSrc1Tag', 0)} rs2=x{summary.get('StrcpyMvRs2', 0)}/p{summary.get('StrcpyMvPrs2', 0)}/tag{summary.get('StrcpyMvSrc2Tag', 0)}",
+        f"StrcpyMvDataSrc: prf_a=0x{int(summary.get('StrcpyMvPrfA', 0)):08X} prf_b=0x{int(summary.get('StrcpyMvPrfB', 0)):08X} tagbuf_a={summary.get('StrcpyMvTagbufAValid', False)}:0x{int(summary.get('StrcpyMvTagbufAData', 0)):08X} tagbuf_b={summary.get('StrcpyMvTagbufBValid', False)}:0x{int(summary.get('StrcpyMvTagbufBData', 0)):08X} fwd_a={summary.get('StrcpyMvFwdA', 0)} fwd_b={summary.get('StrcpyMvFwdB', 0)}",
+        f"StrcpyMvPrfW: w0={summary.get('StrcpyMvPrfW0En', False)} p{summary.get('StrcpyMvPrfW0Addr', 0)}=0x{int(summary.get('StrcpyMvPrfW0Data', 0)):08X} w1={summary.get('StrcpyMvPrfW1En', False)} p{summary.get('StrcpyMvPrfW1Addr', 0)}=0x{int(summary.get('StrcpyMvPrfW1Data', 0)):08X}",
+        f"MainLwA0: seen={summary.get('MainLwA0Seen', False)} addr=0x{int(summary.get('MainLwA0Addr', 0)):08X} base=0x{int(summary.get('MainLwA0Base', 0)):08X} imm=0x{int(summary.get('MainLwA0Imm', 0)):08X} order={summary.get('MainLwA0OrderId', 0)} tag={summary.get('MainLwA0Tag', 0)} rd_p{summary.get('MainLwA0Prd', 0)} rs1_p{summary.get('MainLwA0Prs1', 0)}",
+        f"MainLwA0WB: seen={summary.get('MainLwA0WbSeen', False)} data=0x{int(summary.get('MainLwA0WbData', 0)):08X} prd={summary.get('MainLwA0WbPrd', 0)}",
+        f"MainAddiA0: seen={summary.get('MainAddiA0Seen', False)} op_a=0x{int(summary.get('MainAddiA0OpA', 0)):08X} result=0x{int(summary.get('MainAddiA0Result', 0)):08X} order={summary.get('MainAddiA0OrderId', 0)} tag={summary.get('MainAddiA0Tag', 0)} rd_p{summary.get('MainAddiA0Prd', 0)} rs1_p{summary.get('MainAddiA0Prs1', 0)} src1_tag={summary.get('MainAddiA0Src1Tag', 0)}",
+        f"MainAddiA0DataSrc: prf_a=0x{int(summary.get('MainAddiA0PrfA', 0)):08X} tagbuf_a={summary.get('MainAddiA0TagbufAValid', False)}:0x{int(summary.get('MainAddiA0TagbufAData', 0)):08X}",
+        f"MainA0PrdLastWrite: count={summary.get('MainA0PrdWriteCount', 0)} port={summary.get('MainA0PrdLastWritePort', 0)} pc=0x{int(summary.get('MainA0PrdLastWritePc', 0)):08X} order={summary.get('MainA0PrdLastWriteOrderId', 0)} tag={summary.get('MainA0PrdLastWriteTag', 0)} rd=x{summary.get('MainA0PrdLastWriteRd', 0)} fu={summary.get('MainA0PrdLastWriteFu', 0)} data=0x{int(summary.get('MainA0PrdLastWriteData', 0)):08X}",
+        f"MainA0PrdFirstBadWrite: seen={summary.get('MainA0PrdFirstBadWriteSeen', False)} port={summary.get('MainA0PrdFirstBadWritePort', 0)} pc=0x{int(summary.get('MainA0PrdFirstBadWritePc', 0)):08X} order={summary.get('MainA0PrdFirstBadWriteOrderId', 0)} tag={summary.get('MainA0PrdFirstBadWriteTag', 0)} rd=x{summary.get('MainA0PrdFirstBadWriteRd', 0)} fu={summary.get('MainA0PrdFirstBadWriteFu', 0)} data=0x{int(summary.get('MainA0PrdFirstBadWriteData', 0)):08X}",
+        f"MainA0PrdFirstFree: seen={summary.get('MainA0PrdFirstFreeSeen', False)} port={summary.get('MainA0PrdFirstFreePort', 0)} order={summary.get('MainA0PrdFirstFreeOrderId', 0)} tag={summary.get('MainA0PrdFirstFreeTag', 0)} rd=x{summary.get('MainA0PrdFirstFreeRd', 0)}",
+        f"MainAddiA0WB: seen={summary.get('MainAddiA0WbSeen', False)} cycle={summary.get('MainAddiA0WbCycle', 0)} port={summary.get('MainAddiA0WbPort', 0)} tid={summary.get('MainAddiA0WbTid', 0)} prd={summary.get('MainAddiA0WbPrd', 0)} data=0x{int(summary.get('MainAddiA0WbData', 0)):08X} w0={summary.get('MainAddiA0WbW0En', False)} p{summary.get('MainAddiA0WbW0Addr', 0)}=0x{int(summary.get('MainAddiA0WbW0Data', 0)):08X} w1={summary.get('MainAddiA0WbW1En', False)} p{summary.get('MainAddiA0WbW1Addr', 0)}=0x{int(summary.get('MainAddiA0WbW1Data', 0)):08X}",
         f"MockMemReads: {summary.get('MockMemReads', 0)}",
         f"MockMemWrites: {summary.get('MockMemWrites', 0)}",
         f"MockMemRangeErrorCount: {summary.get('MockMemRangeErrorCount', 0)}",
@@ -367,6 +446,11 @@ def format_summary(
         f"LsuReqSeenCount: {summary.get('LsuReqSeenCount', 0)}",
         f"LsuReqAcceptCount: {summary.get('LsuReqAcceptCount', 0)}",
         f"LsuRespSeenCount: {summary.get('LsuRespSeenCount', 0)}",
+        f"LastLsuM1Cooldown: {summary.get('LastLsuM1Cooldown', False)}",
+        f"LastLsuDrainHoldoff: {summary.get('LastLsuDrainHoldoff', False)}",
+        f"LastLsuSbDrainUrgent: {summary.get('LastLsuSbDrainUrgent', False)}",
+        f"LastLsuSbHasPendingStores: {summary.get('LastLsuSbHasPendingStores', False)}",
+        f"LastLsuSbMemWriteValid: {summary.get('LastLsuSbMemWriteValid', False)}",
         f"StoreBufferEmptyLast: {summary.get('StoreBufferEmptyLast', False)}",
         f"StoreCountT0Last: {summary.get('StoreCountT0Last', 0)}",
         f"StoreCountT1Last: {summary.get('StoreCountT1Last', 0)}",
@@ -401,6 +485,8 @@ def format_summary(
         f"LastMemsubsysM0Ddr3RespLast: {summary.get('LastMemsubsysM0Ddr3RespLast', False)}",
         f"LastMemsubsysDdr3ArbState: {summary.get('LastMemsubsysDdr3ArbState', 0)}",
         f"LastMemsubsysDdr3M0WordIdx: {summary.get('LastMemsubsysDdr3M0WordIdx', 0)}",
+        f"DCacheMissEventCount: {summary.get('DCacheMissEventCount', 0)}",
+        f"LastDCacheMissEvent: {summary.get('LastDCacheMissEvent', False)}",
         f"StuckPcSeen: {summary.get('StuckPcSeen', False)}",
         f"StuckPcValue: 0x{int(summary.get('StuckPcValue', 0)):08X}",
         f"StuckPcRepeatCount: {summary.get('StuckPcRepeatCount', 0)}",
@@ -437,6 +523,11 @@ def main() -> int:
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--cpu-hz", type=int, default=25_000_000)
     parser.add_argument("--mock-latency", type=int, default=1)
+    parser.add_argument(
+        "--dcache-mode",
+        choices=("full", "passthrough", "registered-pt", "read-only"),
+        default="full",
+    )
     parser.add_argument("--max-cycles", type=int, default=20_000_000)
     parser.add_argument("--header-gap-cycles", type=int, default=16)
     parser.add_argument("--payload-gap-cycles", type=int, default=2)
@@ -455,7 +546,7 @@ def main() -> int:
     which_required("wsl")
     which_required_wsl("verilator", "make", "g++")
 
-    run_dir = BUILD_ROOT / args.mode / f"{args.benchmark}_runs{args.runs}"
+    run_dir = BUILD_ROOT / args.mode / f"{args.benchmark}_runs{args.runs}_lat{args.mock_latency}_{args.dcache_mode}"
     obj_dir = run_dir / ("obj_dir_trace" if (args.trace or args.trace_on_stuck) else "obj_dir")
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
@@ -488,6 +579,7 @@ def main() -> int:
         harness_cpp=harness_cpp,
         top_sv=top_sv,
         mock_sv=mock_sv,
+        dcache_mode=args.dcache_mode,
         preload_direct_boot=(args.mode == "preload"),
         enable_trace=(args.trace or args.trace_on_stuck),
     )
@@ -576,6 +668,8 @@ def main() -> int:
     summary["ConfiguredRuns"] = args.runs
     summary["EffectiveRuns"] = effective_runs
     summary["VerilatorFixedRuns"] = verilator_fixed_runs
+    summary["DCacheMode"] = args.dcache_mode
+    summary["MockLatency"] = args.mock_latency
     summary["TraceStartCycle"] = int(args.trace_start_cycle or 0)
     summary["TraceStopCycle"] = int(args.trace_stop_cycle or 0)
     summary.update(

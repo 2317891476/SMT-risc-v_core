@@ -8,6 +8,7 @@ csr_unit.v
 ctrl.v
 data_memory.v
 ddr3_mem_port.v
+l1_dcache_m1.v
 decoder_dual.v
 define.v
 dispatch_unit.v

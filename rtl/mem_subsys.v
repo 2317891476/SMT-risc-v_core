@@ -171,6 +171,40 @@ wire        m0_ddr3_resp_last;
 wire        m1_ddr3_req_ready;
 wire        m1_ddr3_resp_valid;
 wire [31:0] m1_ddr3_resp_data;
+
+// L1 DCache wrapper: sits between M1 DDR3 check and DDR3 arbiter
+wire        dc_m1_req_valid;
+wire        dc_m1_req_ready;
+wire [31:0] dc_m1_req_addr;
+wire        dc_m1_req_write;
+wire [31:0] dc_m1_req_wdata;
+wire [3:0]  dc_m1_req_wen;
+wire        dc_m1_resp_valid;
+wire [31:0] dc_m1_resp_data;
+wire        dcache_miss_event;
+
+l1_dcache_m1 u_dcache_m1 (
+    .clk              (clk),
+    .rstn             (rstn),
+    .up_m1_req_valid  (m1_ddr3_req),
+    .up_m1_req_ready  (m1_ddr3_req_ready),
+    .up_m1_req_addr   (m1_req_addr),
+    .up_m1_req_write  (m1_req_write),
+    .up_m1_req_wdata  (m1_req_wdata),
+    .up_m1_req_wen    (m1_req_wen),
+    .up_m1_resp_valid (m1_ddr3_resp_valid),
+    .up_m1_resp_data  (m1_ddr3_resp_data),
+    .dn_m1_req_valid  (dc_m1_req_valid),
+    .dn_m1_req_ready  (dc_m1_req_ready),
+    .dn_m1_req_addr   (dc_m1_req_addr),
+    .dn_m1_req_write  (dc_m1_req_write),
+    .dn_m1_req_wdata  (dc_m1_req_wdata),
+    .dn_m1_req_wen    (dc_m1_req_wen),
+    .dn_m1_resp_valid (dc_m1_resp_valid),
+    .dn_m1_resp_data  (dc_m1_resp_data),
+    .dcache_miss_event(dcache_miss_event)
+);
+
 wire        ddr3_calib_done_w = ddr3_init_calib_complete;
 wire        ddr3_bridge_idle_w;
 `else
@@ -942,8 +976,8 @@ reg [31:0] debug_m0_last_req_addr_r;
 reg [31:0] debug_m0_last_resp_data_r;
 reg [7:0]  debug_m1_accept_count_r;
 
-wire ddr3_select_m0 = m0_ddr3_req && (!m1_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M1);
-wire ddr3_select_m1 = m1_ddr3_req && (!m0_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M0);
+wire ddr3_select_m0 = m0_ddr3_req && (!dc_m1_req_valid || ddr3_last_owner_r == DDR3_OWNER_M1);
+wire ddr3_select_m1 = dc_m1_req_valid && (!m0_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M0);
 wire [7:0] debug_m0_flags = {
     ddr3_arb_state,
     ddr3_owner_r,
@@ -963,9 +997,9 @@ assign m0_ddr3_req_ready  = m0_ddr3_req_ready_r;
 assign m0_ddr3_resp_valid = m0_ddr3_resp_valid_r;
 assign m0_ddr3_resp_data  = m0_ddr3_resp_data_r;
 assign m0_ddr3_resp_last  = m0_ddr3_resp_last_r;
-assign m1_ddr3_req_ready  = m1_ddr3_req_ready_r;
-assign m1_ddr3_resp_valid = m1_ddr3_resp_valid_r;
-assign m1_ddr3_resp_data  = m1_ddr3_resp_data_r;
+assign dc_m1_req_ready  = m1_ddr3_req_ready_r;
+assign dc_m1_resp_valid = m1_ddr3_resp_valid_r;
+assign dc_m1_resp_data  = m1_ddr3_resp_data_r;
 assign debug_ddr3_m0_bus = {
     debug_uart_flags,
     debug_uart_tx_write_count_r,
@@ -1033,10 +1067,10 @@ always @(posedge clk or negedge rstn) begin
                     ddr3_arb_state      <= DDR3_ARB_M0_SEND;
                 end else if (ddr3_select_m1) begin
                     ddr3_owner_r        <= DDR3_OWNER_M1;
-                    ddr3_req_addr_r     <= {2'b0, m1_req_addr[29:0]};
-                    ddr3_req_write_r    <= m1_req_write;
-                    ddr3_req_wdata_r    <= m1_req_wdata;
-                    ddr3_req_wen_r      <= m1_req_wen;
+                    ddr3_req_addr_r     <= {2'b0, dc_m1_req_addr[29:0]};
+                    ddr3_req_write_r    <= dc_m1_req_write;
+                    ddr3_req_wdata_r    <= dc_m1_req_wdata;
+                    ddr3_req_wen_r      <= dc_m1_req_wen;
                     ddr3_arb_state      <= DDR3_ARB_M0_SEND;
                 end
             end

@@ -311,6 +311,7 @@ reg [`METADATA_ORDER_ID_W-1:0] reg_result_order [0:NUM_THREAD-1][0:31];
 // Tag-liveness tracking (matches scoreboard's approach)
 reg  [0:RS_DEPTH]  tag_live_valid_v;
 reg [`METADATA_ORDER_ID_W-1:0] tag_live_seq [0:RS_DEPTH];
+reg [`METADATA_ORDER_ID_W-1:0] tag_ready_seq [0:RS_DEPTH];
 
 // ═════════════════════════════════════════════════════════════════
 // 3. Dependency Lookup (combinational)
@@ -323,41 +324,61 @@ wire alloc1_wr = disp1_valid && disp1_regs_write && (disp1_rd != 5'd0);
 
 // Disp0 deps — no same-cycle forwarding from disp0 itself
 reg [RS_TAG_W-1:0] d0_src1, d0_src2;
+reg [`METADATA_ORDER_ID_W-1:0] d0_src1_order, d0_src2_order;
 always @(*) begin : dep_lookup_d0
     reg [RS_TAG_W-1:0] t1, t2;
+    reg src1_commit_ready, src2_commit_ready;
     t1 = reg_result[disp0_tid][disp0_rs1];
     t2 = reg_result[disp0_tid][disp0_rs2];
+    src1_commit_ready =
+        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == t1) &&
+         (commit0_order_id == reg_result_order[disp0_tid][disp0_rs1])) ||
+        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == t1) &&
+         (commit1_order_id == reg_result_order[disp0_tid][disp0_rs1]));
+    src2_commit_ready =
+        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == t2) &&
+         (commit0_order_id == reg_result_order[disp0_tid][disp0_rs2])) ||
+        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == t2) &&
+         (commit1_order_id == reg_result_order[disp0_tid][disp0_rs2]));
 
     // d0_src1
+    d0_src1_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp0_rs1_used)
         d0_src1 = {RS_TAG_W{1'b0}};
     else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
              tag_live_seq[t1] == reg_result_order[disp0_tid][disp0_rs1]) begin
-        if (tag_ready_v[t1])
+        if ((tag_ready_v[t1] && tag_ready_seq[t1] == reg_result_order[disp0_tid][disp0_rs1]) ||
+            src1_commit_ready)
             d0_src1 = {RS_TAG_W{1'b0}};
         else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
             d0_src1 = {RS_TAG_W{1'b0}};
         else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
             d0_src1 = {RS_TAG_W{1'b0}};
-        else
+        else begin
             d0_src1 = t1;
+            d0_src1_order = reg_result_order[disp0_tid][disp0_rs1];
+        end
     end
     else
         d0_src1 = {RS_TAG_W{1'b0}};
 
     // d0_src2
+    d0_src2_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp0_rs2_used)
         d0_src2 = {RS_TAG_W{1'b0}};
     else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
              tag_live_seq[t2] == reg_result_order[disp0_tid][disp0_rs2]) begin
-        if (tag_ready_v[t2])
+        if ((tag_ready_v[t2] && tag_ready_seq[t2] == reg_result_order[disp0_tid][disp0_rs2]) ||
+            src2_commit_ready)
             d0_src2 = {RS_TAG_W{1'b0}};
         else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
             d0_src2 = {RS_TAG_W{1'b0}};
         else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
             d0_src2 = {RS_TAG_W{1'b0}};
-        else
+        else begin
             d0_src2 = t2;
+            d0_src2_order = reg_result_order[disp0_tid][disp0_rs2];
+        end
     end
     else
         d0_src2 = {RS_TAG_W{1'b0}};
@@ -365,45 +386,69 @@ end
 
 // Disp1 deps — check same-cycle RAW from disp0
 reg [RS_TAG_W-1:0] d1_src1, d1_src2;
+reg [`METADATA_ORDER_ID_W-1:0] d1_src1_order, d1_src2_order;
 always @(*) begin : dep_lookup_d1
     reg [RS_TAG_W-1:0] t1, t2;
+    reg src1_commit_ready, src2_commit_ready;
     t1 = reg_result[disp1_tid][disp1_rs1];
     t2 = reg_result[disp1_tid][disp1_rs2];
+    src1_commit_ready =
+        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == t1) &&
+         (commit0_order_id == reg_result_order[disp1_tid][disp1_rs1])) ||
+        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == t1) &&
+         (commit1_order_id == reg_result_order[disp1_tid][disp1_rs1]));
+    src2_commit_ready =
+        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == t2) &&
+         (commit0_order_id == reg_result_order[disp1_tid][disp1_rs2])) ||
+        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == t2) &&
+         (commit1_order_id == reg_result_order[disp1_tid][disp1_rs2]));
 
     // d1_src1
+    d1_src1_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp1_rs1_used)
         d1_src1 = {RS_TAG_W{1'b0}};
-    else if (alloc0_wr && disp0_rd == disp1_rs1 && disp0_tid == disp1_tid)
+    else if (alloc0_wr && disp0_rd == disp1_rs1 && disp0_tid == disp1_tid) begin
         d1_src1 = free0_tag;
+        d1_src1_order = disp0_order_id;
+    end
     else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
              tag_live_seq[t1] == reg_result_order[disp1_tid][disp1_rs1]) begin
-        if (tag_ready_v[t1])
+        if ((tag_ready_v[t1] && tag_ready_seq[t1] == reg_result_order[disp1_tid][disp1_rs1]) ||
+            src1_commit_ready)
             d1_src1 = {RS_TAG_W{1'b0}};
         else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
             d1_src1 = {RS_TAG_W{1'b0}};
         else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
             d1_src1 = {RS_TAG_W{1'b0}};
-        else
+        else begin
             d1_src1 = t1;
+            d1_src1_order = reg_result_order[disp1_tid][disp1_rs1];
+        end
     end
     else
         d1_src1 = {RS_TAG_W{1'b0}};
 
     // d1_src2
+    d1_src2_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp1_rs2_used)
         d1_src2 = {RS_TAG_W{1'b0}};
-    else if (alloc0_wr && disp0_rd == disp1_rs2 && disp0_tid == disp1_tid)
+    else if (alloc0_wr && disp0_rd == disp1_rs2 && disp0_tid == disp1_tid) begin
         d1_src2 = free0_tag;
+        d1_src2_order = disp0_order_id;
+    end
     else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
              tag_live_seq[t2] == reg_result_order[disp1_tid][disp1_rs2]) begin
-        if (tag_ready_v[t2])
+        if ((tag_ready_v[t2] && tag_ready_seq[t2] == reg_result_order[disp1_tid][disp1_rs2]) ||
+            src2_commit_ready)
             d1_src2 = {RS_TAG_W{1'b0}};
         else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
             d1_src2 = {RS_TAG_W{1'b0}};
         else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
             d1_src2 = {RS_TAG_W{1'b0}};
-        else
+        else begin
             d1_src2 = t2;
+            d1_src2_order = reg_result_order[disp1_tid][disp1_rs2];
+        end
     end
     else
         d1_src2 = {RS_TAG_W{1'b0}};
@@ -718,6 +763,8 @@ issue_queue #(
     .disp0_epoch       (iq_int_dp0_from1 ? disp1_epoch       : disp0_epoch),
     .disp0_src1_tag    (iq_int_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_int_dp0_from1 ? d1_src2   : d0_src2),
+    .disp0_src1_order_id(iq_int_dp0_from1 ? d1_src1_order : d0_src1_order),
+    .disp0_src2_order_id(iq_int_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1 — only when both disp0 and disp1 are INT
     .disp1_valid       (d0_go && d0_is_int && d1_go && d1_is_int),
     .disp1_tag         (free1_tag),
@@ -746,6 +793,8 @@ issue_queue #(
     .disp1_epoch       (disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
+    .disp1_src1_order_id(d1_src1_order),
+    .disp1_src2_order_id(d1_src2_order),
     // Outputs
     .iq_full        (iq_int_full),
     .iq_almost_full (iq_int_almost_full),
@@ -780,9 +829,13 @@ issue_queue #(
     // Wakeup
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
+    .wb0_tid         (wb0_tid),
+    .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
+    .wb1_tid         (wb1_tid),
+    .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     // Commit
     .commit0_valid   (commit0_valid),
@@ -853,6 +906,8 @@ issue_queue #(
     .disp0_epoch       (iq_mem_dp0_from1 ? disp1_epoch       : disp0_epoch),
     .disp0_src1_tag    (iq_mem_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_mem_dp0_from1 ? d1_src2   : d0_src2),
+    .disp0_src1_order_id(iq_mem_dp0_from1 ? d1_src1_order : d0_src1_order),
+    .disp0_src2_order_id(iq_mem_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
     .disp1_valid       (d0_go && d0_is_mem && d1_go && d1_is_mem),
     .disp1_tag         (free1_tag),
@@ -881,6 +936,8 @@ issue_queue #(
     .disp1_epoch       (disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
+    .disp1_src1_order_id(d1_src1_order),
+    .disp1_src2_order_id(d1_src2_order),
     // Outputs
     .iq_full        (iq_mem_full),
     .iq_almost_full (iq_mem_almost_full),
@@ -913,9 +970,13 @@ issue_queue #(
     .iss_epoch       (mem_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
+    .wb0_tid         (wb0_tid),
+    .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
+    .wb1_tid         (wb1_tid),
+    .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
@@ -983,6 +1044,8 @@ issue_queue #(
     .disp0_epoch       (iq_mul_dp0_from1 ? disp1_epoch       : disp0_epoch),
     .disp0_src1_tag    (iq_mul_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_mul_dp0_from1 ? d1_src2   : d0_src2),
+    .disp0_src1_order_id(iq_mul_dp0_from1 ? d1_src1_order : d0_src1_order),
+    .disp0_src2_order_id(iq_mul_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
     .disp1_valid       (d0_go && d0_is_mul && d1_go && d1_is_mul),
     .disp1_tag         (free1_tag),
@@ -1011,6 +1074,8 @@ issue_queue #(
     .disp1_epoch       (disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
+    .disp1_src1_order_id(d1_src1_order),
+    .disp1_src2_order_id(d1_src2_order),
     // Outputs
     .iq_full        (iq_mul_full),
     .iq_almost_full (iq_mul_almost_full),
@@ -1043,9 +1108,13 @@ issue_queue #(
     .iss_epoch       (mul_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
+    .wb0_tid         (wb0_tid),
+    .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
+    .wb1_tid         (wb1_tid),
+    .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
@@ -1113,6 +1182,8 @@ issue_queue #(
     .disp0_epoch       (iq_div_dp0_from1 ? disp1_epoch       : disp0_epoch),
     .disp0_src1_tag    (iq_div_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_div_dp0_from1 ? d1_src2   : d0_src2),
+    .disp0_src1_order_id(iq_div_dp0_from1 ? d1_src1_order : d0_src1_order),
+    .disp0_src2_order_id(iq_div_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
     .disp1_valid       (d0_go && d0_is_div && d1_go && d1_is_div),
     .disp1_tag         (free1_tag),
@@ -1141,6 +1212,8 @@ issue_queue #(
     .disp1_epoch       (disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
+    .disp1_src1_order_id(d1_src1_order),
+    .disp1_src2_order_id(d1_src2_order),
     // Outputs
     .iq_full        (iq_div_full),
     .iq_almost_full (iq_div_almost_full),
@@ -1173,9 +1246,13 @@ issue_queue #(
     .iss_epoch       (div_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
+    .wb0_tid         (wb0_tid),
+    .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
+    .wb1_tid         (wb1_tid),
+    .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
@@ -1606,6 +1683,7 @@ always @(posedge clk or negedge rstn) begin
             tag_just_ready[ti] <= 1'b0;
             tag_live_valid_v[ti] <= 1'b0;
             tag_live_seq[ti]   <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_ready_seq[ti]  <= {`METADATA_ORDER_ID_W{1'b0}};
         end
         for (ti = 0; ti < NUM_THREAD; ti = ti + 1)
             for (ri = 0; ri < 32; ri = ri + 1) begin
@@ -1621,10 +1699,12 @@ always @(posedge clk or negedge rstn) begin
         if (wb0_valid && wb0_regs_write && wb0_tag != {RS_TAG_W{1'b0}}) begin
             tag_ready_v[wb0_tag]    <= 1'b1;
             tag_just_ready[wb0_tag] <= 1'b1;
+            tag_ready_seq[wb0_tag]  <= tag_live_seq[wb0_tag];
         end
         if (wb1_valid && wb1_regs_write && wb1_tag != {RS_TAG_W{1'b0}}) begin
             tag_ready_v[wb1_tag]    <= 1'b1;
             tag_just_ready[wb1_tag] <= 1'b1;
+            tag_ready_seq[wb1_tag]  <= tag_live_seq[wb1_tag];
         end
 
         // ── Commit: free tags, clear reg_result ──
@@ -1632,11 +1712,13 @@ always @(posedge clk or negedge rstn) begin
             tag_in_use[commit0_tag]    <= 1'b0;
             tag_ready_v[commit0_tag]   <= 1'b0;
             tag_live_valid_v[commit0_tag]<= 1'b0;
+            tag_ready_seq[commit0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             // Clear reg_result if still pointing to this tag
             for (ri = 0; ri < 32; ri = ri + 1) begin
                 if (reg_result[commit0_tid][ri] == commit0_tag &&
                     reg_result_order[commit0_tid][ri] == commit0_order_id) begin
                     reg_result[commit0_tid][ri] <= {RS_TAG_W{1'b0}};
+                    reg_result_order[commit0_tid][ri] <= {`METADATA_ORDER_ID_W{1'b0}};
                 end
             end
         end
@@ -1644,18 +1726,25 @@ always @(posedge clk or negedge rstn) begin
             tag_in_use[commit1_tag]    <= 1'b0;
             tag_ready_v[commit1_tag]   <= 1'b0;
             tag_live_valid_v[commit1_tag]<= 1'b0;
+            tag_ready_seq[commit1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             for (ri = 0; ri < 32; ri = ri + 1) begin
                 if (reg_result[commit1_tid][ri] == commit1_tag &&
                     reg_result_order[commit1_tid][ri] == commit1_order_id) begin
                     reg_result[commit1_tid][ri] <= {RS_TAG_W{1'b0}};
+                    reg_result_order[commit1_tid][ri] <= {`METADATA_ORDER_ID_W{1'b0}};
                 end
             end
         end
 
         // ── Flush: clear reg_result for flushed thread ──
         if (flush) begin
-            for (ri = 0; ri < 32; ri = ri + 1)
-                reg_result[flush_tid][ri] <= {RS_TAG_W{1'b0}};
+            for (ri = 0; ri < 32; ri = ri + 1) begin
+                if (!flush_order_valid ||
+                    (reg_result_order[flush_tid][ri] > flush_order_id)) begin
+                    reg_result[flush_tid][ri] <= {RS_TAG_W{1'b0}};
+                    reg_result_order[flush_tid][ri] <= {`METADATA_ORDER_ID_W{1'b0}};
+                end
+            end
         end
 
         // ── Dispatch: allocate tags, update reg_result ──
@@ -1664,6 +1753,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[free0_tag]   <= 1'b0;
             tag_live_valid_v[free0_tag]<= 1'b1;
             tag_live_seq[free0_tag]  <= disp0_order_id;
+            tag_ready_seq[free0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             if (disp0_regs_write && disp0_rd != 5'd0) begin
                 reg_result[disp0_tid][disp0_rd]       <= free0_tag;
                 reg_result_order[disp0_tid][disp0_rd] <= disp0_order_id;
@@ -1674,6 +1764,7 @@ always @(posedge clk or negedge rstn) begin
             tag_ready_v[free1_tag]   <= 1'b0;
             tag_live_valid_v[free1_tag]<= 1'b1;
             tag_live_seq[free1_tag]  <= disp1_order_id;
+            tag_ready_seq[free1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
             if (disp1_regs_write && disp1_rd != 5'd0) begin
                 reg_result[disp1_tid][disp1_rd]       <= free1_tag;
                 reg_result_order[disp1_tid][disp1_rd] <= disp1_order_id;

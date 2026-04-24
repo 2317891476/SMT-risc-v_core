@@ -164,6 +164,7 @@ wire                     sb_debug_empty;
 wire [2:0]               sb_debug_count_t0;
 wire [2:0]               sb_debug_count_t1;
 wire                     sb_stall_event;
+wire                     sb_drain_urgent;
 
 // Load vs Store classification
 wire is_load  = req_valid && !req_wen;
@@ -186,12 +187,19 @@ wire legacy_load_issue_fire;
 // State machine must be idle to accept new requests
 wire state_machine_idle = (lsu_state == LSU_IDLE);
 
+// After completing an M1 transaction, hold off accepting new requests
+// until the store buffer has drained below the full threshold.
+// This prevents store buffer starvation during long-latency loads.
+reg m1_cooldown_r;
+wire sb_has_pending_stores = (sb_debug_count_t0 > 0) || (sb_debug_count_t1 > 0);
+wire m1_drain_holdoff = m1_cooldown_r && sb_has_pending_stores;
+
 // Accept stores when store buffer has space and state machine idle
-wire store_accept = sb_store_accept && state_machine_idle;
+wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff;
 
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
-wire load_accept = !sb_load_hazard && state_machine_idle;
+wire load_accept = !sb_load_hazard && state_machine_idle && !m1_drain_holdoff;
 
 assign req_accept = is_store ? store_accept : load_accept;
 assign store_enqueue_fire = is_store && req_accept;
@@ -267,7 +275,8 @@ store_buffer #(
     .debug_empty            (sb_debug_empty),
     .debug_count_t0         (sb_debug_count_t0),
     .debug_count_t1         (sb_debug_count_t1),
-    .sb_stall_event         (sb_stall_event)
+    .sb_stall_event         (sb_stall_event),
+    .sb_drain_urgent        (sb_drain_urgent)
 );
 
 // Export Store Buffer memory interface
@@ -324,7 +333,8 @@ wire              flush_kills_pending =
                     (!flush_order_valid || (pending_order_id > flush_order_id));
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
-                                ((lsu_state == LSU_IDLE) && !(req_valid && req_accept)) :
+                                ((lsu_state == LSU_IDLE) &&
+                                 (sb_drain_urgent || !(req_valid && req_accept))) :
                                 sb_mem_write_ready;
 
 // State machine
@@ -336,7 +346,10 @@ always @(posedge clk or negedge rstn) begin
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
         dbg_beacon_block_reported_r <= 1'b0;
+        m1_cooldown_r     <= 1'b0;
     end else begin
+        if (!sb_has_pending_stores)
+            m1_cooldown_r <= 1'b0;
         if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
             dbg_beacon_block_reported_r <= 1'b0;
         end
@@ -369,8 +382,20 @@ always @(posedge clk or negedge rstn) begin
         end else begin
         case (lsu_state)
             LSU_IDLE: begin
-                // Ready to accept new request
-                if (req_valid && req_accept) begin
+                // When store buffer is nearly full with committed stores,
+                // prioritize drain over new request acceptance to prevent
+                // store buffer starvation during long-latency loads.
+                if (use_mem_subsys && sb_drain_urgent &&
+                    sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
+                    pending_valid       <= 1'b0;
+                    m1_txn_is_drain     <= 1'b1;
+                    lsu_state           <= LSU_REQ;
+                    m1_req_valid        <= 1'b1;
+                    m1_req_addr         <= sb_mem_write_addr_int;
+                    m1_req_write        <= 1'b1;
+                    m1_req_wdata        <= sb_mem_write_data_int;
+                    m1_req_wen          <= sb_mem_write_wen_int;
+                end else if (req_valid && req_accept) begin
 `ifdef VERBOSE_SIM_LOGS
                     if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                         $display("[DBG_LSU_ACCEPT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
@@ -502,8 +527,9 @@ always @(posedge clk or negedge rstn) begin
                         lsu_state       <= LSU_IDLE;
                         m1_txn_is_drain <= 1'b0;
                     end else begin
-                        raw_mem_rdata <= m1_resp_data;
-                        lsu_state     <= LSU_RESP;
+                        raw_mem_rdata   <= m1_resp_data;
+                        lsu_state       <= LSU_RESP;
+                        m1_cooldown_r   <= 1'b1;
                     end
                 end
             end

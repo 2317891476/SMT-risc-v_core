@@ -89,7 +89,10 @@ module store_buffer #(
     output wire [SB_IDX_W:0]        debug_count_t1,
 
     // HPM event
-    output wire                     sb_stall_event
+    output wire                     sb_stall_event,
+
+    // Drain urgency: a committed store is ready AND buffer is nearly full
+    output wire                     sb_drain_urgent
 );
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -120,6 +123,9 @@ wire sb_empty_t0 = (sb_count[0] == 0);
 wire sb_empty_t1 = (sb_count[1] == 0);
 
 assign sb_stall_event = sb_full_t0 || sb_full_t1;
+
+assign sb_drain_urgent = (t0_can_drain && sb_issue_full_t0) ||
+                         (t1_can_drain && sb_issue_full_t1);
 
 // Accept new stores only while one slot remains reserved for the oldest
 // not-yet-issued store. This buffer drains in FIFO issue order but only grants

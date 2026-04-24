@@ -4360,8 +4360,28 @@ def main() -> int:
                 rom_asm=BEACON_SELFTEST_ROM,
             )
             if args.skip_vivado:
-                uart_result = analyze_loader_beacon_selftest_sim_log(read_text(sim_log))
-                uart_result["decoded_log_path"] = str(sim_log)
+                sim_result = analyze_loader_beacon_selftest_sim_log(read_text(sim_log))
+                uart_result = {
+                    "loader_beacon_selftest_pass": bool(sim_result.get("pass", False)),
+                    "loader_session_count": int(sim_result.get("session_count", 0)),
+                    "loader_pass_session_count": int(sim_result.get("pass_session_count", 0)),
+                    "loader_bad_frames": int(sim_result.get("bad_frames", 0)),
+                    "loader_good_frames": int(sim_result.get("good_frames", 0)),
+                    "loader_session_classification": sim_result.get("session_classification", "no_ready_session"),
+                    "loader_chosen_session_index": sim_result.get("chosen_session_index"),
+                    "loader_chosen_session_start_offset": sim_result.get("chosen_session_start_offset"),
+                    "loader_chosen_session_ready_arg": sim_result.get("chosen_session_ready_arg"),
+                    "loader_chosen_session_first_events": list(sim_result.get("chosen_session_first_event_types", [])),
+                    "loader_chosen_session_matched_prefix_len": int(sim_result.get("chosen_session_matched_prefix_len", 0)),
+                    "loader_chosen_session_event_count": int(sim_result.get("chosen_session_event_count", 0)),
+                    "loader_chosen_session_order_valid": bool(sim_result.get("chosen_session_order_valid", False)),
+                    "loader_chosen_session_order_error": str(sim_result.get("chosen_session_order_error", "")),
+                    "loader_decoded_log_path": str(sim_log),
+                    "decoded_log_path": str(sim_log),
+                    "loader_sessions_json_path": "N/A",
+                    "capture_bytes": int(sim_result.get("capture_bytes", 0)),
+                    "bad_reason": "none" if bool(sim_result.get("pass", False)) else str(sim_result.get("session_classification", "no_ready_session")),
+                }
         elif args.loader_early_audit:
             current_stage = "build_dhrystone_payload"
             manifest = build_dhrystone_payload(

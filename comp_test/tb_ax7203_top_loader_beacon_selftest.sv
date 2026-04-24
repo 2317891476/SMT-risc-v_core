@@ -1,3 +1,5 @@
+`timescale 1ns/1ps
+
 module tb_ax7203_top_loader_beacon_selftest;
     reg sys_clk_p;
     reg sys_clk_n;
@@ -195,6 +197,15 @@ module tb_ax7203_top_loader_beacon_selftest;
         sys_rst_n = 1'b1;
     end
 
+    initial begin : sim_fast_por
+        wait (sys_rst_n === 1'b1);
+        force dut.por_cnt = 16'hFFFF;
+        force dut.por_rst_n = 1'b1;
+        #20;
+        release dut.por_cnt;
+        release dut.por_rst_n;
+    end
+
     always @(posedge core_uart_tx_start) begin
         if (!beacon_collecting && (core_uart_tx_byte == BEACON_SOF)) begin
             beacon_collecting = 1'b1;
@@ -223,8 +234,9 @@ module tb_ax7203_top_loader_beacon_selftest;
 
     initial begin : timeout_guard
         #TB_TIMEOUT_NS;
-        $display("[AX7203_LOADER_BEACON_SELFTEST] TIMEOUT match_count=%0d unique=%0d dup=%0d good=%0d bad=%0d summary=%0b order_error=%0b tube=%02h led=%b",
-                 match_count, unique_good_frames, duplicate_frames, good_frames, bad_frames, saw_summary, order_error, dut.tube_status, led);
+        $display("[AX7203_LOADER_BEACON_SELFTEST] TIMEOUT match_count=%0d unique=%0d dup=%0d good=%0d bad=%0d summary=%0b order_error=%0b tube=%02h led=%b core_ready=%0b por=%0b calib=%0b",
+                 match_count, unique_good_frames, duplicate_frames, good_frames, bad_frames, saw_summary, order_error, dut.tube_status, led,
+                 dut.core_ready, dut.por_rst_n, dut.mig_init_calib_complete);
         $fatal(1);
     end
 

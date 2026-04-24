@@ -61,6 +61,8 @@ module issue_queue #(
     // Source dependencies (from rename / reg_result)
     input  wire [RS_TAG_W-1:0]              disp0_src1_tag,  // 0 = ready
     input  wire [RS_TAG_W-1:0]              disp0_src2_tag,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_src1_order_id,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_src2_order_id,
 
     // ─── Dispatch Port 1 ────────────────────────────────────────
     input  wire        disp1_valid,
@@ -90,6 +92,8 @@ module issue_queue #(
     input  wire [`METADATA_EPOCH_W-1:0]     disp1_epoch,
     input  wire [RS_TAG_W-1:0]              disp1_src1_tag,
     input  wire [RS_TAG_W-1:0]              disp1_src2_tag,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_src1_order_id,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_src2_order_id,
 
     // ─── Stall / Capacity ────────────────────────────────────────
     output wire        iq_full,           // cannot accept even 1
@@ -127,9 +131,13 @@ module issue_queue #(
     // ─── Wakeup / CDB ports ─────────────────────────────────────
     input  wire        wb0_valid,
     input  wire [RS_TAG_W-1:0] wb0_tag,
+    input  wire [0:0]  wb0_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] wb0_order_id,
     input  wire        wb0_regs_write,
     input  wire        wb1_valid,
     input  wire [RS_TAG_W-1:0] wb1_tag,
+    input  wire [0:0]  wb1_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] wb1_order_id,
     input  wire        wb1_regs_write,
 
     // ─── Commit (deallocation) ───────────────────────────────────
@@ -164,6 +172,8 @@ module issue_queue #(
     reg  [`METADATA_EPOCH_W-1:0]    e_epoch  [0:IQ_DEPTH-1];
     reg  [RS_TAG_W-1:0]             e_qj     [0:IQ_DEPTH-1]; // src1 dep
     reg  [RS_TAG_W-1:0]             e_qk     [0:IQ_DEPTH-1]; // src2 dep
+    reg  [`METADATA_ORDER_ID_W-1:0] e_qj_order [0:IQ_DEPTH-1];
+    reg  [`METADATA_ORDER_ID_W-1:0] e_qk_order [0:IQ_DEPTH-1];
     reg                              e_ready  [0:IQ_DEPTH-1];
     reg  [1:0]                       e_wake_hold [0:IQ_DEPTH-1];
     reg                              e_just_woke [0:IQ_DEPTH-1];
@@ -432,6 +442,7 @@ module issue_queue #(
     // ═══ Sequential Logic ═══
     integer i;
     reg [RS_TAG_W-1:0] nqj, nqk;
+    reg [`METADATA_ORDER_ID_W-1:0] nqj_order, nqk_order;
     reg woke_src;
     reg [1:0] next_wake_hold;
 
@@ -443,6 +454,8 @@ module issue_queue #(
                 e_ready[i]     <= 1'b0;
                 e_qj[i]        <= {RS_TAG_W{1'b0}};
                 e_qk[i]        <= {RS_TAG_W{1'b0}};
+                e_qj_order[i]  <= {`METADATA_ORDER_ID_W{1'b0}};
+                e_qk_order[i]  <= {`METADATA_ORDER_ID_W{1'b0}};
                 e_just_woke[i] <= 1'b0;
                 e_wake_hold[i] <= 2'd0;
             end
@@ -474,27 +487,53 @@ module issue_queue #(
                 if (e_valid[i] && !e_issued[i]) begin
                     nqj = e_qj[i];
                     nqk = e_qk[i];
+                    nqj_order = e_qj_order[i];
+                    nqk_order = e_qk_order[i];
                     woke_src = 1'b0;
 
                     // WB port 0
                     if (wb0_valid && wb0_regs_write && (wb0_tag != {RS_TAG_W{1'b0}})) begin
-                        if (nqj == wb0_tag) begin nqj = {RS_TAG_W{1'b0}}; woke_src = 1'b1; end
-                        if (nqk == wb0_tag) begin nqk = {RS_TAG_W{1'b0}}; woke_src = 1'b1; end
+                        if ((nqj == wb0_tag) && (e_tid[i] == wb0_tid) && (nqj_order == wb0_order_id)) begin
+                            nqj = {RS_TAG_W{1'b0}};
+                            nqj_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
+                        if ((nqk == wb0_tag) && (e_tid[i] == wb0_tid) && (nqk_order == wb0_order_id)) begin
+                            nqk = {RS_TAG_W{1'b0}};
+                            nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
                     end
                     // WB port 1
                     if (wb1_valid && wb1_regs_write && (wb1_tag != {RS_TAG_W{1'b0}})) begin
-                        if (nqj == wb1_tag) begin nqj = {RS_TAG_W{1'b0}}; woke_src = 1'b1; end
-                        if (nqk == wb1_tag) begin nqk = {RS_TAG_W{1'b0}}; woke_src = 1'b1; end
+                        if ((nqj == wb1_tag) && (e_tid[i] == wb1_tid) && (nqj_order == wb1_order_id)) begin
+                            nqj = {RS_TAG_W{1'b0}};
+                            nqj_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
+                        if ((nqk == wb1_tag) && (e_tid[i] == wb1_tid) && (nqk_order == wb1_order_id)) begin
+                            nqk = {RS_TAG_W{1'b0}};
+                            nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
                     end
 
                     e_qj[i]    <= nqj;
                     e_qk[i]    <= nqk;
+                    e_qj_order[i] <= nqj_order;
+                    e_qk_order[i] <= nqk_order;
                     e_ready[i] <= (nqj == {RS_TAG_W{1'b0}}) && (nqk == {RS_TAG_W{1'b0}});
 
                     // Clear src tags when dependency resolves — prevents stale
                     // tagbuf lookups after the producing tag is recycled.
-                    if (nqj == {RS_TAG_W{1'b0}}) e_src1_tag[i] <= {RS_TAG_W{1'b0}};
-                    if (nqk == {RS_TAG_W{1'b0}}) e_src2_tag[i] <= {RS_TAG_W{1'b0}};
+                    if (nqj == {RS_TAG_W{1'b0}}) begin
+                        e_src1_tag[i] <= {RS_TAG_W{1'b0}};
+                        e_qj_order[i] <= {`METADATA_ORDER_ID_W{1'b0}};
+                    end
+                    if (nqk == {RS_TAG_W{1'b0}}) begin
+                        e_src2_tag[i] <= {RS_TAG_W{1'b0}};
+                        e_qk_order[i] <= {`METADATA_ORDER_ID_W{1'b0}};
+                    end
 
                     // Wake hold counter
                     next_wake_hold = e_wake_hold[i];
@@ -511,12 +550,14 @@ module issue_queue #(
             if (DEALLOC_AT_COMMIT) begin
                 if (commit0_valid) begin
                     for (i = 0; i < IQ_DEPTH; i = i + 1)
-                        if (e_valid[i] && e_tag[i] == commit0_tag && e_tid[i] == commit0_tid)
+                        if (e_valid[i] && e_tag[i] == commit0_tag && e_tid[i] == commit0_tid &&
+                            e_order_id[i] == commit0_order_id)
                             e_valid[i] <= 1'b0;
                 end
                 if (commit1_valid) begin
                     for (i = 0; i < IQ_DEPTH; i = i + 1)
-                        if (e_valid[i] && e_tag[i] == commit1_tag && e_tid[i] == commit1_tid)
+                        if (e_valid[i] && e_tag[i] == commit1_tag && e_tid[i] == commit1_tid &&
+                            e_order_id[i] == commit1_order_id)
                             e_valid[i] <= 1'b0;
                 end
             end
@@ -532,6 +573,10 @@ module issue_queue #(
                 e_seq[free0_idx]       <= alloc_seq;
                 e_qj[free0_idx]        <= disp0_rs1_used ? disp0_src1_tag : {RS_TAG_W{1'b0}};
                 e_qk[free0_idx]        <= disp0_rs2_used ? disp0_src2_tag : {RS_TAG_W{1'b0}};
+                e_qj_order[free0_idx]  <= (disp0_rs1_used && (disp0_src1_tag != {RS_TAG_W{1'b0}})) ? disp0_src1_order_id :
+                                          {`METADATA_ORDER_ID_W{1'b0}};
+                e_qk_order[free0_idx]  <= (disp0_rs2_used && (disp0_src2_tag != {RS_TAG_W{1'b0}})) ? disp0_src2_order_id :
+                                          {`METADATA_ORDER_ID_W{1'b0}};
                 e_ready[free0_idx]     <= (!disp0_rs1_used || disp0_src1_tag == {RS_TAG_W{1'b0}}) &&
                                           (!disp0_rs2_used || disp0_src2_tag == {RS_TAG_W{1'b0}});
                 e_just_woke[free0_idx] <= 1'b0;
@@ -572,6 +617,10 @@ module issue_queue #(
                 e_seq[free1_idx]       <= alloc_seq + (disp0_valid ? 16'd1 : 16'd0);
                 e_qj[free1_idx]        <= disp1_rs1_used ? disp1_src1_tag : {RS_TAG_W{1'b0}};
                 e_qk[free1_idx]        <= disp1_rs2_used ? disp1_src2_tag : {RS_TAG_W{1'b0}};
+                e_qj_order[free1_idx]  <= (disp1_rs1_used && (disp1_src1_tag != {RS_TAG_W{1'b0}})) ? disp1_src1_order_id :
+                                          {`METADATA_ORDER_ID_W{1'b0}};
+                e_qk_order[free1_idx]  <= (disp1_rs2_used && (disp1_src2_tag != {RS_TAG_W{1'b0}})) ? disp1_src2_order_id :
+                                          {`METADATA_ORDER_ID_W{1'b0}};
                 e_ready[free1_idx]     <= (!disp1_rs1_used || disp1_src1_tag == {RS_TAG_W{1'b0}}) &&
                                           (!disp1_rs2_used || disp1_src2_tag == {RS_TAG_W{1'b0}});
                 e_just_woke[free1_idx] <= 1'b0;

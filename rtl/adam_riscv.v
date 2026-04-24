@@ -633,6 +633,11 @@ reg [5:0] tag_prd_map  [0:31];   // dest phys reg for each RS tag
 reg [5:0] tag_prs1_map [0:31];   // source 1 phys reg for each RS tag
 reg [5:0] tag_prs2_map [0:31];   // source 2 phys reg for each RS tag
 reg [0:0] tag_tid_map  [0:31];   // thread ID for each RS tag
+`ifdef VERILATOR_MAINLINE
+reg [31:0] tag_pc_map [0:31];
+reg [`METADATA_ORDER_ID_W-1:0] tag_order_map [0:31];
+reg [4:0] tag_rd_map [0:31];
+`endif
 integer tp_idx;
 
 always @(posedge clk or negedge rstn) begin
@@ -642,6 +647,11 @@ always @(posedge clk or negedge rstn) begin
             tag_prs1_map[tp_idx] <= 6'd0;
             tag_prs2_map[tp_idx] <= 6'd0;
             tag_tid_map[tp_idx]  <= 1'b0;
+`ifdef VERILATOR_MAINLINE
+            tag_pc_map[tp_idx] <= 32'd0;
+            tag_order_map[tp_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
+            tag_rd_map[tp_idx] <= 5'd0;
+`endif
         end
     end else begin
         if (disp0_accepted && sb_disp0_tag != 5'd0) begin
@@ -649,12 +659,22 @@ always @(posedge clk or negedge rstn) begin
             tag_prs1_map[sb_disp0_tag] <= rmt_prs0_1;
             tag_prs2_map[sb_disp0_tag] <= rmt_prs0_2;
             tag_tid_map[sb_disp0_tag]  <= dec0_tid;
+`ifdef VERILATOR_MAINLINE
+            tag_pc_map[sb_disp0_tag] <= dec0_pc;
+            tag_order_map[sb_disp0_tag] <= disp0_order_id;
+            tag_rd_map[sb_disp0_tag] <= dec0_rd;
+`endif
         end
         if (disp1_accepted && sb_disp1_tag != 5'd0) begin
             tag_prd_map[sb_disp1_tag]  <= shadow_alloc1_valid ? fl_alloc1_prd : 6'd0;
             tag_prs1_map[sb_disp1_tag] <= rmt_prs1_1;
             tag_prs2_map[sb_disp1_tag] <= rmt_prs1_2;
             tag_tid_map[sb_disp1_tag]  <= dec1_tid;
+`ifdef VERILATOR_MAINLINE
+            tag_pc_map[sb_disp1_tag] <= dec1_pc;
+            tag_order_map[sb_disp1_tag] <= disp1_order_id;
+            tag_rd_map[sb_disp1_tag] <= dec1_rd;
+`endif
         end
     end
 end
@@ -1955,9 +1975,154 @@ reg  [`METADATA_ORDER_ID_W-1:0] ro1_order_id;
 reg  [`METADATA_EPOCH_W-1:0]    ro1_epoch;
 reg  [31:0] ro1_op_a, ro1_op_b;
 
+`ifdef VERILATOR_MAINLINE
+reg  [4:0]  ro1_dbg_rs1, ro1_dbg_rs2;
+reg  [4:0]  ro1_dbg_src1_tag, ro1_dbg_src2_tag;
+reg  [5:0]  ro1_dbg_prs1, ro1_dbg_prs2;
+reg  [31:0] ro1_dbg_prf_a, ro1_dbg_prf_b;
+reg         ro1_dbg_tagbuf_a_valid, ro1_dbg_tagbuf_b_valid;
+reg  [31:0] ro1_dbg_tagbuf_a_data, ro1_dbg_tagbuf_b_data;
+reg  [1:0]  ro1_dbg_fwd_a, ro1_dbg_fwd_b;
+
+reg         dbg_bad_uart_store_seen_r;
+reg  [31:0] dbg_bad_uart_store_pc_r;
+reg  [31:0] dbg_bad_uart_store_addr_r;
+reg  [31:0] dbg_bad_uart_store_op_a_r;
+reg  [31:0] dbg_bad_uart_store_op_b_r;
+reg  [31:0] dbg_bad_uart_store_imm_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_bad_uart_store_order_id_r;
+reg  [4:0]  dbg_bad_uart_store_tag_r;
+reg  [4:0]  dbg_bad_uart_store_rd_r;
+reg  [4:0]  dbg_bad_uart_store_rs1_r;
+reg  [4:0]  dbg_bad_uart_store_rs2_r;
+reg  [4:0]  dbg_bad_uart_store_src1_tag_r;
+reg  [4:0]  dbg_bad_uart_store_src2_tag_r;
+reg  [5:0]  dbg_bad_uart_store_prs1_r;
+reg  [5:0]  dbg_bad_uart_store_prs2_r;
+reg  [31:0] dbg_bad_uart_store_prf_a_r;
+reg  [31:0] dbg_bad_uart_store_prf_b_r;
+reg         dbg_bad_uart_store_tagbuf_a_valid_r;
+reg         dbg_bad_uart_store_tagbuf_b_valid_r;
+reg  [31:0] dbg_bad_uart_store_tagbuf_a_data_r;
+reg  [31:0] dbg_bad_uart_store_tagbuf_b_data_r;
+reg  [1:0]  dbg_bad_uart_store_fwd_a_r;
+reg  [1:0]  dbg_bad_uart_store_fwd_b_r;
+reg  [2:0]  dbg_bad_uart_store_func3_r;
+reg  [0:0]  dbg_bad_uart_store_tid_r;
+
+reg         dbg_strcpy_mv_seen_r;
+reg  [31:0] dbg_strcpy_mv_pc_r;
+reg  [31:0] dbg_strcpy_mv_op_a_r;
+reg  [31:0] dbg_strcpy_mv_op_b_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_strcpy_mv_order_id_r;
+reg  [4:0]  dbg_strcpy_mv_tag_r;
+reg  [4:0]  dbg_strcpy_mv_rd_r;
+reg  [0:0]  dbg_strcpy_mv_tid_r;
+reg  [4:0]  dbg_strcpy_mv_rs1_r;
+reg  [4:0]  dbg_strcpy_mv_rs2_r;
+reg  [4:0]  dbg_strcpy_mv_src1_tag_r;
+reg  [4:0]  dbg_strcpy_mv_src2_tag_r;
+reg  [5:0]  dbg_strcpy_mv_prd_r;
+reg  [5:0]  dbg_strcpy_mv_prs1_r;
+reg  [5:0]  dbg_strcpy_mv_prs2_r;
+reg  [31:0] dbg_strcpy_mv_prf_a_r;
+reg  [31:0] dbg_strcpy_mv_prf_b_r;
+reg         dbg_strcpy_mv_tagbuf_a_valid_r;
+reg         dbg_strcpy_mv_tagbuf_b_valid_r;
+reg  [31:0] dbg_strcpy_mv_tagbuf_a_data_r;
+reg  [31:0] dbg_strcpy_mv_tagbuf_b_data_r;
+reg  [1:0]  dbg_strcpy_mv_fwd_a_r;
+reg  [1:0]  dbg_strcpy_mv_fwd_b_r;
+reg         dbg_strcpy_mv_prf_w0_en_r;
+reg  [5:0]  dbg_strcpy_mv_prf_w0_addr_r;
+reg  [31:0] dbg_strcpy_mv_prf_w0_data_r;
+reg         dbg_strcpy_mv_prf_w1_en_r;
+reg  [5:0]  dbg_strcpy_mv_prf_w1_addr_r;
+reg  [31:0] dbg_strcpy_mv_prf_w1_data_r;
+
+reg         dbg_main_lw_a0_seen_r;
+reg  [31:0] dbg_main_lw_a0_addr_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_lw_a0_order_id_r;
+reg  [4:0]  dbg_main_lw_a0_tag_r;
+reg  [5:0]  dbg_main_lw_a0_prd_r;
+reg  [5:0]  dbg_main_lw_a0_prs1_r;
+reg  [31:0] dbg_main_lw_a0_base_r;
+reg  [31:0] dbg_main_lw_a0_imm_r;
+reg         dbg_main_lw_a0_wb_seen_r;
+reg  [31:0] dbg_main_lw_a0_wb_data_r;
+reg  [5:0]  dbg_main_lw_a0_wb_prd_r;
+
+reg         dbg_main_addi_a0_seen_r;
+reg  [31:0] dbg_main_addi_a0_op_a_r;
+reg  [31:0] dbg_main_addi_a0_result_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_addi_a0_order_id_r;
+reg  [4:0]  dbg_main_addi_a0_tag_r;
+reg  [5:0]  dbg_main_addi_a0_prd_r;
+reg  [5:0]  dbg_main_addi_a0_prs1_r;
+reg  [4:0]  dbg_main_addi_a0_src1_tag_r;
+reg  [31:0] dbg_main_addi_a0_prf_a_r;
+reg         dbg_main_addi_a0_tagbuf_a_valid_r;
+reg  [31:0] dbg_main_addi_a0_tagbuf_a_data_r;
+
+reg  [7:0]  dbg_main_a0_prd_write_count_r;
+reg         dbg_main_a0_prd_last_write_port_r;
+reg  [31:0] dbg_main_a0_prd_last_write_data_r;
+reg  [4:0]  dbg_main_a0_prd_last_write_tag_r;
+reg  [4:0]  dbg_main_a0_prd_last_write_rd_r;
+reg  [2:0]  dbg_main_a0_prd_last_write_fu_r;
+reg  [31:0] dbg_main_a0_prd_last_write_pc_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_last_write_order_id_r;
+reg         dbg_main_a0_prd_first_bad_write_seen_r;
+reg         dbg_main_a0_prd_first_bad_write_port_r;
+reg  [31:0] dbg_main_a0_prd_first_bad_write_data_r;
+reg  [4:0]  dbg_main_a0_prd_first_bad_write_tag_r;
+reg  [4:0]  dbg_main_a0_prd_first_bad_write_rd_r;
+reg  [2:0]  dbg_main_a0_prd_first_bad_write_fu_r;
+reg  [31:0] dbg_main_a0_prd_first_bad_write_pc_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_first_bad_write_order_id_r;
+reg         dbg_main_a0_prd_first_free_seen_r;
+reg         dbg_main_a0_prd_first_free_port_r;
+reg  [4:0]  dbg_main_a0_prd_first_free_rd_r;
+reg  [4:0]  dbg_main_a0_prd_first_free_tag_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_first_free_order_id_r;
+reg         dbg_main_addi_a0_wb_seen_r;
+reg         dbg_main_addi_a0_wb_port_r;
+reg  [0:0]  dbg_main_addi_a0_wb_tid_r;
+reg  [5:0]  dbg_main_addi_a0_wb_prd_r;
+reg  [31:0] dbg_main_addi_a0_wb_data_r;
+reg         dbg_main_addi_a0_wb_w0_en_r;
+reg  [5:0]  dbg_main_addi_a0_wb_w0_addr_r;
+reg  [31:0] dbg_main_addi_a0_wb_w0_data_r;
+reg         dbg_main_addi_a0_wb_w1_en_r;
+reg  [5:0]  dbg_main_addi_a0_wb_w1_addr_r;
+reg  [31:0] dbg_main_addi_a0_wb_w1_data_r;
+
+wire [31:0] ro1_dbg_eff_addr = ro1_op_a + ro1_imm;
+wire        ro1_dbg_bad_uart_store =
+    ro1_valid && ro1_mem_write &&
+    (ro1_pc >= 32'h8000_10AC) && (ro1_pc <= 32'h8000_10C8) &&
+    (ro1_dbg_eff_addr >= 32'h1300_0010) && (ro1_dbg_eff_addr <= 32'h1300_001F);
+`endif
+
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         ro1_valid <= 1'b0;
+`ifdef VERILATOR_MAINLINE
+        ro1_dbg_rs1 <= 5'd0;
+        ro1_dbg_rs2 <= 5'd0;
+        ro1_dbg_src1_tag <= 5'd0;
+        ro1_dbg_src2_tag <= 5'd0;
+        ro1_dbg_prs1 <= 6'd0;
+        ro1_dbg_prs2 <= 6'd0;
+        ro1_dbg_prf_a <= 32'd0;
+        ro1_dbg_prf_b <= 32'd0;
+        ro1_dbg_tagbuf_a_valid <= 1'b0;
+        ro1_dbg_tagbuf_b_valid <= 1'b0;
+        ro1_dbg_tagbuf_a_data <= 32'd0;
+        ro1_dbg_tagbuf_b_data <= 32'd0;
+        ro1_dbg_fwd_a <= 2'd0;
+        ro1_dbg_fwd_b <= 2'd0;
+`endif
     end else begin
         ro1_valid <= p1_pre_ro_valid;
         if (p1_pre_ro_valid) begin
@@ -1982,9 +2147,320 @@ always @(posedge clk or negedge rstn) begin
             ro1_epoch      <= p1_pre_ro_epoch;
             ro1_op_a       <= byp1_op_a;
             ro1_op_b       <= byp1_op_b;
+`ifdef VERILATOR_MAINLINE
+            ro1_dbg_rs1            <= p1_pre_ro_rs1;
+            ro1_dbg_rs2            <= p1_pre_ro_rs2;
+            ro1_dbg_src1_tag       <= p1_pre_ro_src1_tag;
+            ro1_dbg_src2_tag       <= p1_pre_ro_src2_tag;
+            ro1_dbg_prs1           <= p1_pre_ro_prs1;
+            ro1_dbg_prs2           <= p1_pre_ro_prs2;
+            ro1_dbg_prf_a          <= prf_r2_data;
+            ro1_dbg_prf_b          <= prf_r3_data;
+            ro1_dbg_tagbuf_a_valid <= p1_tagbuf_a_valid;
+            ro1_dbg_tagbuf_b_valid <= p1_tagbuf_b_valid;
+            ro1_dbg_tagbuf_a_data  <= p1_tagbuf_a_data;
+            ro1_dbg_tagbuf_b_data  <= p1_tagbuf_b_data;
+            ro1_dbg_fwd_a          <= byp1_fwd_a;
+            ro1_dbg_fwd_b          <= byp1_fwd_b;
+`endif
         end
     end
 end
+
+`ifdef VERILATOR_MAINLINE
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        dbg_bad_uart_store_seen_r <= 1'b0;
+        dbg_bad_uart_store_pc_r <= 32'd0;
+        dbg_bad_uart_store_addr_r <= 32'd0;
+        dbg_bad_uart_store_op_a_r <= 32'd0;
+        dbg_bad_uart_store_op_b_r <= 32'd0;
+        dbg_bad_uart_store_imm_r <= 32'd0;
+        dbg_bad_uart_store_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_bad_uart_store_tag_r <= 5'd0;
+        dbg_bad_uart_store_rd_r <= 5'd0;
+        dbg_bad_uart_store_rs1_r <= 5'd0;
+        dbg_bad_uart_store_rs2_r <= 5'd0;
+        dbg_bad_uart_store_src1_tag_r <= 5'd0;
+        dbg_bad_uart_store_src2_tag_r <= 5'd0;
+        dbg_bad_uart_store_prs1_r <= 6'd0;
+        dbg_bad_uart_store_prs2_r <= 6'd0;
+        dbg_bad_uart_store_prf_a_r <= 32'd0;
+        dbg_bad_uart_store_prf_b_r <= 32'd0;
+        dbg_bad_uart_store_tagbuf_a_valid_r <= 1'b0;
+        dbg_bad_uart_store_tagbuf_b_valid_r <= 1'b0;
+        dbg_bad_uart_store_tagbuf_a_data_r <= 32'd0;
+        dbg_bad_uart_store_tagbuf_b_data_r <= 32'd0;
+        dbg_bad_uart_store_fwd_a_r <= 2'd0;
+        dbg_bad_uart_store_fwd_b_r <= 2'd0;
+        dbg_bad_uart_store_func3_r <= 3'd0;
+        dbg_bad_uart_store_tid_r <= 1'b0;
+        dbg_strcpy_mv_seen_r <= 1'b0;
+        dbg_strcpy_mv_pc_r <= 32'd0;
+        dbg_strcpy_mv_op_a_r <= 32'd0;
+        dbg_strcpy_mv_op_b_r <= 32'd0;
+        dbg_strcpy_mv_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_strcpy_mv_tag_r <= 5'd0;
+        dbg_strcpy_mv_rd_r <= 5'd0;
+        dbg_strcpy_mv_tid_r <= 1'b0;
+        dbg_strcpy_mv_rs1_r <= 5'd0;
+        dbg_strcpy_mv_rs2_r <= 5'd0;
+        dbg_strcpy_mv_src1_tag_r <= 5'd0;
+        dbg_strcpy_mv_src2_tag_r <= 5'd0;
+        dbg_strcpy_mv_prd_r <= 6'd0;
+        dbg_strcpy_mv_prs1_r <= 6'd0;
+        dbg_strcpy_mv_prs2_r <= 6'd0;
+        dbg_strcpy_mv_prf_a_r <= 32'd0;
+        dbg_strcpy_mv_prf_b_r <= 32'd0;
+        dbg_strcpy_mv_tagbuf_a_valid_r <= 1'b0;
+        dbg_strcpy_mv_tagbuf_b_valid_r <= 1'b0;
+        dbg_strcpy_mv_tagbuf_a_data_r <= 32'd0;
+        dbg_strcpy_mv_tagbuf_b_data_r <= 32'd0;
+        dbg_strcpy_mv_fwd_a_r <= 2'd0;
+        dbg_strcpy_mv_fwd_b_r <= 2'd0;
+        dbg_strcpy_mv_prf_w0_en_r <= 1'b0;
+        dbg_strcpy_mv_prf_w0_addr_r <= 6'd0;
+        dbg_strcpy_mv_prf_w0_data_r <= 32'd0;
+        dbg_strcpy_mv_prf_w1_en_r <= 1'b0;
+        dbg_strcpy_mv_prf_w1_addr_r <= 6'd0;
+        dbg_strcpy_mv_prf_w1_data_r <= 32'd0;
+        dbg_main_lw_a0_seen_r <= 1'b0;
+        dbg_main_lw_a0_addr_r <= 32'd0;
+        dbg_main_lw_a0_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_main_lw_a0_tag_r <= 5'd0;
+        dbg_main_lw_a0_prd_r <= 6'd0;
+        dbg_main_lw_a0_prs1_r <= 6'd0;
+        dbg_main_lw_a0_base_r <= 32'd0;
+        dbg_main_lw_a0_imm_r <= 32'd0;
+        dbg_main_lw_a0_wb_seen_r <= 1'b0;
+        dbg_main_lw_a0_wb_data_r <= 32'd0;
+        dbg_main_lw_a0_wb_prd_r <= 6'd0;
+        dbg_main_addi_a0_seen_r <= 1'b0;
+        dbg_main_addi_a0_op_a_r <= 32'd0;
+        dbg_main_addi_a0_result_r <= 32'd0;
+        dbg_main_addi_a0_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_main_addi_a0_tag_r <= 5'd0;
+        dbg_main_addi_a0_prd_r <= 6'd0;
+        dbg_main_addi_a0_prs1_r <= 6'd0;
+        dbg_main_addi_a0_src1_tag_r <= 5'd0;
+        dbg_main_addi_a0_prf_a_r <= 32'd0;
+        dbg_main_addi_a0_tagbuf_a_valid_r <= 1'b0;
+        dbg_main_addi_a0_tagbuf_a_data_r <= 32'd0;
+        dbg_main_a0_prd_write_count_r <= 8'd0;
+        dbg_main_a0_prd_last_write_port_r <= 1'b0;
+        dbg_main_a0_prd_last_write_data_r <= 32'd0;
+        dbg_main_a0_prd_last_write_tag_r <= 5'd0;
+        dbg_main_a0_prd_last_write_rd_r <= 5'd0;
+        dbg_main_a0_prd_last_write_fu_r <= 3'd0;
+        dbg_main_a0_prd_last_write_pc_r <= 32'd0;
+        dbg_main_a0_prd_last_write_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_main_a0_prd_first_bad_write_seen_r <= 1'b0;
+        dbg_main_a0_prd_first_bad_write_port_r <= 1'b0;
+        dbg_main_a0_prd_first_bad_write_data_r <= 32'd0;
+        dbg_main_a0_prd_first_bad_write_tag_r <= 5'd0;
+        dbg_main_a0_prd_first_bad_write_rd_r <= 5'd0;
+        dbg_main_a0_prd_first_bad_write_fu_r <= 3'd0;
+        dbg_main_a0_prd_first_bad_write_pc_r <= 32'd0;
+        dbg_main_a0_prd_first_bad_write_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_main_a0_prd_first_free_seen_r <= 1'b0;
+        dbg_main_a0_prd_first_free_port_r <= 1'b0;
+        dbg_main_a0_prd_first_free_rd_r <= 5'd0;
+        dbg_main_a0_prd_first_free_tag_r <= 5'd0;
+        dbg_main_a0_prd_first_free_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_main_addi_a0_wb_seen_r <= 1'b0;
+        dbg_main_addi_a0_wb_port_r <= 1'b0;
+        dbg_main_addi_a0_wb_tid_r <= 1'b0;
+        dbg_main_addi_a0_wb_prd_r <= 6'd0;
+        dbg_main_addi_a0_wb_data_r <= 32'd0;
+        dbg_main_addi_a0_wb_w0_en_r <= 1'b0;
+        dbg_main_addi_a0_wb_w0_addr_r <= 6'd0;
+        dbg_main_addi_a0_wb_w0_data_r <= 32'd0;
+        dbg_main_addi_a0_wb_w1_en_r <= 1'b0;
+        dbg_main_addi_a0_wb_w1_addr_r <= 6'd0;
+        dbg_main_addi_a0_wb_w1_data_r <= 32'd0;
+    end else if (!dbg_bad_uart_store_seen_r && ro1_dbg_bad_uart_store) begin
+        dbg_bad_uart_store_seen_r <= 1'b1;
+        dbg_bad_uart_store_pc_r <= ro1_pc;
+        dbg_bad_uart_store_addr_r <= ro1_dbg_eff_addr;
+        dbg_bad_uart_store_op_a_r <= ro1_op_a;
+        dbg_bad_uart_store_op_b_r <= ro1_op_b;
+        dbg_bad_uart_store_imm_r <= ro1_imm;
+        dbg_bad_uart_store_order_id_r <= ro1_order_id;
+        dbg_bad_uart_store_tag_r <= ro1_tag;
+        dbg_bad_uart_store_rd_r <= ro1_rd;
+        dbg_bad_uart_store_rs1_r <= ro1_dbg_rs1;
+        dbg_bad_uart_store_rs2_r <= ro1_dbg_rs2;
+        dbg_bad_uart_store_src1_tag_r <= ro1_dbg_src1_tag;
+        dbg_bad_uart_store_src2_tag_r <= ro1_dbg_src2_tag;
+        dbg_bad_uart_store_prs1_r <= ro1_dbg_prs1;
+        dbg_bad_uart_store_prs2_r <= ro1_dbg_prs2;
+        dbg_bad_uart_store_prf_a_r <= ro1_dbg_prf_a;
+        dbg_bad_uart_store_prf_b_r <= ro1_dbg_prf_b;
+        dbg_bad_uart_store_tagbuf_a_valid_r <= ro1_dbg_tagbuf_a_valid;
+        dbg_bad_uart_store_tagbuf_b_valid_r <= ro1_dbg_tagbuf_b_valid;
+        dbg_bad_uart_store_tagbuf_a_data_r <= ro1_dbg_tagbuf_a_data;
+        dbg_bad_uart_store_tagbuf_b_data_r <= ro1_dbg_tagbuf_b_data;
+        dbg_bad_uart_store_fwd_a_r <= ro1_dbg_fwd_a;
+        dbg_bad_uart_store_fwd_b_r <= ro1_dbg_fwd_b;
+        dbg_bad_uart_store_func3_r <= ro1_func3;
+        dbg_bad_uart_store_tid_r <= ro1_tid;
+    end
+
+    if (rstn && !dbg_strcpy_mv_seen_r && p0_pre_ro_to_pipe0_valid && (p0_pre_ro_pc == 32'h8000_10AC)) begin
+        dbg_strcpy_mv_seen_r <= 1'b1;
+        dbg_strcpy_mv_pc_r <= p0_pre_ro_pc;
+        dbg_strcpy_mv_op_a_r <= byp0_op_a;
+        dbg_strcpy_mv_op_b_r <= byp0_op_b;
+        dbg_strcpy_mv_order_id_r <= p0_pre_ro_order_id;
+        dbg_strcpy_mv_tag_r <= p0_pre_ro_tag;
+        dbg_strcpy_mv_rd_r <= p0_pre_ro_rd;
+        dbg_strcpy_mv_tid_r <= p0_pre_ro_tid;
+        dbg_strcpy_mv_rs1_r <= p0_pre_ro_rs1;
+        dbg_strcpy_mv_rs2_r <= p0_pre_ro_rs2;
+        dbg_strcpy_mv_src1_tag_r <= p0_pre_ro_src1_tag;
+        dbg_strcpy_mv_src2_tag_r <= p0_pre_ro_src2_tag;
+        dbg_strcpy_mv_prd_r <= tag_prd_map[p0_pre_ro_tag];
+        dbg_strcpy_mv_prs1_r <= p0_pre_ro_prs1;
+        dbg_strcpy_mv_prs2_r <= p0_pre_ro_prs2;
+        dbg_strcpy_mv_prf_a_r <= prf_r0_data;
+        dbg_strcpy_mv_prf_b_r <= prf_r1_data;
+        dbg_strcpy_mv_tagbuf_a_valid_r <= p0_tagbuf_a_valid;
+        dbg_strcpy_mv_tagbuf_b_valid_r <= p0_tagbuf_b_valid;
+        dbg_strcpy_mv_tagbuf_a_data_r <= p0_tagbuf_a_data;
+        dbg_strcpy_mv_tagbuf_b_data_r <= p0_tagbuf_b_data;
+        dbg_strcpy_mv_fwd_a_r <= byp0_fwd_a;
+        dbg_strcpy_mv_fwd_b_r <= byp0_fwd_b;
+        dbg_strcpy_mv_prf_w0_en_r <= prf_w0_en;
+        dbg_strcpy_mv_prf_w0_addr_r <= prf_w0_addr;
+        dbg_strcpy_mv_prf_w0_data_r <= prf_w0_data;
+        dbg_strcpy_mv_prf_w1_en_r <= prf_w1_en;
+        dbg_strcpy_mv_prf_w1_addr_r <= prf_w1_addr;
+        dbg_strcpy_mv_prf_w1_data_r <= prf_w1_data;
+    end
+
+    if (rstn && !dbg_main_lw_a0_seen_r && ro1_valid && ro1_mem_read && (ro1_pc == 32'h8000_0484)) begin
+        dbg_main_lw_a0_seen_r <= 1'b1;
+        dbg_main_lw_a0_addr_r <= ro1_dbg_eff_addr;
+        dbg_main_lw_a0_order_id_r <= ro1_order_id;
+        dbg_main_lw_a0_tag_r <= ro1_tag;
+        dbg_main_lw_a0_prd_r <= tag_prd_map[ro1_tag];
+        dbg_main_lw_a0_prs1_r <= ro1_dbg_prs1;
+        dbg_main_lw_a0_base_r <= ro1_op_a;
+        dbg_main_lw_a0_imm_r <= ro1_imm;
+    end
+
+    if (rstn && dbg_main_lw_a0_seen_r && !dbg_main_lw_a0_wb_seen_r &&
+        wb1_valid && (wb1_tag == dbg_main_lw_a0_tag_r) && (wb1_tid == 1'b0)) begin
+        dbg_main_lw_a0_wb_seen_r <= 1'b1;
+        dbg_main_lw_a0_wb_data_r <= wb1_result_data;
+        dbg_main_lw_a0_wb_prd_r <= tag_prd_map[wb1_tag];
+    end
+
+    if (rstn && !dbg_main_addi_a0_seen_r && p0_pre_ro_to_pipe0_valid && (p0_pre_ro_pc == 32'h8000_049C)) begin
+        dbg_main_addi_a0_seen_r <= 1'b1;
+        dbg_main_addi_a0_op_a_r <= byp0_op_a;
+        dbg_main_addi_a0_result_r <= byp0_op_a + p0_pre_ro_imm;
+        dbg_main_addi_a0_order_id_r <= p0_pre_ro_order_id;
+        dbg_main_addi_a0_tag_r <= p0_pre_ro_tag;
+        dbg_main_addi_a0_prd_r <= tag_prd_map[p0_pre_ro_tag];
+        dbg_main_addi_a0_prs1_r <= p0_pre_ro_prs1;
+        dbg_main_addi_a0_src1_tag_r <= p0_pre_ro_src1_tag;
+        dbg_main_addi_a0_prf_a_r <= prf_r0_data;
+        dbg_main_addi_a0_tagbuf_a_valid_r <= p0_tagbuf_a_valid;
+        dbg_main_addi_a0_tagbuf_a_data_r <= p0_tagbuf_a_data;
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && prf_w0_en && (prf_w0_addr == dbg_main_addi_a0_prd_r)) begin
+        dbg_main_a0_prd_write_count_r <= dbg_main_a0_prd_write_count_r + 8'd1;
+        dbg_main_a0_prd_last_write_port_r <= 1'b0;
+        dbg_main_a0_prd_last_write_data_r <= prf_w0_data;
+        dbg_main_a0_prd_last_write_tag_r <= wb0_tag;
+        dbg_main_a0_prd_last_write_rd_r <= wb0_rd;
+        dbg_main_a0_prd_last_write_fu_r <= wb0_fu;
+        dbg_main_a0_prd_last_write_pc_r <= tag_pc_map[wb0_tag];
+        dbg_main_a0_prd_last_write_order_id_r <= tag_order_map[wb0_tag];
+        if (!dbg_main_a0_prd_first_bad_write_seen_r && (prf_w0_data != dbg_main_addi_a0_result_r)) begin
+            dbg_main_a0_prd_first_bad_write_seen_r <= 1'b1;
+            dbg_main_a0_prd_first_bad_write_port_r <= 1'b0;
+            dbg_main_a0_prd_first_bad_write_data_r <= prf_w0_data;
+            dbg_main_a0_prd_first_bad_write_tag_r <= wb0_tag;
+            dbg_main_a0_prd_first_bad_write_rd_r <= wb0_rd;
+            dbg_main_a0_prd_first_bad_write_fu_r <= wb0_fu;
+            dbg_main_a0_prd_first_bad_write_pc_r <= tag_pc_map[wb0_tag];
+            dbg_main_a0_prd_first_bad_write_order_id_r <= tag_order_map[wb0_tag];
+        end
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && prf_w1_en && (prf_w1_addr == dbg_main_addi_a0_prd_r)) begin
+        dbg_main_a0_prd_write_count_r <= dbg_main_a0_prd_write_count_r + 8'd1;
+        dbg_main_a0_prd_last_write_port_r <= 1'b1;
+        dbg_main_a0_prd_last_write_data_r <= prf_w1_data;
+        dbg_main_a0_prd_last_write_tag_r <= wb1_tag;
+        dbg_main_a0_prd_last_write_rd_r <= wb1_rd;
+        dbg_main_a0_prd_last_write_fu_r <= wb1_fu;
+        dbg_main_a0_prd_last_write_pc_r <= tag_pc_map[wb1_tag];
+        dbg_main_a0_prd_last_write_order_id_r <= tag_order_map[wb1_tag];
+        if (!dbg_main_a0_prd_first_bad_write_seen_r && (prf_w1_data != dbg_main_addi_a0_result_r)) begin
+            dbg_main_a0_prd_first_bad_write_seen_r <= 1'b1;
+            dbg_main_a0_prd_first_bad_write_port_r <= 1'b1;
+            dbg_main_a0_prd_first_bad_write_data_r <= prf_w1_data;
+            dbg_main_a0_prd_first_bad_write_tag_r <= wb1_tag;
+            dbg_main_a0_prd_first_bad_write_rd_r <= wb1_rd;
+            dbg_main_a0_prd_first_bad_write_fu_r <= wb1_fu;
+            dbg_main_a0_prd_first_bad_write_pc_r <= tag_pc_map[wb1_tag];
+            dbg_main_a0_prd_first_bad_write_order_id_r <= tag_order_map[wb1_tag];
+        end
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && !dbg_main_a0_prd_first_free_seen_r &&
+        rob_commit0_valid && rob_commit0_regs_write && (rob_commit0_prd_old == dbg_main_addi_a0_prd_r)) begin
+        dbg_main_a0_prd_first_free_seen_r <= 1'b1;
+        dbg_main_a0_prd_first_free_port_r <= 1'b0;
+        dbg_main_a0_prd_first_free_rd_r <= rob_commit0_rd;
+        dbg_main_a0_prd_first_free_tag_r <= rob_commit0_tag;
+        dbg_main_a0_prd_first_free_order_id_r <= rob_commit0_order_id;
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && !dbg_main_a0_prd_first_free_seen_r &&
+        rob_commit1_valid && rob_commit1_regs_write && (rob_commit1_prd_old == dbg_main_addi_a0_prd_r)) begin
+        dbg_main_a0_prd_first_free_seen_r <= 1'b1;
+        dbg_main_a0_prd_first_free_port_r <= 1'b1;
+        dbg_main_a0_prd_first_free_rd_r <= rob_commit1_rd;
+        dbg_main_a0_prd_first_free_tag_r <= rob_commit1_tag;
+        dbg_main_a0_prd_first_free_order_id_r <= rob_commit1_order_id;
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && !dbg_main_addi_a0_wb_seen_r &&
+        prf_w0_en && (wb0_tag == dbg_main_addi_a0_tag_r)) begin
+        dbg_main_addi_a0_wb_seen_r <= 1'b1;
+        dbg_main_addi_a0_wb_port_r <= 1'b0;
+        dbg_main_addi_a0_wb_tid_r <= prf_w0_tid;
+        dbg_main_addi_a0_wb_prd_r <= prf_w0_addr;
+        dbg_main_addi_a0_wb_data_r <= prf_w0_data;
+        dbg_main_addi_a0_wb_w0_en_r <= prf_w0_en;
+        dbg_main_addi_a0_wb_w0_addr_r <= prf_w0_addr;
+        dbg_main_addi_a0_wb_w0_data_r <= prf_w0_data;
+        dbg_main_addi_a0_wb_w1_en_r <= prf_w1_en;
+        dbg_main_addi_a0_wb_w1_addr_r <= prf_w1_addr;
+        dbg_main_addi_a0_wb_w1_data_r <= prf_w1_data;
+    end
+
+    if (rstn && dbg_main_addi_a0_seen_r && !dbg_main_addi_a0_wb_seen_r &&
+        prf_w1_en && (wb1_tag == dbg_main_addi_a0_tag_r)) begin
+        dbg_main_addi_a0_wb_seen_r <= 1'b1;
+        dbg_main_addi_a0_wb_port_r <= 1'b1;
+        dbg_main_addi_a0_wb_tid_r <= prf_w1_tid;
+        dbg_main_addi_a0_wb_prd_r <= prf_w1_addr;
+        dbg_main_addi_a0_wb_data_r <= prf_w1_data;
+        dbg_main_addi_a0_wb_w0_en_r <= prf_w0_en;
+        dbg_main_addi_a0_wb_w0_addr_r <= prf_w0_addr;
+        dbg_main_addi_a0_wb_w0_data_r <= prf_w0_data;
+        dbg_main_addi_a0_wb_w1_en_r <= prf_w1_en;
+        dbg_main_addi_a0_wb_w1_addr_r <= prf_w1_addr;
+        dbg_main_addi_a0_wb_w1_data_r <= prf_w1_data;
+    end
+end
+`endif
 
 // Pipeline register ro1: no epoch squash needed here.
 // Stale instructions pass through to exec_pipe1 → produce wb1 that the ROB

@@ -19,6 +19,11 @@
 .equ LOADER_EA_EVT_HEADER_ENTER, 0x3A
 .equ LOADER_EVT_CAL_FAIL,        0xE0
 .equ LOADER_EVT_SUMMARY,         0xF0
+#ifdef SIM_FAST_STORE_DRAIN
+.equ BEACON_SELFTEST_DELAY_CYCLES, 64
+#else
+.equ BEACON_SELFTEST_DELAY_CYCLES, 8192
+#endif
 
 .section .text
 .globl _start
@@ -74,7 +79,7 @@ calib_done:
     fence iorw, iorw
     sw x10, 0(x5)
     fence iorw, iorw
-    li x6, 8192
+    li x6, BEACON_SELFTEST_DELAY_CYCLES
 final_summary_delay:
     addi x6, x6, -1
     bne x6, x0, final_summary_delay
@@ -87,7 +92,7 @@ emit_event:
     fence iorw, iorw
     sw x10, 0(x5)
     fence iorw, iorw
-    li x6, 8192
+    li x6, BEACON_SELFTEST_DELAY_CYCLES
 emit_event_delay:
     addi x6, x6, -1
     bne x6, x0, emit_event_delay
