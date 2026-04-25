@@ -17,7 +17,7 @@
 module rename_map_table #(
     parameter NUM_ARCH_REG = 32,
     parameter ARCH_REG_W   = 5,
-    parameter NUM_PHYS_REG = 48,
+    parameter NUM_PHYS_REG = 64,
     parameter PHYS_REG_W   = 6,
     parameter NUM_THREAD   = 2
 )(

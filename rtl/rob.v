@@ -3,7 +3,7 @@
 // Module : rob
 // Description: Full Reorder Buffer for in-order commit with rename support.
 //   Evolved from rob_lite:
-//   - Depth increased from 8 to 16 per thread
+//   - Depth increased from 8 to 32 per thread
 //   - Added prd_new/prd_old fields for register rename support
 //   - Added is_branch, pc fields
 //   - Outputs rob_idx at dispatch time (indexed WB, no CAM)
@@ -21,8 +21,8 @@
 `include "define.v"
 
 module rob #(
-    parameter ROB_DEPTH     = 16,       // Entries per thread (power of 2)
-    parameter ROB_IDX_W     = 4,        // log2(ROB_DEPTH)
+    parameter ROB_DEPTH     = 32,       // Entries per thread (power of 2)
+    parameter ROB_IDX_W     = 5,        // log2(ROB_DEPTH)
     parameter RS_TAG_W      = 5,        // Match scoreboard tag width
     parameter PHYS_REG_W    = 6,        // Physical register address width
     parameter NUM_THREAD    = 2
@@ -103,6 +103,8 @@ module rob #(
     // ─── Store Buffer Commit Outputs ─────────────────────────────
     output wire [`METADATA_ORDER_ID_W-1:0] commit0_order_id,
     output wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
+    output wire [31:0]                 commit0_pc,
+    output wire [31:0]                 commit1_pc,
     output wire                        commit0_is_store,
     output wire                        commit1_is_store,
     output wire                        commit0_is_mret,
@@ -168,6 +170,7 @@ reg  [RS_TAG_W-1:0]     commit0_tag_r, commit1_tag_r;
 reg                     commit0_has_result_r, commit1_has_result_r;
 reg  [31:0]             commit0_data_r, commit1_data_r;
 reg  [`METADATA_ORDER_ID_W-1:0] commit0_order_id_r, commit1_order_id_r;
+reg  [31:0]             commit0_pc_r, commit1_pc_r;
 reg                     commit0_is_store_r, commit1_is_store_r;
 reg                     commit0_is_mret_r,  commit1_is_mret_r;
 reg  [PHYS_REG_W-1:0]  commit0_prd_old_r, commit1_prd_old_r;
@@ -266,6 +269,8 @@ assign commit1_data       = commit1_data_r;
 assign instr_retired      = {commit1_valid_r, commit0_valid_r};
 assign commit0_order_id   = commit0_order_id_r;
 assign commit1_order_id   = commit1_order_id_r;
+assign commit0_pc         = commit0_pc_r;
+assign commit1_pc         = commit1_pc_r;
 assign commit0_is_store   = commit0_is_store_r;
 assign commit1_is_store   = commit1_is_store_r;
 assign commit0_is_mret    = commit0_is_mret_r;
@@ -318,6 +323,8 @@ always @(posedge clk or negedge rstn) begin
         commit1_data_r     <= 32'd0;
         commit0_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
         commit1_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        commit0_pc_r       <= 32'd0;
+        commit1_pc_r       <= 32'd0;
         commit0_is_store_r <= 1'b0;
         commit1_is_store_r <= 1'b0;
         commit0_is_mret_r  <= 1'b0;
@@ -513,6 +520,7 @@ always @(posedge clk or negedge rstn) begin
                     commit0_has_result_r <= head_has_result_t0;
                     commit0_data_r       <= head_result_t0;
                     commit0_order_id_r   <= rob_order_id[0][rob_head[0]];
+                    commit0_pc_r         <= rob_pc[0][rob_head[0]];
                     commit0_is_store_r   <= rob_is_store[0][rob_head[0]];
                     commit0_is_mret_r    <= rob_is_mret[0][rob_head[0]];
                     commit0_prd_old_r    <= rob_prd_old[0][rob_head[0]];
@@ -605,6 +613,7 @@ always @(posedge clk or negedge rstn) begin
                     commit1_has_result_r <= head_has_result_t1;
                     commit1_data_r       <= head_result_t1;
                     commit1_order_id_r   <= rob_order_id[1][rob_head[1]];
+                    commit1_pc_r         <= rob_pc[1][rob_head[1]];
                     commit1_is_store_r   <= rob_is_store[1][rob_head[1]];
                     commit1_is_mret_r    <= rob_is_mret[1][rob_head[1]];
                     commit1_prd_old_r    <= rob_prd_old[1][rob_head[1]];

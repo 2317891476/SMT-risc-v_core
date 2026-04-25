@@ -109,6 +109,12 @@ reg [ORDER_ID_W-1:0]    sb_order_id [0:NUM_THREAD-1][0:SB_DEPTH-1];
 reg [EPOCH_W-1:0]       sb_epoch    [0:NUM_THREAD-1][0:SB_DEPTH-1];
 reg                     sb_committed[0:NUM_THREAD-1][0:SB_DEPTH-1];
 
+// ROB commit can arrive before the corresponding store has reached this
+// buffer once MEM issue is no longer branch-order gated.  Keep that retire
+// permission until the late store enqueue shows up.
+reg                     pending_commit_valid[0:NUM_THREAD-1][0:SB_DEPTH-1];
+reg [ORDER_ID_W-1:0]    pending_commit_order[0:NUM_THREAD-1][0:SB_DEPTH-1];
+
 // Head/tail pointers per thread
 reg  [SB_IDX_W-1:0]     sb_head     [0:NUM_THREAD-1];  // Drain pointer (oldest)
 reg  [SB_IDX_W-1:0]     sb_tail     [0:NUM_THREAD-1];  // Allocate pointer (next free)
@@ -138,6 +144,17 @@ wire sb_issue_full_t1 = (sb_count[1] >= (SB_DEPTH - 1));
 // Note: We always indicate capacity status regardless of store_req_valid
 // to avoid combinational loops with the LSU shell.
 assign store_req_accept = store_tid ? !sb_issue_full_t1 : !sb_issue_full_t0;
+
+wire store_flush_kill =
+    flush && (store_tid == flush_tid) &&
+    (!flush_order_valid || (store_order_id > flush_order_id));
+wire store_alloc_fire = store_req_valid && store_req_accept && !store_flush_kill;
+wire commit0_flush_kill =
+    flush && (flush_tid == 1'b0) &&
+    (!flush_order_valid || (commit0_order_id > flush_order_id));
+wire commit1_flush_kill =
+    flush && (flush_tid == 1'b1) &&
+    (!flush_order_valid || (commit1_order_id > flush_order_id));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Drain Logic - Write oldest committed store to memory
@@ -388,6 +405,11 @@ reg [SB_IDX_W-1:0]  sb_tail_next  [0:NUM_THREAD-1];
 reg [SB_IDX_W:0]    sb_count_next [0:NUM_THREAD-1];
 reg                 sb_valid_next [0:NUM_THREAD-1][0:SB_DEPTH-1];
 reg                 sb_committed_next[0:NUM_THREAD-1][0:SB_DEPTH-1];
+reg                 pending_commit_valid_next[0:NUM_THREAD-1][0:SB_DEPTH-1];
+reg [ORDER_ID_W-1:0] pending_commit_order_next[0:NUM_THREAD-1][0:SB_DEPTH-1];
+reg                 alloc_committed;
+reg                 commit_marked;
+reg                 pending_stored;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -404,6 +426,8 @@ always @(posedge clk or negedge rstn) begin
                 sb_order_id[t][j]  <= {ORDER_ID_W{1'b0}};
                 sb_epoch[t][j]     <= {EPOCH_W{1'b0}};
                 sb_committed[t][j] <= 1'b0;
+                pending_commit_valid[t][j] <= 1'b0;
+                pending_commit_order[t][j] <= {ORDER_ID_W{1'b0}};
             end
         end
     end else begin
@@ -417,6 +441,8 @@ always @(posedge clk or negedge rstn) begin
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 sb_valid_next[t][j]     = sb_valid[t][j];
                 sb_committed_next[t][j] = sb_committed[t][j];
+                pending_commit_valid_next[t][j] = pending_commit_valid[t][j];
+                pending_commit_order_next[t][j] = pending_commit_order[t][j];
             end
         end
         
@@ -435,6 +461,12 @@ always @(posedge clk or negedge rstn) begin
                                       : !sb_committed_next[flush_tid][j])) begin
                     sb_valid_next[flush_tid][j] = 1'b0;
                     sb_committed_next[flush_tid][j] = 1'b0;
+                end
+                if (flush_order_valid &&
+                    pending_commit_valid_next[flush_tid][j] &&
+                    (pending_commit_order_next[flush_tid][j] > flush_order_id)) begin
+                    pending_commit_valid_next[flush_tid][j] = 1'b0;
+                    pending_commit_order_next[flush_tid][j] = {ORDER_ID_W{1'b0}};
                 end
             end
             
@@ -457,27 +489,47 @@ always @(posedge clk or negedge rstn) begin
         // During a global flush (!flush_order_valid), block all stores from
         // the flushed thread.
         alloc_expected_epoch = store_tid ? current_epoch_t1 : current_epoch_t0;
-        if (store_req_valid && store_req_accept &&
-            !(flush && (store_tid == flush_tid) &&
-              (!flush_order_valid || (store_order_id > flush_order_id)))) begin
+        if (store_alloc_fire) begin
             if (store_tid == 1'b0) begin
+                alloc_committed = commit0_valid && commit0_is_store &&
+                                  !commit0_flush_kill &&
+                                  (commit0_order_id == store_order_id);
+                for (j = 0; j < SB_DEPTH; j = j + 1) begin
+                    if (pending_commit_valid_next[0][j] &&
+                        (pending_commit_order_next[0][j] == store_order_id)) begin
+                        alloc_committed = 1'b1;
+                        pending_commit_valid_next[0][j] = 1'b0;
+                        pending_commit_order_next[0][j] = {ORDER_ID_W{1'b0}};
+                    end
+                end
                 sb_valid_next[0][sb_tail_next[0]]     = 1'b1;
                 sb_addr[0][sb_tail_next[0]]      <= store_addr;
                 sb_data[0][sb_tail_next[0]]      <= align_store_data(store_data, store_func3, store_addr[1:0]);
                 sb_func3[0][sb_tail_next[0]]     <= store_func3;
                 sb_order_id[0][sb_tail_next[0]]  <= store_order_id;
                 sb_epoch[0][sb_tail_next[0]]     <= store_epoch;
-                sb_committed_next[0][sb_tail_next[0]] = 1'b0;  // Never commit on allocation
+                sb_committed_next[0][sb_tail_next[0]] = alloc_committed;
                 sb_tail_next[0] = sb_tail_next[0] + 1;
                 sb_count_next[0] = sb_count_next[0] + 1;
             end else begin
+                alloc_committed = commit1_valid && commit1_is_store &&
+                                  !commit1_flush_kill &&
+                                  (commit1_order_id == store_order_id);
+                for (j = 0; j < SB_DEPTH; j = j + 1) begin
+                    if (pending_commit_valid_next[1][j] &&
+                        (pending_commit_order_next[1][j] == store_order_id)) begin
+                        alloc_committed = 1'b1;
+                        pending_commit_valid_next[1][j] = 1'b0;
+                        pending_commit_order_next[1][j] = {ORDER_ID_W{1'b0}};
+                    end
+                end
                 sb_valid_next[1][sb_tail_next[1]]     = 1'b1;
                 sb_addr[1][sb_tail_next[1]]      <= store_addr;
                 sb_data[1][sb_tail_next[1]]      <= align_store_data(store_data, store_func3, store_addr[1:0]);
                 sb_func3[1][sb_tail_next[1]]     <= store_func3;
                 sb_order_id[1][sb_tail_next[1]]  <= store_order_id;
                 sb_epoch[1][sb_tail_next[1]]     <= store_epoch;
-                sb_committed_next[1][sb_tail_next[1]] = 1'b0;  // Never commit on allocation
+                sb_committed_next[1][sb_tail_next[1]] = alloc_committed;
                 sb_tail_next[1] = sb_tail_next[1] + 1;
                 sb_count_next[1] = sb_count_next[1] + 1;
             end
@@ -508,29 +560,55 @@ always @(posedge clk or negedge rstn) begin
         // Mark stores as committed when ROB signals
         
         // Thread 0 commit
-        if (commit0_valid && commit0_is_store) begin
+        if (commit0_valid && commit0_is_store && !commit0_flush_kill) begin
+            commit_marked = store_alloc_fire && (store_tid == 1'b0) &&
+                            (store_order_id == commit0_order_id);
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 if (sb_valid_next[0][j] && !sb_committed_next[0][j] &&
                     (sb_order_id[0][j] == commit0_order_id)) begin
                     sb_committed_next[0][j] = 1'b1;
+                    commit_marked = 1'b1;
                     `ifdef VERBOSE_SIM_LOGS
                     $display("[SB COMMIT] tid=0 order=%0d idx=%0d addr=%h",
                              commit0_order_id, j, sb_addr[0][j]);
                     `endif
                 end
             end
+            if (!commit_marked) begin
+                pending_stored = 1'b0;
+                for (j = 0; j < SB_DEPTH; j = j + 1) begin
+                    if (!pending_stored && !pending_commit_valid_next[0][j]) begin
+                        pending_commit_valid_next[0][j] = 1'b1;
+                        pending_commit_order_next[0][j] = commit0_order_id;
+                        pending_stored = 1'b1;
+                    end
+                end
+            end
         end
 
         // Thread 1 commit
-        if (commit1_valid && commit1_is_store) begin
+        if (commit1_valid && commit1_is_store && !commit1_flush_kill) begin
+            commit_marked = store_alloc_fire && (store_tid == 1'b1) &&
+                            (store_order_id == commit1_order_id);
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 if (sb_valid_next[1][j] && !sb_committed_next[1][j] &&
                     (sb_order_id[1][j] == commit1_order_id)) begin
                     sb_committed_next[1][j] = 1'b1;
+                    commit_marked = 1'b1;
                     `ifdef VERBOSE_SIM_LOGS
                     $display("[SB COMMIT] tid=1 order=%0d idx=%0d addr=%h",
                              commit1_order_id, j, sb_addr[1][j]);
                     `endif
+                end
+            end
+            if (!commit_marked) begin
+                pending_stored = 1'b0;
+                for (j = 0; j < SB_DEPTH; j = j + 1) begin
+                    if (!pending_stored && !pending_commit_valid_next[1][j]) begin
+                        pending_commit_valid_next[1][j] = 1'b1;
+                        pending_commit_order_next[1][j] = commit1_order_id;
+                        pending_stored = 1'b1;
+                    end
                 end
             end
         end
@@ -581,6 +659,8 @@ always @(posedge clk or negedge rstn) begin
             for (j = 0; j < SB_DEPTH; j = j + 1) begin
                 sb_valid[t][j]     <= sb_valid_next[t][j];
                 sb_committed[t][j] <= sb_committed_next[t][j];
+                pending_commit_valid[t][j] <= pending_commit_valid_next[t][j];
+                pending_commit_order[t][j] <= pending_commit_order_next[t][j];
             end
         end
     end

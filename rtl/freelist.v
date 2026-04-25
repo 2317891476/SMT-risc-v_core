@@ -2,12 +2,12 @@
 // =============================================================================
 // Module : freelist
 // Description: Physical register free‑list, one circular FIFO per thread.
-//   Manages phys_reg 32‥47 for each thread (arch regs 0‥31 are pre‑allocated).
+//   Manages phys_reg 32‥63 for each thread (arch regs 0‥31 are pre‑allocated).
 //   Supports:
 //   - Dual allocate (2 phys regs/cycle for dual-dispatch)
 //   - Dual free (2 phys regs/cycle at commit)
 //   - Single-cycle ROB walk push‑back (free recovered prd_new to freelist)
-//   - Bulk reset (trap flush: re-initialize freelist to phys 32..47)
+//   - Bulk reset (trap flush: re-initialize freelist to phys 32..63)
 //
 //   Empty condition: alloc blocked → stalls rename.
 // =============================================================================
@@ -15,8 +15,8 @@
 
 module freelist #(
     parameter PHYS_REG_W   = 6,
-    parameter NUM_FREE     = 16,   // initial free count: phys regs 32..47 per thread
-    parameter FL_DEPTH     = 64,   // FIFO depth (power-of-2 for mod arithmetic; max ~47 entries used)
+    parameter NUM_FREE     = 32,   // initial free count: phys regs 32..63 per thread
+    parameter FL_DEPTH     = 64,   // FIFO depth (power-of-2 for mod arithmetic)
     parameter FL_IDX_W     = 6,    // clog2(FL_DEPTH)
     parameter NUM_THREAD   = 2
 )(
@@ -82,7 +82,7 @@ module freelist #(
     integer t, r;
     always @(posedge clk or negedge rstn) begin
         if (!rstn) begin
-            // Initialize: phys regs 32..47 in FIFO (first 16 entries)
+            // Initialize: phys regs 32..63 in FIFO
             for (t = 0; t < NUM_THREAD; t = t + 1) begin
                 fl_head[t] <= {(FL_IDX_W+1){1'b0}};
                 fl_tail[t] <= NUM_FREE[FL_IDX_W:0];

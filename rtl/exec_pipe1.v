@@ -201,21 +201,11 @@ reg [`METADATA_ORDER_ID_W-1:0] mem_req_order_id_r;
 reg [7:0]  mem_req_epoch_r;
 reg        dbg_beacon_wait_reported_r;
 
-wire held_mem_req_addr_is_mmio =
-    (mem_req_addr_r[31:16] == 16'h1300) ||
-    ((mem_req_addr_r >= `CLINT_BASE) && (mem_req_addr_r <= `CLINT_MTIME_HI)) ||
-    ((mem_req_addr_r >= `PLIC_BASE) && (mem_req_addr_r <= `PLIC_CLAIM_COMPLETE));
-wire incoming_eff_addr_is_mmio =
-    (eff_addr[31:16] == 16'h1300) ||
-    ((eff_addr >= `CLINT_BASE) && (eff_addr <= `CLINT_MTIME_HI)) ||
-    ((eff_addr >= `PLIC_BASE) && (eff_addr <= `PLIC_CLAIM_COMPLETE));
-wire held_mem_req_is_mmio_load = mem_req_valid_r && !mem_req_wen_r && held_mem_req_addr_is_mmio;
-wire incoming_mem_req_is_mmio_load = in_valid && in_mem_read && incoming_eff_addr_is_mmio;
 wire held_mem_req_flush_kill =
-    held_mem_req_is_mmio_load && flush && (mem_req_tid_r == flush_tid) &&
+    mem_req_valid_r && flush && (mem_req_tid_r == flush_tid) &&
     (!flush_order_valid || (mem_req_order_id_r > flush_order_id));
 wire incoming_mem_req_flush_kill =
-    incoming_mem_req_is_mmio_load && flush && (in_tid == flush_tid) &&
+    in_valid && is_mem_op && flush && (in_tid == flush_tid) &&
     (!flush_order_valid || (in_order_id > flush_order_id));
 
 always @(posedge clk or negedge rstn) begin

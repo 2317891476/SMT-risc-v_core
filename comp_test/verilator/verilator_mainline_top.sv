@@ -56,8 +56,8 @@ module verilator_mainline_top (
     output wire        debug_rob_commit1_valid,
     output wire [15:0] debug_rob_commit0_order_id,
     output wire [15:0] debug_rob_commit1_order_id,
-    output wire [3:0]  debug_rob_head_idx_t0,
-    output wire [3:0]  debug_rob_head_idx_t1,
+    output wire [4:0]  debug_rob_head_idx_t0,
+    output wire [4:0]  debug_rob_head_idx_t1,
     output wire        debug_rob_head_valid_t0,
     output wire        debug_rob_head_valid_t1,
     output wire        debug_rob_head_complete_t0,
@@ -72,11 +72,11 @@ module verilator_mainline_top (
     output wire        debug_rob_head_is_store_t1,
     output wire        debug_rob_head_flushed_t0,
     output wire        debug_rob_head_flushed_t1,
-    output wire [4:0]  debug_rob_count_t0,
-    output wire [4:0]  debug_rob_count_t1,
+    output wire [5:0]  debug_rob_count_t0,
+    output wire [5:0]  debug_rob_count_t1,
     output wire        debug_rob_recovering,
     output wire        debug_rob_recover_tid,
-    output wire [3:0]  debug_rob_recover_ptr,
+    output wire [4:0]  debug_rob_recover_ptr,
     output wire        debug_trap_seen,
     output wire [31:0] debug_trap_cause,
     output wire [63:0] debug_mcycle,
@@ -359,8 +359,8 @@ module verilator_mainline_top (
     wire        debug_older_store_blocked_mmio_load_unused;
     wire [7:0]  debug_branch_issue_count_unused;
     wire [7:0]  debug_branch_complete_count_unused;
-    wire [3:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
-    wire [3:0]  rob_head_idx_t1 = u_dut.u_rob.rob_head[1];
+    wire [4:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
+    wire [4:0]  rob_head_idx_t1 = u_dut.u_rob.rob_head[1];
     wire [1:0]  sb_head_idx_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_head[0];
     wire [1:0]  sb_head_idx_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_head[1];
 

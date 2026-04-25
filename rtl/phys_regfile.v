@@ -2,15 +2,15 @@
 // =============================================================================
 // Module : phys_regfile
 // Description: Physical Register File for rename-based OoO backend.
-//   48 registers per thread (32 arch + 16 extra for renaming).
+//   64 registers per thread (32 arch + 32 extra for renaming).
 //   4 combinational read ports (2 per execution pipe), 2 write ports (WB).
 //   x0 hard-wired to zero.  Same-cycle write→read forwarding.
 // =============================================================================
 `include "define.v"
 
 module phys_regfile #(
-    parameter NUM_PHYS_REG = 48,
-    parameter PHYS_REG_W   = 6,   // clog2(48) ≈ 6
+    parameter NUM_PHYS_REG = 64,
+    parameter PHYS_REG_W   = 6,
     parameter NUM_THREAD   = 2,
     parameter DATA_W       = 32
 )(

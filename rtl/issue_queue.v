@@ -56,6 +56,7 @@ module issue_queue #(
     input  wire [2:0]                       disp0_fu,
     input  wire [0:0]                       disp0_tid,
     input  wire                             disp0_is_mret,
+    input  wire                             disp0_side_effect,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_order_id,
     input  wire [`METADATA_EPOCH_W-1:0]     disp0_epoch,
     // Source dependencies (from rename / reg_result)
@@ -88,6 +89,7 @@ module issue_queue #(
     input  wire [2:0]                       disp1_fu,
     input  wire [0:0]                       disp1_tid,
     input  wire                             disp1_is_mret,
+    input  wire                             disp1_side_effect,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_order_id,
     input  wire [`METADATA_EPOCH_W-1:0]     disp1_epoch,
     input  wire [RS_TAG_W-1:0]              disp1_src1_tag,
@@ -164,6 +166,10 @@ module issue_queue #(
     input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t0,
     input  wire                             issue_after_order_block_valid_t1,
     input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t1,
+    input  wire                             issue_side_effect_block_valid_t0,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_side_effect_block_id_t0,
+    input  wire                             issue_side_effect_block_valid_t1,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_side_effect_block_id_t1,
     output wire                            oldest_store_valid_t0,
     output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t0,
     output wire                            oldest_store_valid_t1,
@@ -210,6 +216,7 @@ module issue_queue #(
     reg                            e_regs_write [0:IQ_DEPTH-1];
     reg [2:0]                      e_fu       [0:IQ_DEPTH-1];
     reg                            e_is_mret  [0:IQ_DEPTH-1];
+    reg                            e_side_effect [0:IQ_DEPTH-1];
     reg [`METADATA_ORDER_ID_W-1:0] e_order_id [0:IQ_DEPTH-1];
 
     localparam STORE_PTR_W = (IQ_DEPTH <= 1) ? 1 : $clog2(IQ_DEPTH);
@@ -359,6 +366,12 @@ module issue_queue #(
                      (e_order_id[ci] > issue_after_order_block_id_t0)) :
                     (issue_after_order_block_valid_t1 &&
                      (e_order_id[ci] > issue_after_order_block_id_t1));
+                wire side_effect_blocked = e_side_effect[ci] &&
+                    ((e_tid[ci] == 1'b0) ?
+                     (issue_side_effect_block_valid_t0 &&
+                      (e_order_id[ci] > issue_side_effect_block_id_t0)) :
+                     (issue_side_effect_block_valid_t1 &&
+                      (e_order_id[ci] > issue_side_effect_block_id_t1)));
                 wire is_load_no_store = CHECK_LOAD_STORE_ORDER &&
                                         e_mem_read[ci] && !e_mem_write[ci];
                 wire is_store_ordered = CHECK_LOAD_STORE_ORDER &&
@@ -381,12 +394,13 @@ module issue_queue #(
                 wire eligible = e_valid[ci] && !e_issued[ci] && e_ready[ci]
                                 && !e_just_woke[ci] && !inhibited
                                 && !order_blocked
+                                && !side_effect_blocked
                                 && !older_store_blocks
                                 && !older_store_blocks_store
                                 && !older_store_blocks_mret;
                 assign order_blocked_vec[ci] = e_valid[ci] && !e_issued[ci] &&
                                                e_ready[ci] && !e_just_woke[ci] &&
-                                               order_blocked;
+                                               (order_blocked || side_effect_blocked);
                 assign cand[ci] = {eligible, e_seq[ci], ci[IQ_IDX_W-1:0]};
             end else begin : pad_entry
                 assign cand[ci] = {1'b0, {`METADATA_ORDER_ID_W{1'b1}}, {IQ_IDX_W{1'b0}}};
@@ -480,6 +494,7 @@ module issue_queue #(
                 e_qk_order[i]  <= {`METADATA_ORDER_ID_W{1'b0}};
                 e_just_woke[i] <= 1'b0;
                 e_wake_hold[i] <= 2'd0;
+                e_side_effect[i] <= 1'b0;
             end
             alloc_seq <= {`METADATA_ORDER_ID_W{1'b0}};
             debug_flush_killed_any <= 1'b0;
@@ -644,6 +659,7 @@ module issue_queue #(
                 e_regs_write[free0_idx]   <= disp0_regs_write;
                 e_fu[free0_idx]       <= disp0_fu;
                 e_is_mret[free0_idx]  <= disp0_is_mret;
+                e_side_effect[free0_idx] <= disp0_side_effect;
             end
 
             // ── Dispatch 1 ──
@@ -688,6 +704,7 @@ module issue_queue #(
                 e_regs_write[free1_idx]   <= disp1_regs_write;
                 e_fu[free1_idx]       <= disp1_fu;
                 e_is_mret[free1_idx]  <= disp1_is_mret;
+                e_side_effect[free1_idx] <= disp1_side_effect;
             end
 
             // ── Update alloc_seq ──
@@ -736,6 +753,7 @@ module issue_queue #(
         if (store_count_t0_n != {STORE_COUNT_W{1'b0}}) begin
             head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
             if ((!e_valid[head_slot_idx]) || !e_mem_write[head_slot_idx] ||
+                (e_order_id[head_slot_idx] != store_head_order_id_t0_n) ||
                 (flush && flush_order_valid && (flush_tid == 1'b0) &&
                  (store_head_order_id_t0_n > flush_order_id))) begin
                 if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
@@ -753,6 +771,7 @@ module issue_queue #(
         if (store_count_t1_n != {STORE_COUNT_W{1'b0}}) begin
             head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
             if ((!e_valid[head_slot_idx]) || !e_mem_write[head_slot_idx] ||
+                (e_order_id[head_slot_idx] != store_head_order_id_t1_n) ||
                 (flush && flush_order_valid && (flush_tid == 1'b1) &&
                  (store_head_order_id_t1_n > flush_order_id))) begin
                 if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
@@ -769,7 +788,9 @@ module issue_queue #(
 
         if (commit0_valid && (commit0_tid == 1'b0) && (store_count_t0_n != {STORE_COUNT_W{1'b0}})) begin
             head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] && (e_tag[head_slot_idx] == commit0_tag)) begin
+            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
+                (e_tag[head_slot_idx] == commit0_tag) &&
+                (e_order_id[head_slot_idx] == commit0_order_id)) begin
                 if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
                     store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
                     store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
@@ -783,7 +804,9 @@ module issue_queue #(
         end
         if (commit1_valid && (commit1_tid == 1'b0) && (store_count_t0_n != {STORE_COUNT_W{1'b0}})) begin
             head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] && (e_tag[head_slot_idx] == commit1_tag)) begin
+            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
+                (e_tag[head_slot_idx] == commit1_tag) &&
+                (e_order_id[head_slot_idx] == commit1_order_id)) begin
                 if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
                     store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
                     store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
@@ -798,7 +821,9 @@ module issue_queue #(
 
         if (commit0_valid && (commit0_tid == 1'b1) && (store_count_t1_n != {STORE_COUNT_W{1'b0}})) begin
             head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] && (e_tag[head_slot_idx] == commit0_tag)) begin
+            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
+                (e_tag[head_slot_idx] == commit0_tag) &&
+                (e_order_id[head_slot_idx] == commit0_order_id)) begin
                 if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
                     store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
                     store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};
@@ -812,7 +837,9 @@ module issue_queue #(
         end
         if (commit1_valid && (commit1_tid == 1'b1) && (store_count_t1_n != {STORE_COUNT_W{1'b0}})) begin
             head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] && (e_tag[head_slot_idx] == commit1_tag)) begin
+            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
+                (e_tag[head_slot_idx] == commit1_tag) &&
+                (e_order_id[head_slot_idx] == commit1_order_id)) begin
                 if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
                     store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
                     store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};

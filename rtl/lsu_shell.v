@@ -207,6 +207,9 @@ wire req_at_rob_head = req_tid ? req_at_rob_head_t1 : req_at_rob_head_t0;
 wire mmio_load_spec_block = req_is_mmio_load && !req_at_rob_head;
 wire mmio_load_older_store_block =
     req_is_mmio_load && req_at_rob_head && sb_older_store_pending_for_load;
+wire req_flush_kill =
+    req_valid && flush && (req_tid == flush_tid) &&
+    (!flush_order_valid || (req_order_id > flush_order_id));
 
 
 
@@ -231,7 +234,7 @@ wire mem_subsys_load_resp_fire =
 wire load_resp_accept_slot = mem_subsys_load_resp_fire;
 
 assign resp_early_wakeup_valid =
-    mem_subsys_load_resp_fire && pending_valid && !flush_kills_pending &&
+    mem_subsys_load_resp_fire && pending_valid && !(flush && flush_kills_pending) &&
     !pending_wen && pending_regs_write && pending_mem2reg;
 assign resp_early_wakeup_tag = pending_tag;
 
@@ -243,11 +246,13 @@ wire sb_has_pending_stores = (sb_debug_count_t0 > 0) || (sb_debug_count_t1 > 0);
 wire m1_drain_holdoff = m1_cooldown_r && sb_has_pending_stores;
 
 // Accept stores when store buffer has space and state machine idle
-wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff;
+wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff &&
+                    !req_flush_kill;
 
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
 wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
+                   !req_flush_kill &&
                    !mmio_load_spec_block && !mmio_load_older_store_block &&
                    (state_machine_idle ||
                     (load_resp_accept_slot && !sb_forward_valid));
@@ -388,6 +393,7 @@ wire              flush_kills_pending =
                     pending_valid &&
                     flush_hits_pending &&
                     (!flush_order_valid || (pending_order_id > flush_order_id));
+wire              pending_flush_kill = flush && flush_kills_pending;
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
                                 ((lsu_state == LSU_IDLE) &&
@@ -449,7 +455,7 @@ always @(posedge clk or negedge rstn) begin
         if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
             dbg_beacon_block_reported_r <= 1'b0;
         end
-        if (flush && !m1_txn_is_drain && flush_kills_pending) begin
+        if (!m1_txn_is_drain && pending_flush_kill) begin
             // On flush, abort speculative load requests, but never discard a
             // committed store-buffer drain that has already been handed off.
             // Branch redirects only kill younger requests from the flushed thread.
@@ -816,7 +822,8 @@ always @(posedge clk or negedge rstn) begin
             resp_regs_write   <= 1'b0;
             resp_fu           <= req_fu;
             resp_rdata        <= 32'd0;
-        end else if ((lsu_state == LSU_RESP) || mem_subsys_load_resp_fire) begin
+        end else if (((lsu_state == LSU_RESP) || mem_subsys_load_resp_fire) &&
+                     !pending_flush_kill) begin
             if (!pending_wen) begin
                 // Load response
                 resp_valid        <= 1'b1;
