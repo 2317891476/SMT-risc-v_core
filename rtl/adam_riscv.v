@@ -73,6 +73,10 @@ module adam_riscv(
     output wire       debug_branch_gated_mem_issue,
     output wire       debug_flush_killed_speculative,
     output wire       debug_commit_suppressed,
+    output wire       debug_spec_mmio_load_blocked,
+    output wire       debug_spec_mmio_load_violation,
+    output wire       debug_mmio_load_at_rob_head,
+    output wire       debug_older_store_blocked_mmio_load,
     output wire [7:0] debug_branch_issue_count,
     output wire [7:0] debug_branch_complete_count,
     output wire [383:0] debug_ddr3_fetch_bus
@@ -378,6 +382,9 @@ wire [5:0]  rob_recover_prd_old, rob_recover_prd_new;
 wire        rob_recover_regs_write;
 wire [0:0]  rob_recover_tid;
 wire        rob_debug_commit_suppressed;
+wire        rob_head_valid_t0, rob_head_valid_t1;
+wire [`METADATA_ORDER_ID_W-1:0] rob_head_order_id_t0, rob_head_order_id_t1;
+wire        rob_head_flushed_t0, rob_head_flushed_t1;
 wire [3:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
 wire [4:0]  sb_disp0_tag, sb_disp1_tag;
 wire        iss0_is_csr;
@@ -1056,6 +1063,8 @@ dispatch_unit #(
     .wb1_regs_write  (wb1_regs_write  ),
     .wb1_fu          (wb1_fu          ),
     .wb1_tid         (wb1_tid         ),
+    .lsu_early_wakeup_valid(lsu_early_wakeup_valid),
+    .lsu_early_wakeup_tag(lsu_early_wakeup_tag),
     .commit0_valid   (rob_commit0_valid),
     .commit0_tag     (rob_commit0_tag  ),
     .commit0_tid     (1'b0             ),
@@ -1077,6 +1086,9 @@ wire       p1_issue_is_mem     = (p1_winner == 2'b10);
 wire       p1_issue_is_div     = (p1_winner == 2'b01);
 wire [0:0] p1_issue_arch_tid   = p1_issue_is_mem ? p1_mem_cand_tid :
                                   p1_issue_is_div ? p1_div_cand_tid : p1_mul_cand_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_issue_arch_order_id =
+                                  p1_issue_is_mem ? p1_mem_cand_order_id :
+                                  p1_issue_is_div ? p1_div_cand_order_id : p1_mul_cand_order_id;
 wire [4:0] p1_issue_arch_rs1   = p1_issue_is_mem ? p1_mem_cand_rs1 :
                                   p1_issue_is_div ? p1_div_cand_rs1 : p1_mul_cand_rs1;
 wire [4:0] p1_issue_arch_rs2   = p1_issue_is_mem ? p1_mem_cand_rs2 :
@@ -1207,7 +1219,13 @@ rob #(
     .recover_prd_new     (rob_recover_prd_new),
     .recover_regs_write  (rob_recover_regs_write),
     .recover_tid         (rob_recover_tid),
-    .debug_commit_suppressed(rob_debug_commit_suppressed)
+    .debug_commit_suppressed(rob_debug_commit_suppressed),
+    .head_valid_t0       (rob_head_valid_t0),
+    .head_order_id_t0    (rob_head_order_id_t0),
+    .head_flushed_t0     (rob_head_flushed_t0),
+    .head_valid_t1       (rob_head_valid_t1),
+    .head_order_id_t1    (rob_head_order_id_t1),
+    .head_flushed_t1     (rob_head_flushed_t1)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1445,13 +1463,26 @@ reg  [`METADATA_ORDER_ID_W-1:0] p1_pre_ro_order_id;
 reg  [`METADATA_EPOCH_W-1:0]    p1_pre_ro_epoch;
 reg  [5:0]  p1_pre_ro_prs1, p1_pre_ro_prs2;
 
+wire iss0_flush_kill =
+    combined_flush_any && (iss0_tid == flush_tid_mux) &&
+    (!flush_is_order_based || (iss0_order_id > flush_order_id_mux));
+wire p1_winner_flush_kill =
+    combined_flush_any && (p1_issue_arch_tid == flush_tid_mux) &&
+    (!flush_is_order_based || (p1_issue_arch_order_id > flush_order_id_mux));
+wire p0_pre_ro_flush_kill =
+    combined_flush_any && (p0_pre_ro_tid == flush_tid_mux) &&
+    (!flush_is_order_based || (p0_pre_ro_order_id > flush_order_id_mux));
+wire p1_pre_ro_flush_kill =
+    combined_flush_any && (p1_pre_ro_tid == flush_tid_mux) &&
+    (!flush_is_order_based || (p1_pre_ro_order_id > flush_order_id_mux));
+
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         p0_pre_ro_valid <= 1'b0;
         p1_pre_ro_valid <= 1'b0;
     end else begin
-        p0_pre_ro_valid <= iss0_valid;
-        if (iss0_valid) begin
+        p0_pre_ro_valid <= iss0_valid && !iss0_flush_kill;
+        if (iss0_valid && !iss0_flush_kill) begin
             p0_pre_ro_tag          <= iss0_tag;
             p0_pre_ro_pc           <= iss0_pc;
             p0_pre_ro_imm          <= iss0_imm;
@@ -1488,8 +1519,8 @@ always @(posedge clk or negedge rstn) begin
             p0_pre_ro_rocc_funct7  <= iss0_rocc_funct7;
         end
 
-        p1_pre_ro_valid <= p1_winner_valid;
-        if (p1_winner_valid) begin
+        p1_pre_ro_valid <= p1_winner_valid && !p1_winner_flush_kill;
+        if (p1_winner_valid && !p1_winner_flush_kill) begin
             if (p1_issue_is_mem) begin
                 p1_pre_ro_tag          <= p1_mem_cand_tag;
                 p1_pre_ro_pc           <= p1_mem_cand_pc;
@@ -1977,7 +2008,7 @@ wire rocc_resp_not_flushed = rocc_resp_epoch_match && rocc_cmd_in_flight[rocc_re
 
 // ─── Execution Pipe 0 (INT + Branch) ───────────────────────────────────────
 // When p0_pre_ro_is_rocc, don't send to exec_pipe0 (RoCC bypasses it)
-wire p0_pre_ro_to_pipe0_valid = p0_pre_ro_valid && !p0_pre_ro_is_rocc;
+wire p0_pre_ro_to_pipe0_valid = p0_pre_ro_valid && !p0_pre_ro_is_rocc && !p0_pre_ro_flush_kill;
 
 exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .clk              (clk              ),
@@ -2003,6 +2034,10 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .in_regs_write    (p0_pre_ro_regs_write),
     .in_fu            (p0_pre_ro_fu     ),
     .in_tid           (p0_pre_ro_tid    ),
+    .flush            (combined_flush_any),
+    .flush_tid        (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
+    .flush_order_valid(flush_is_order_based),
+    .flush_order_id   (flush_order_id_mux),
     .in_is_csr        (p0_pre_ro_is_csr ),
     .in_is_mret       (p0_pre_ro_is_mret),
     .in_csr_addr      (p0_pre_ro_csr_addr),
@@ -2237,8 +2272,8 @@ always @(posedge clk or negedge rstn) begin
         ro1_dbg_fwd_b <= 2'd0;
 `endif
     end else begin
-        ro1_valid <= p1_pre_ro_valid;
-        if (p1_pre_ro_valid) begin
+        ro1_valid <= p1_pre_ro_valid && !p1_pre_ro_flush_kill;
+        if (p1_pre_ro_valid && !p1_pre_ro_flush_kill) begin
             ro1_tag        <= p1_pre_ro_tag;
             ro1_pc         <= p1_pre_ro_pc;
             ro1_imm        <= p1_pre_ro_imm;
@@ -2607,6 +2642,10 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .in_tid        (ro1_tid          ),
     .in_order_id   (ro1_order_id     ),
     .in_epoch      (ro1_epoch        ),
+    .flush         (combined_flush_any),
+    .flush_tid     (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
+    .flush_order_valid(flush_is_order_based),
+    .flush_order_id(flush_order_id_mux),
     .alu_out_valid      (p1_alu_valid     ),
     .alu_out_tag        (p1_alu_tag       ),
     .alu_out_result     (p1_alu_result    ),
@@ -2659,6 +2698,12 @@ wire        lsu_resp_regs_write;
 wire [2:0]  lsu_resp_fu;
 wire [0:0]  lsu_resp_tid;
 wire        lsu_load_hazard;
+wire        lsu_early_wakeup_valid;
+wire [4:0]  lsu_early_wakeup_tag;
+wire        lsu_debug_spec_mmio_load_blocked;
+wire        lsu_debug_spec_mmio_load_violation;
+wire        lsu_debug_mmio_load_at_rob_head;
+wire        lsu_debug_older_store_blocked_mmio_load;
 
 wire [31:0] lsu_mem_addr;
 wire [3:0]  lsu_mem_read;
@@ -2719,6 +2764,12 @@ lsu_shell #(
     .req_regs_write     (p1_mem_req_regs_write),
     .req_fu             (p1_mem_req_fu        ),
     .req_mem2reg        (p1_mem_req_mem2reg   ),
+    .rob_head_valid_t0  (rob_head_valid_t0),
+    .rob_head_order_id_t0(rob_head_order_id_t0),
+    .rob_head_flushed_t0(rob_head_flushed_t0),
+    .rob_head_valid_t1  (rob_head_valid_t1),
+    .rob_head_order_id_t1(rob_head_order_id_t1),
+    .rob_head_flushed_t1(rob_head_flushed_t1),
 
     // Response to writeback
     .resp_valid         (lsu_resp_valid       ),
@@ -2731,6 +2782,8 @@ lsu_shell #(
     .resp_regs_write    (lsu_resp_regs_write  ),
     .resp_fu            (lsu_resp_fu          ),
     .resp_rdata         (lsu_resp_rdata       ),
+    .resp_early_wakeup_valid(lsu_early_wakeup_valid),
+    .resp_early_wakeup_tag(lsu_early_wakeup_tag),
 
     // Memory interface
     .mem_addr           (lsu_mem_addr         ),
@@ -2760,6 +2813,10 @@ lsu_shell #(
 
     // HPM event
     .hpm_sb_stall_event (hpm_sb_stall_event   ),
+    .debug_spec_mmio_load_blocked(lsu_debug_spec_mmio_load_blocked),
+    .debug_spec_mmio_load_violation(lsu_debug_spec_mmio_load_violation),
+    .debug_mmio_load_at_rob_head(lsu_debug_mmio_load_at_rob_head),
+    .debug_older_store_blocked_mmio_load(lsu_debug_older_store_blocked_mmio_load),
 
     // Task 6: Mem_subsys M1 interface
     .use_mem_subsys     (use_mem_subsys       ),
@@ -3485,6 +3542,10 @@ assign debug_spec_dispatch1 = sb_debug_spec_dispatch1;
 assign debug_branch_gated_mem_issue = sb_debug_branch_gated_mem_issue;
 assign debug_flush_killed_speculative = sb_debug_flush_killed_speculative;
 assign debug_commit_suppressed = rob_debug_commit_suppressed;
+assign debug_spec_mmio_load_blocked = lsu_debug_spec_mmio_load_blocked;
+assign debug_spec_mmio_load_violation = lsu_debug_spec_mmio_load_violation;
+assign debug_mmio_load_at_rob_head = lsu_debug_mmio_load_at_rob_head;
+assign debug_older_store_blocked_mmio_load = lsu_debug_older_store_blocked_mmio_load;
 assign debug_branch_issue_count = debug_branch_issue_count_r;
 assign debug_branch_complete_count = debug_branch_complete_count_r;
 assign debug_ddr3_fetch_bus = {

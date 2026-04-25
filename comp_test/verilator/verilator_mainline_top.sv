@@ -31,6 +31,10 @@ module verilator_mainline_top (
     output wire        debug_branch_gated_mem_issue,
     output wire        debug_flush_killed_speculative,
     output wire        debug_commit_suppressed,
+    output wire        debug_spec_mmio_load_blocked,
+    output wire        debug_spec_mmio_load_violation,
+    output wire        debug_mmio_load_at_rob_head,
+    output wire        debug_older_store_blocked_mmio_load,
     output wire        debug_if_valid,
     output wire        debug_fb_pop0_valid,
     output wire        debug_fb_pop1_valid,
@@ -349,6 +353,10 @@ module verilator_mainline_top (
     wire        debug_branch_gated_mem_issue_unused;
     wire        debug_flush_killed_speculative_unused;
     wire        debug_commit_suppressed_unused;
+    wire        debug_spec_mmio_load_blocked_unused;
+    wire        debug_spec_mmio_load_violation_unused;
+    wire        debug_mmio_load_at_rob_head_unused;
+    wire        debug_older_store_blocked_mmio_load_unused;
     wire [7:0]  debug_branch_issue_count_unused;
     wire [7:0]  debug_branch_complete_count_unused;
     wire [3:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
@@ -406,6 +414,10 @@ module verilator_mainline_top (
         .debug_branch_gated_mem_issue(debug_branch_gated_mem_issue_unused),
         .debug_flush_killed_speculative(debug_flush_killed_speculative_unused),
         .debug_commit_suppressed(debug_commit_suppressed_unused),
+        .debug_spec_mmio_load_blocked(debug_spec_mmio_load_blocked_unused),
+        .debug_spec_mmio_load_violation(debug_spec_mmio_load_violation_unused),
+        .debug_mmio_load_at_rob_head(debug_mmio_load_at_rob_head_unused),
+        .debug_older_store_blocked_mmio_load(debug_older_store_blocked_mmio_load_unused),
         .debug_branch_issue_count(debug_branch_issue_count_unused),
         .debug_branch_complete_count(debug_branch_complete_count_unused),
         .debug_ddr3_fetch_bus(debug_ddr3_fetch_bus),
@@ -460,6 +472,10 @@ module verilator_mainline_top (
     assign debug_branch_gated_mem_issue = debug_branch_gated_mem_issue_unused;
     assign debug_flush_killed_speculative = debug_flush_killed_speculative_unused;
     assign debug_commit_suppressed = debug_commit_suppressed_unused;
+    assign debug_spec_mmio_load_blocked = debug_spec_mmio_load_blocked_unused;
+    assign debug_spec_mmio_load_violation = debug_spec_mmio_load_violation_unused;
+    assign debug_mmio_load_at_rob_head = debug_mmio_load_at_rob_head_unused;
+    assign debug_older_store_blocked_mmio_load = debug_older_store_blocked_mmio_load_unused;
     assign debug_if_valid = u_dut.if_valid;
     assign debug_fb_pop0_valid = u_dut.fb_pop0_valid;
     assign debug_fb_pop1_valid = u_dut.fb_pop1_valid;

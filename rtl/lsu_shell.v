@@ -67,6 +67,14 @@ module lsu_shell #(
     input  wire [2:0]         req_fu,            // FU type (FU_LOAD/FU_STORE)
     input  wire               req_mem2reg,       // Load to register
 
+    // ROB head query: side-effecting MMIO loads may only issue at ROB head.
+    input  wire               rob_head_valid_t0,
+    input  wire [ORDER_ID_W-1:0] rob_head_order_id_t0,
+    input  wire               rob_head_flushed_t0,
+    input  wire               rob_head_valid_t1,
+    input  wire [ORDER_ID_W-1:0] rob_head_order_id_t1,
+    input  wire               rob_head_flushed_t1,
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Response Interface (to writeback stage)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -84,6 +92,10 @@ module lsu_shell #(
 
     // Response data (for loads)
     output reg  [31:0]        resp_rdata,        // Load data (sign/unsign extended)
+
+    // Early wakeup for IQ dependency tracking
+    output wire               resp_early_wakeup_valid,
+    output wire [TAG_W-1:0]   resp_early_wakeup_tag,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Legacy Memory Interface (to stage_mem / data_memory) - for loads only
@@ -139,7 +151,13 @@ module lsu_shell #(
     output wire               load_hazard,          // Load must be retried
 
     // HPM event
-    output wire               hpm_sb_stall_event
+    output wire               hpm_sb_stall_event,
+
+    // Speculation firewall debug
+    output wire               debug_spec_mmio_load_blocked,
+    output wire               debug_spec_mmio_load_violation,
+    output wire               debug_mmio_load_at_rob_head,
+    output wire               debug_older_store_blocked_mmio_load
 );
 
 // =============================================================================
@@ -160,6 +178,7 @@ wire                     sb_mem_write_ready_mux;
 wire [31:0]              sb_forward_data;
 wire                     sb_forward_valid;
 wire                     sb_load_hazard;
+wire                     sb_older_store_pending_for_load;
 wire                     sb_debug_empty;
 wire [2:0]               sb_debug_count_t0;
 wire [2:0]               sb_debug_count_t1;
@@ -171,6 +190,23 @@ wire is_load  = req_valid && !req_wen;
 wire is_store = req_valid && req_wen;
 wire store_enqueue_fire;
 wire legacy_load_issue_fire;
+
+wire req_addr_is_mmio_0x13 = (req_addr[31:16] == 16'h1300);
+wire req_addr_is_clint     = (req_addr >= `CLINT_BASE) && (req_addr <= `CLINT_MTIME_HI);
+wire req_addr_is_plic      = (req_addr >= `PLIC_BASE) && (req_addr <= `PLIC_CLAIM_COMPLETE);
+wire req_addr_is_mmio      = req_addr_is_mmio_0x13 || req_addr_is_clint || req_addr_is_plic;
+wire req_is_mmio_load      = is_load && req_addr_is_mmio;
+
+wire req_at_rob_head_t0 =
+    rob_head_valid_t0 && !rob_head_flushed_t0 &&
+    (rob_head_order_id_t0 == req_order_id);
+wire req_at_rob_head_t1 =
+    rob_head_valid_t1 && !rob_head_flushed_t1 &&
+    (rob_head_order_id_t1 == req_order_id);
+wire req_at_rob_head = req_tid ? req_at_rob_head_t1 : req_at_rob_head_t0;
+wire mmio_load_spec_block = req_is_mmio_load && !req_at_rob_head;
+wire mmio_load_older_store_block =
+    req_is_mmio_load && req_at_rob_head && sb_older_store_pending_for_load;
 
 
 
@@ -194,6 +230,11 @@ wire mem_subsys_load_resp_fire =
                 m1_resp_valid && !m1_txn_is_drain;
 wire load_resp_accept_slot = mem_subsys_load_resp_fire;
 
+assign resp_early_wakeup_valid =
+    mem_subsys_load_resp_fire && pending_valid && !flush_kills_pending &&
+    !pending_wen && pending_regs_write && pending_mem2reg;
+assign resp_early_wakeup_tag = pending_tag;
+
 // After completing an M1 transaction, hold off accepting new requests
 // until the store buffer has drained below the full threshold.
 // This prevents store buffer starvation during long-latency loads.
@@ -207,6 +248,7 @@ wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff;
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
 wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
+                   !mmio_load_spec_block && !mmio_load_older_store_block &&
                    (state_machine_idle ||
                     (load_resp_accept_slot && !sb_forward_valid));
 
@@ -281,6 +323,7 @@ store_buffer #(
     .forward_data           (sb_forward_data),
     .forward_valid          (sb_forward_valid),
     .load_hazard            (sb_load_hazard),
+    .older_store_pending_for_load(sb_older_store_pending_for_load),
     .debug_empty            (sb_debug_empty),
     .debug_count_t0         (sb_debug_count_t0),
     .debug_count_t1         (sb_debug_count_t1),
@@ -361,6 +404,30 @@ assign m1_req_addr  = mem_subsys_load_issue_fire ? req_addr : m1_req_addr_r;
 assign m1_req_write = mem_subsys_load_issue_fire ? 1'b0 : m1_req_write_r;
 assign m1_req_wdata = mem_subsys_load_issue_fire ? 32'd0 : m1_req_wdata_r;
 assign m1_req_wen   = mem_subsys_load_issue_fire ? 4'b0000 : m1_req_wen_r;
+
+wire pending_at_rob_head_t0 =
+    rob_head_valid_t0 && !rob_head_flushed_t0 &&
+    (rob_head_order_id_t0 == pending_order_id);
+wire pending_at_rob_head_t1 =
+    rob_head_valid_t1 && !rob_head_flushed_t1 &&
+    (rob_head_order_id_t1 == pending_order_id);
+wire pending_at_rob_head = pending_tid ? pending_at_rob_head_t1 : pending_at_rob_head_t0;
+wire m1_req_addr_is_mmio_0x13 = (m1_req_addr[31:16] == 16'h1300);
+wire m1_req_addr_is_clint     = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
+wire m1_req_addr_is_plic      = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
+wire m1_req_addr_is_mmio      = m1_req_addr_is_mmio_0x13 || m1_req_addr_is_clint || m1_req_addr_is_plic;
+wire current_mmio_load_violation =
+    mem_subsys_load_issue_fire && req_addr_is_mmio && !req_at_rob_head;
+wire pending_mmio_load_violation =
+    m1_req_valid_r && !m1_req_write_r && m1_req_addr_is_mmio &&
+    !(pending_valid && pending_at_rob_head);
+
+assign debug_spec_mmio_load_blocked = req_valid && mmio_load_spec_block;
+assign debug_mmio_load_at_rob_head = req_valid && req_is_mmio_load && req_at_rob_head;
+assign debug_older_store_blocked_mmio_load =
+    req_valid && mmio_load_older_store_block;
+assign debug_spec_mmio_load_violation =
+    use_mem_subsys && (current_mmio_load_violation || pending_mmio_load_violation);
 
 // State machine
 always @(posedge clk or negedge rstn) begin

@@ -140,6 +140,9 @@ module issue_queue #(
     input  wire [`METADATA_ORDER_ID_W-1:0] wb1_order_id,
     input  wire        wb1_regs_write,
 
+    input  wire        early_wakeup_valid,
+    input  wire [RS_TAG_W-1:0] early_wakeup_tag,
+
     // ─── Commit (deallocation) ───────────────────────────────────
     input  wire        commit0_valid,
     input  wire [RS_TAG_W-1:0] commit0_tag,
@@ -535,6 +538,20 @@ module issue_queue #(
                             woke_src = 1'b1;
                         end
                         if ((nqk == wb1_tag) && (e_tid[i] == wb1_tid) && (nqk_order == wb1_order_id)) begin
+                            nqk = {RS_TAG_W{1'b0}};
+                            nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
+                    end
+
+                    // Early wakeup (LSU load response)
+                    if (early_wakeup_valid && (early_wakeup_tag != {RS_TAG_W{1'b0}})) begin
+                        if (nqj == early_wakeup_tag) begin
+                            nqj = {RS_TAG_W{1'b0}};
+                            nqj_order = {`METADATA_ORDER_ID_W{1'b0}};
+                            woke_src = 1'b1;
+                        end
+                        if (nqk == early_wakeup_tag) begin
                             nqk = {RS_TAG_W{1'b0}};
                             nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
                             woke_src = 1'b1;

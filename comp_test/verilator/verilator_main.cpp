@@ -103,6 +103,10 @@ struct Summary {
     uint64_t bench_branch_gated_mem_issue_cycles = 0;
     uint64_t bench_flush_killed_speculative_cycles = 0;
     uint64_t bench_commit_suppressed_count = 0;
+    uint64_t spec_mmio_load_blocked_cycles = 0;
+    uint64_t spec_mmio_load_violation_count = 0;
+    uint64_t mmio_load_at_rob_head_count = 0;
+    uint64_t older_store_blocked_mmio_load_cycles = 0;
     std::string bench_branch_redirect_top_pcs;
     uint32_t rob_commit0_seen_count = 0;
     uint32_t rob_commit1_seen_count = 0;
@@ -459,6 +463,10 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BenchBranchGatedMemIssueCycles\": " << summary.bench_branch_gated_mem_issue_cycles << ",\n";
     ofs << "  \"BenchFlushKilledSpeculativeCycles\": " << summary.bench_flush_killed_speculative_cycles << ",\n";
     ofs << "  \"BenchCommitSuppressedCount\": " << summary.bench_commit_suppressed_count << ",\n";
+    ofs << "  \"SpecMmioLoadBlockedCycles\": " << summary.spec_mmio_load_blocked_cycles << ",\n";
+    ofs << "  \"SpecMmioLoadViolationCount\": " << summary.spec_mmio_load_violation_count << ",\n";
+    ofs << "  \"MmioLoadAtRobHeadCount\": " << summary.mmio_load_at_rob_head_count << ",\n";
+    ofs << "  \"OlderStoreBlockedMmioLoadCycles\": " << summary.older_store_blocked_mmio_load_cycles << ",\n";
     ofs << "  \"BenchBranchRedirectTopPcs\": \"" << json_escape(summary.bench_branch_redirect_top_pcs) << "\",\n";
     ofs << "  \"RobCommit0SeenCount\": " << summary.rob_commit0_seen_count << ",\n";
     ofs << "  \"RobCommit1SeenCount\": " << summary.rob_commit1_seen_count << ",\n";
@@ -1470,6 +1478,20 @@ int main(int argc, char** argv) {
             ++summary.dcache_miss_event_count;
         }
         summary.last_dcache_miss_event = top->debug_dcache_miss_event != 0;
+        if (core_clk_rise) {
+            if (top->debug_spec_mmio_load_blocked) {
+                ++summary.spec_mmio_load_blocked_cycles;
+            }
+            if (top->debug_spec_mmio_load_violation) {
+                ++summary.spec_mmio_load_violation_count;
+            }
+            if (top->debug_mmio_load_at_rob_head) {
+                ++summary.mmio_load_at_rob_head_count;
+            }
+            if (top->debug_older_store_blocked_mmio_load) {
+                ++summary.older_store_blocked_mmio_load_cycles;
+            }
+        }
 
         if (!summary.entry_reached && top->debug_pc_t0 >= cfg.entry_pc) {
             summary.entry_reached = true;
@@ -1736,6 +1758,10 @@ int main(int argc, char** argv) {
 #endif
         }
 
+        if (summary.spec_mmio_load_violation_count != 0) {
+            summary.exit_reason = "spec_mmio_violation";
+            break;
+        }
         if (summary.benchmark_done_seen) {
             summary.exit_reason = "done";
             break;

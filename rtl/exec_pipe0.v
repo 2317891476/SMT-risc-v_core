@@ -37,6 +37,10 @@ module exec_pipe0 #(
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
     input  wire [0:0]         in_tid,
+    input  wire               flush,
+    input  wire [0:0]         flush_tid,
+    input  wire               flush_order_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
 
     // ─── CSR/MRET inputs ────────────────────────────────────────
     input  wire               in_is_csr,     // CSR instruction
@@ -149,6 +153,12 @@ wire in_link_rs1 = (in_rs1_idx == 5'd1) || (in_rs1_idx == 5'd5);
 wire in_is_call = in_br && in_regs_write && in_link_rd;
 wire in_is_return = in_br && (in_br_addr_mode == `J_REG) &&
                     (in_rd == 5'd0) && in_link_rs1;
+wire incoming_flush_kill =
+    flush && (in_tid == flush_tid) &&
+    (!flush_order_valid || (in_order_id > flush_order_id));
+wire stored_flush_kill =
+    flush && (stored_tid == flush_tid) &&
+    (!flush_order_valid || (stored_order_id > flush_order_id));
 
 wire [31:0] branch_actual_target = (stored_br_addr_mode == `J_REG) ?
                                    (stored_op_a + stored_imm) :
@@ -215,7 +225,7 @@ always @(posedge clk or negedge rstn) begin
         stored_br_addr_mode <= in_br_addr_mode;
         stored_pred_taken   <= in_pred_taken;
         stored_pred_target  <= in_pred_target;
-        stored_valid        <= in_valid;
+        stored_valid        <= in_valid && !incoming_flush_kill;
         stored_br_mark      <= br_mark;
         stored_is_call      <= in_is_call;
         stored_is_return    <= in_is_return;
@@ -227,7 +237,7 @@ always @(posedge clk or negedge rstn) begin
         `endif
 
         // Output registers (1 cycle delay)
-        out_valid_r      <= in_valid;
+        out_valid_r      <= in_valid && !incoming_flush_kill;
         out_tag_r        <= in_tag;
         out_result_r     <= in_is_csr ? csr_rdata : alu_out;
         out_rd_r         <= in_rd;
@@ -236,17 +246,17 @@ always @(posedge clk or negedge rstn) begin
         out_tid_r        <= in_tid;
 
         // Branch resolution uses stored values from previous cycle
-        br_ctrl_r     <= redirect_needed;
+        br_ctrl_r     <= redirect_needed && !stored_flush_kill;
         br_addr_r     <= redirect_target;
         br_tid_r      <= stored_tid;
         br_order_id_r <= stored_order_id;
-        br_complete_r <= stored_valid && stored_br;
-        br_update_valid_r  <= bpu_update_needed;
+        br_complete_r <= stored_valid && stored_br && !stored_flush_kill;
+        br_update_valid_r  <= bpu_update_needed && !stored_flush_kill;
         br_update_pc_r     <= stored_pc;
         br_update_taken_r  <= bpu_update_taken;
         br_update_target_r <= bpu_update_target;
-        br_update_is_call_r   <= stored_valid && stored_is_call;
-        br_update_is_return_r <= stored_valid && stored_is_return;
+        br_update_is_call_r   <= stored_valid && stored_is_call && !stored_flush_kill;
+        br_update_is_return_r <= stored_valid && stored_is_return && !stored_flush_kill;
     end
 end
 
@@ -258,11 +268,11 @@ assign out_regs_write = out_regs_write_r;
 assign out_fu         = out_fu_r;
 assign out_tid        = out_tid_r;
 
-assign csr_valid  = in_valid && in_is_csr;
+assign csr_valid  = in_valid && in_is_csr && !incoming_flush_kill;
 assign csr_wdata  = csr_write_data;
 assign csr_op     = in_func3;    // funct3 encodes CSR operation
 assign csr_addr   = in_csr_addr;
-assign mret_valid    = in_valid && in_is_mret;
+assign mret_valid    = in_valid && in_is_mret && !incoming_flush_kill;
 assign mret_order_id = in_order_id;
 
 assign br_ctrl     = br_ctrl_r;

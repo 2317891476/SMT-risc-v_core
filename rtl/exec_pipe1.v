@@ -40,6 +40,12 @@ module exec_pipe1 #(
     input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,   // Metadata from scoreboard
     input  wire [7:0]         in_epoch,
 
+    // Flush can kill a held memory request before the LSU accepts it.
+    input  wire               flush,
+    input  wire [0:0]         flush_tid,
+    input  wire               flush_order_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
+
     // ─── ALU / AGU result (1-cycle path) ────────────────────────
     output wire               alu_out_valid,
     output wire [TAG_W-1:0]   alu_out_tag,
@@ -195,6 +201,23 @@ reg [`METADATA_ORDER_ID_W-1:0] mem_req_order_id_r;
 reg [7:0]  mem_req_epoch_r;
 reg        dbg_beacon_wait_reported_r;
 
+wire held_mem_req_addr_is_mmio =
+    (mem_req_addr_r[31:16] == 16'h1300) ||
+    ((mem_req_addr_r >= `CLINT_BASE) && (mem_req_addr_r <= `CLINT_MTIME_HI)) ||
+    ((mem_req_addr_r >= `PLIC_BASE) && (mem_req_addr_r <= `PLIC_CLAIM_COMPLETE));
+wire incoming_eff_addr_is_mmio =
+    (eff_addr[31:16] == 16'h1300) ||
+    ((eff_addr >= `CLINT_BASE) && (eff_addr <= `CLINT_MTIME_HI)) ||
+    ((eff_addr >= `PLIC_BASE) && (eff_addr <= `PLIC_CLAIM_COMPLETE));
+wire held_mem_req_is_mmio_load = mem_req_valid_r && !mem_req_wen_r && held_mem_req_addr_is_mmio;
+wire incoming_mem_req_is_mmio_load = in_valid && in_mem_read && incoming_eff_addr_is_mmio;
+wire held_mem_req_flush_kill =
+    held_mem_req_is_mmio_load && flush && (mem_req_tid_r == flush_tid) &&
+    (!flush_order_valid || (mem_req_order_id_r > flush_order_id));
+wire incoming_mem_req_flush_kill =
+    incoming_mem_req_is_mmio_load && flush && (in_tid == flush_tid) &&
+    (!flush_order_valid || (in_order_id > flush_order_id));
+
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         alu_out_valid_r      <= 1'b0;
@@ -231,12 +254,16 @@ always @(posedge clk or negedge rstn) begin
         alu_out_order_id_r   <= in_order_id;
         alu_out_epoch_r      <= in_epoch;
 
-        if (mem_req_valid_r && mem_req_accept) begin
+        if (held_mem_req_flush_kill) begin
+            mem_req_valid_r <= 1'b0;
+            dbg_beacon_wait_reported_r <= 1'b0;
+        end else if (mem_req_valid_r && mem_req_accept) begin
             mem_req_valid_r <= 1'b0;
             dbg_beacon_wait_reported_r <= 1'b0;
         end
 
-        if (in_valid && is_mem_op && (!mem_req_valid_r || mem_req_accept)) begin
+        if (in_valid && is_mem_op && !incoming_mem_req_flush_kill &&
+            (!mem_req_valid_r || mem_req_accept || held_mem_req_flush_kill)) begin
 `ifdef VERBOSE_SIM_LOGS
             if (in_mem_write && (eff_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                 $display("[DBG_EP1_STORE] t=%0t pc=%h order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
@@ -257,12 +284,13 @@ always @(posedge clk or negedge rstn) begin
             mem_req_order_id_r   <= in_order_id;
             mem_req_epoch_r      <= in_epoch;
             dbg_beacon_wait_reported_r <= 1'b0;
-        end else if (in_valid && is_mem_op && mem_req_valid_r && !mem_req_accept) begin
+        end else if (in_valid && is_mem_op && mem_req_valid_r && !mem_req_accept &&
+                     !held_mem_req_flush_kill && !incoming_mem_req_flush_kill) begin
 `ifdef VERBOSE_SIM_LOGS
             $display("[EP1_MEM_HOLD] t=%0t held_order=%0d held_addr=%h new_order=%0d new_addr=%h",
                      $time, mem_req_order_id_r, mem_req_addr_r, in_order_id, eff_addr);
 `endif
-        end else if (mem_req_valid_r && !mem_req_accept &&
+        end else if (mem_req_valid_r && !mem_req_accept && !held_mem_req_flush_kill &&
                      mem_req_wen_r && (mem_req_addr_r == `DEBUG_BEACON_EVT_ADDR) &&
                      !dbg_beacon_wait_reported_r) begin
 `ifdef VERBOSE_SIM_LOGS

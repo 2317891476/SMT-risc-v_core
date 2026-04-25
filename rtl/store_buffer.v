@@ -84,6 +84,7 @@ module store_buffer #(
     output wire [31:0]              forward_data,        // Forwarded data (if exact match)
     output wire                     forward_valid,       // Forward data is valid
     output wire                     load_hazard,         // Stall: unresolved/partial overlap
+    output wire                     older_store_pending_for_load,
     output wire                     debug_empty,
     output wire [SB_IDX_W:0]        debug_count_t0,
     output wire [SB_IDX_W:0]        debug_count_t1,
@@ -293,6 +294,7 @@ reg [31:0] fwd_data_r;
 reg        fwd_valid_r;
 reg        hazard_r;
 reg        found_match_r;
+reg        older_store_pending_r;
 reg [ORDER_ID_W-1:0] match_order_id_r;
 reg [3:0]  load_mask;
 
@@ -302,6 +304,7 @@ always @(*) begin
     fwd_valid_r = 1'b0;
     hazard_r = 1'b0;
     found_match_r = 1'b0;
+    older_store_pending_r = 1'b0;
     match_order_id_r = {ORDER_ID_W{1'b0}};
     load_mask = load_byte_mask(load_query_func3, load_query_addr[1:0]);
 
@@ -312,6 +315,7 @@ always @(*) begin
                 // Check if this store is older than the load (smaller order_id)
                 // order_ids are monotonically increasing per thread
                 if (sb_order_id[load_query_tid][fwd_i] < load_query_order_id) begin
+                    older_store_pending_r = 1'b1;
                     // Check address match
                     if (sb_addr[load_query_tid][fwd_i] == load_query_addr) begin
                         // Same address: check coverage
@@ -365,6 +369,7 @@ end
 assign forward_data = fwd_data_r;
 assign forward_valid = fwd_valid_r;
 assign load_hazard = hazard_r;
+assign older_store_pending_for_load = older_store_pending_r;
 assign debug_empty = sb_empty_t0 && sb_empty_t1;
 assign debug_count_t0 = sb_count[0];
 assign debug_count_t1 = sb_count[1];

@@ -78,6 +78,9 @@ BASIC_TEST_IDS = {
     "test_branch_spec_mem_sideeffect": 27,
     "test_branch_spec_system_block": 28,
     "test_branch_spec_correct_path_alu": 29,
+    "test_branch_spec_mmio_load_flush": 30,
+    "test_mmio_load_rob_head": 31,
+    "test_mmio_load_store_order": 32,
 }
 
 
@@ -269,7 +272,19 @@ class TestRunner:
     def run_basic_tests(self, tests=None):
         """Run basic tests including Store Buffer and Branch Prediction tests"""
         self.log("Running basic tests...", "INFO")
-        
+
+        if tests is not None:
+            normalized = []
+            for t in tests:
+                if not (t.endswith('.s') or t.endswith('.S')):
+                    if (ROM_DIR / (t + '.S')).exists():
+                        normalized.append(t + '.S')
+                    else:
+                        normalized.append(t + '.s')
+                else:
+                    normalized.append(t)
+            tests = normalized
+
         if tests is None:
             # Core functionality tests
             tests = [
@@ -282,6 +297,9 @@ class TestRunner:
                 "test_branch_spec_mem_sideeffect.s",
                 "test_branch_spec_system_block.s",
                 "test_branch_spec_correct_path_alu.s",
+                "test_branch_spec_mmio_load_flush.s",
+                "test_mmio_load_rob_head.s",
+                "test_mmio_load_store_order.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
