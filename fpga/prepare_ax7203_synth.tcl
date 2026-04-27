@@ -9,9 +9,19 @@ set project_name "adam_riscv_ax7203"
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
-set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0]
-set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 0]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
+set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
+set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
+set ddr3_fetch_debug [ax7203_env_or_default AX7203_DDR3_FETCH_DEBUG 0]
+set ddr3_bridge_audit [ax7203_env_or_default AX7203_DDR3_BRIDGE_AUDIT 0]
+set step2_beacon_debug [ax7203_env_or_default AX7203_STEP2_BEACON_DEBUG 0]
+set loader_beacon_debug [ax7203_env_or_default AX7203_DDR3_LOADER_BEACON_DEBUG 0]
+set transport_uart_rxdata_reg_test [ax7203_env_or_default AX7203_TRANSPORT_UART_RXDATA_REG_TEST 0]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
+set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 48] + 0}]
+set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
+set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
+set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
+set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
 set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set project_file "$project_dir/$project_name.xpr"
@@ -26,7 +36,18 @@ puts "Opening project: $project_file"
 puts "Target part: $target_part"
 puts "ENABLE_ROCC_ACCEL: $enable_rocc"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
+puts "ENABLE_DDR3: $enable_ddr3"
+puts "DDR3_FETCH_DEBUG: $ddr3_fetch_debug"
+puts "DDR3_BRIDGE_AUDIT: $ddr3_bridge_audit"
+puts "AX7203_STEP2_BEACON_DEBUG: $step2_beacon_debug"
+puts "AX7203_DDR3_LOADER_BEACON_DEBUG: $loader_beacon_debug"
+puts "TRANSPORT_UART_RXDATA_REG_TEST: $transport_uart_rxdata_reg_test"
 puts "SMT_MODE: $smt_mode"
+puts "RS depth: $rs_depth"
+puts "RS idx width: $rs_idx_w"
+puts "Fetch buffer depth: $fetch_buffer_depth"
+puts "Core clock: ${core_clk_mhz} MHz"
+puts "UART clock divider: $uart_clk_div"
 puts "Top module: $top_module"
 puts "Synthesis jobs: $synth_jobs"
 
@@ -42,12 +63,32 @@ if {$current_part != $target_part} {
 }
 
 set_property top $top_module [get_filesets sources_1]
+if {$enable_mem_subsys} {
+    set l2_pt "L2_PASSTHROUGH=1"
+} else {
+    set l2_pt ""
+}
+set ddr3_fetch_debug_def [expr {$ddr3_fetch_debug ? "DDR3_FETCH_DEBUG=1" : ""}]
+set ddr3_bridge_audit_def [expr {$ddr3_bridge_audit ? "DDR3_BRIDGE_AUDIT=1" : ""}]
+set step2_beacon_debug_def [expr {$step2_beacon_debug ? "AX7203_STEP2_BEACON_DEBUG=1" : ""}]
+set loader_beacon_debug_def [expr {$loader_beacon_debug ? "AX7203_DDR3_LOADER_BEACON_DEBUG=1" : ""}]
+set transport_uart_rxdata_reg_test_def [expr {$transport_uart_rxdata_reg_test ? "TRANSPORT_UART_RXDATA_REG_TEST=1" : ""}]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
     ENABLE_MEM_SUBSYS=$enable_mem_subsys \
     SMT_MODE=$smt_mode \
+    FPGA_SCOREBOARD_RS_DEPTH=$rs_depth \
+    FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w \
+    FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth \
+    FPGA_UART_CLK_DIV=$uart_clk_div \
+    {*}$l2_pt \
     {*}[expr {$enable_ddr3 ? "ENABLE_DDR3=1" : ""}] \
+    {*}$ddr3_fetch_debug_def \
+    {*}$ddr3_bridge_audit_def \
+    {*}$step2_beacon_debug_def \
+    {*}$loader_beacon_debug_def \
+    {*}$transport_uart_rxdata_reg_test_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 

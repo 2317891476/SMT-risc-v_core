@@ -4,7 +4,7 @@ Unified test runner for AdamRiscv.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
-  --basic           : Core tests + Store Buffer tests + P2 L2/Interrupt tests (26 tests)
+  --basic           : Core tests + divider tests + Store Buffer tests + P2 L2/Interrupt tests (28 tests)
                       - test1, test2, test_rv32i_full (core functionality)
                       - test_store_buffer_simple, test_store_buffer_commit,
                         test_store_buffer_forwarding, test_store_buffer_hazard,
@@ -74,13 +74,21 @@ BASIC_TEST_IDS = {
     "test_store_buffer_latest_write_wins": 23,
     "test_store_buffer_stream_multiline": 24,
     "test_l2_mmio_ping_pong": 25,
+    "test_branch_spec_alu_flush": 26,
+    "test_branch_spec_mem_sideeffect": 27,
+    "test_branch_spec_system_block": 28,
+    "test_branch_spec_correct_path_alu": 29,
+    "test_branch_spec_mmio_load_flush": 30,
+    "test_mmio_load_rob_head": 31,
+    "test_mmio_load_store_order": 32,
 }
 
 
 class TestRunner:
-    def __init__(self, verbose=False, enable_rocc=False):
+    def __init__(self, verbose=False, enable_rocc=False, fpga_config=False):
         self.verbose = verbose
         self.enable_rocc = enable_rocc
+        self.fpga_config = fpga_config
         self.results = []
         self.start_time = None
         
@@ -128,6 +136,7 @@ class TestRunner:
                 f"-march={march_flag}",
                 "-mabi=ilp32",
                 test,
+                *(["-lgcc"] if ("div_helper" in test_name or test.endswith(".c")) else []),
                 "-o",
                 f"{test_name}.elf",
             ],
@@ -174,6 +183,9 @@ class TestRunner:
         """Compile the basic testbench using explicit file arguments."""
         out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
         out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"tb_{test_name}.out"
+        if out_path.exists():
+            out_path.unlink()
 
         rtl_files = sorted((PROJECT_ROOT / "rtl").glob("*.v"))
         test_id = BASIC_TEST_IDS.get(test_name, 0)
@@ -183,10 +195,18 @@ class TestRunner:
             f"-DROCC_ENABLE={1 if self.enable_rocc else 0}",
             f"-DENABLE_ROCC_ACCEL={1 if self.enable_rocc else 0}",
             f"-DTEST_ID={test_id}",
+        ]
+        if self.fpga_config:
+            compile_cmd += [
+                "-DENABLE_MEM_SUBSYS=1",
+                "-DSIM_SCOREBOARD_RS_DEPTH=48",
+                "-DSIM_SCOREBOARD_RS_IDX_W=6",
+            ]
+        compile_cmd += [
             "-s",
             "tb",
             "-o",
-            str(out_dir / "tb_test.out"),
+            str(out_path),
             "-I",
             str(PROJECT_ROOT / "rtl"),
             *[str(path) for path in rtl_files],
@@ -252,13 +272,34 @@ class TestRunner:
     def run_basic_tests(self, tests=None):
         """Run basic tests including Store Buffer and Branch Prediction tests"""
         self.log("Running basic tests...", "INFO")
-        
+
+        if tests is not None:
+            normalized = []
+            for t in tests:
+                if not (t.endswith('.s') or t.endswith('.S')):
+                    if (ROM_DIR / (t + '.S')).exists():
+                        normalized.append(t + '.S')
+                    else:
+                        normalized.append(t + '.s')
+                else:
+                    normalized.append(t)
+            tests = normalized
+
         if tests is None:
             # Core functionality tests
             tests = [
                 "test1.s",
                 "test2.S",
                 "test_rv32i_full.s",
+                "test_div_basic.s",
+                "test_div_helper_path.s",
+                "test_branch_spec_alu_flush.s",
+                "test_branch_spec_mem_sideeffect.s",
+                "test_branch_spec_system_block.s",
+                "test_branch_spec_correct_path_alu.s",
+                "test_branch_spec_mmio_load_flush.s",
+                "test_mmio_load_rob_head.s",
+                "test_mmio_load_store_order.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
@@ -308,7 +349,7 @@ class TestRunner:
             
             # Build ROM
             # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
-            march_flag = "rv32i_zicsr" if "csr" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32i"
+            march_flag = "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
             ret, out, err = self.build_basic_rom(test, test_name, march_flag)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))
@@ -322,7 +363,7 @@ class TestRunner:
                 continue
             
             # Run simulation
-            run_cmd = ["vvp", str(COMP_TEST_DIR / "out_iverilog" / "bin" / "tb_test.out")]
+            run_cmd = ["vvp", str(COMP_TEST_DIR / "out_iverilog" / "bin" / f"tb_{test_name}.out")]
             ret, out, err = self.run_command(run_cmd, cwd=COMP_TEST_DIR, timeout=60)
 
             result, detail = self.evaluate_basic_result(out, err, ret)
@@ -338,7 +379,8 @@ class TestRunner:
         
         # Run using run_riscv_tests.py
         ret, out, err = self.run_command(
-            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-tests"],
+            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-tests"]
+            + (["--fpga-config"] if self.fpga_config else []),
             cwd=VERIFICATION_DIR, timeout=600
         )
         
@@ -365,7 +407,8 @@ class TestRunner:
         
         # Run using run_riscv_tests.py
         ret, out, err = self.run_command(
-            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-arch-test"],
+            [sys.executable, "run_riscv_tests.py", "--suite", "riscv-arch-test"]
+            + (["--fpga-config"] if self.fpga_config else []),
             cwd=VERIFICATION_DIR, timeout=1200
         )
         
@@ -439,9 +482,11 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--tests", nargs="+", help="Specific basic tests to run")
     parser.add_argument("--enable-rocc", action="store_true", help="Enable RoCC accelerator RTL and include RoCC tests")
+    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_TAG_DEPTH=48, RS_TAG_W=6) for simulation")
     args = parser.parse_args()
     
-    runner = TestRunner(verbose=args.verbose, enable_rocc=args.enable_rocc)
+    runner = TestRunner(verbose=args.verbose, enable_rocc=args.enable_rocc,
+                        fpga_config=args.fpga_config)
     runner.start_time = time.time()
     
     print("=" * 60)

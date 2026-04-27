@@ -136,9 +136,31 @@ wire req_flag_ui = req_flag_ui_sync[2];
 reg  req_flag_ui_prev;
 wire req_pulse_ui = (req_flag_ui != req_flag_ui_prev);
 
+// Synchronize request payload into UI domain. The source-side request registers
+// stay stable for the full request lifetime, so by the time the toggle reaches
+// the UI domain these synchronized copies have settled as well.
+(* ASYNC_REG = "TRUE" *) reg [31:0] req_addr_ui_sync0;
+(* ASYNC_REG = "TRUE" *) reg [31:0] req_addr_ui_sync1;
+(* ASYNC_REG = "TRUE" *) reg        req_write_ui_sync0;
+(* ASYNC_REG = "TRUE" *) reg        req_write_ui_sync1;
+(* ASYNC_REG = "TRUE" *) reg [31:0] req_wdata_ui_sync0;
+(* ASYNC_REG = "TRUE" *) reg [31:0] req_wdata_ui_sync1;
+(* ASYNC_REG = "TRUE" *) reg [3:0]  req_wen_ui_sync0;
+(* ASYNC_REG = "TRUE" *) reg [3:0]  req_wen_ui_sync1;
+
 // Level-based pending flag: survives until FSM actually consumes the request.
 // Fixes race where req_pulse_ui fires before init_calib_complete.
 reg  req_pending_ui;
+
+localparam UI_IDLE      = 3'd0;
+localparam UI_RD_ADDR   = 3'd1;
+localparam UI_RD_DATA   = 3'd2;
+localparam UI_WR_ADDR   = 3'd3;
+localparam UI_WR_DATA   = 3'd4;
+localparam UI_WR_RESP   = 3'd5;
+localparam UI_DONE      = 3'd6;
+
+reg [2:0] ui_state;
 
 // Synchronize response flag to core domain
 reg         resp_flag_ui;      // Toggle flag in UI domain
@@ -149,17 +171,42 @@ wire resp_pulse_core = (resp_flag_core != resp_flag_core_prev);
 
 // Response data captured in UI domain, read in core domain
 reg [31:0]  resp_data_ui;      // UI domain response word
+(* ASYNC_REG = "TRUE" *) reg [31:0] resp_data_core_sync0;
+(* ASYNC_REG = "TRUE" *) reg [31:0] resp_data_core_sync1;
 reg [31:0]  resp_data_r;       // Core domain captured response
+
+`ifdef DDR3_BRIDGE_AUDIT
+localparam integer CORE_REQ_TIMEOUT_CYCLES = 16'd1024;
+localparam integer UI_STATE_TIMEOUT_CYCLES = 16'd2048;
+
+reg [31:0] debug_core_req_accept_count_r;
+reg [31:0] debug_ui_req_consume_count_r;
+reg [31:0] debug_axi_ar_count_r;
+reg [31:0] debug_axi_r_count_r;
+reg [31:0] debug_axi_aw_count_r;
+reg [31:0] debug_axi_w_count_r;
+reg [31:0] debug_axi_b_count_r;
+reg [31:0] debug_resp_toggle_count_r;
+reg        debug_req_pending_timeout_flag_r;
+reg        debug_ui_state_stuck_flag_r;
+reg        debug_duplicate_resp_core_flag_r;
+reg        debug_duplicate_resp_ui_flag_r;
+wire       debug_duplicate_resp_flag_r = debug_duplicate_resp_core_flag_r | debug_duplicate_resp_ui_flag_r;
+reg [31:0] debug_last_req_addr_r;
+reg        debug_last_req_write_r;
+reg [31:0] debug_last_resp_data_r;
+reg [15:0] debug_req_pending_age_r;
+reg [15:0] debug_ui_state_age_r;
+reg [2:0]  debug_ui_state_prev_r;
+reg        debug_prev_bvalid_r;
+reg        debug_prev_rvalid_r;
+`endif
 
 // ── Core domain logic ──
 
 assign req_ready  = !req_pending && core_rstn;
 assign resp_valid = resp_pulse_core;
-// CDC-safe: resp_data_ui is stable well before the toggle flag propagates
-// through the 3-stage synchronizer, so we can read it directly when the
-// pulse fires. resp_data_r lags by one cycle (assigned at posedge), so
-// we bypass it during the valid pulse to avoid outputting stale data.
-assign resp_data  = resp_pulse_core ? resp_data_ui : resp_data_r;
+assign resp_data  = resp_pulse_core ? resp_data_core_sync1 : resp_data_r;
 
 always @(posedge core_clk or negedge core_rstn) begin
     if (!core_rstn) begin
@@ -171,11 +218,39 @@ always @(posedge core_clk or negedge core_rstn) begin
         req_pending        <= 1'b0;
         resp_flag_core_sync <= 3'b0;
         resp_flag_core_prev <= 1'b0;
+        resp_data_core_sync0 <= 32'd0;
+        resp_data_core_sync1 <= 32'd0;
         resp_data_r        <= 32'd0;
+`ifdef DDR3_BRIDGE_AUDIT
+        debug_core_req_accept_count_r   <= 32'd0;
+        debug_req_pending_timeout_flag_r <= 1'b0;
+        debug_duplicate_resp_core_flag_r <= 1'b0;
+        debug_last_req_addr_r           <= 32'd0;
+        debug_last_req_write_r          <= 1'b0;
+        debug_last_resp_data_r          <= 32'd0;
+        debug_req_pending_age_r         <= 16'd0;
+`endif
     end else begin
         // Synchronize response flag
         resp_flag_core_sync <= {resp_flag_core_sync[1:0], resp_flag_ui};
         resp_flag_core_prev <= resp_flag_core;
+        resp_data_core_sync0 <= resp_data_ui;
+        resp_data_core_sync1 <= resp_data_core_sync0;
+
+`ifdef DDR3_BRIDGE_AUDIT
+        if (req_pending) begin
+            if (!resp_pulse_core) begin
+                if (debug_req_pending_age_r != 16'hFFFF)
+                    debug_req_pending_age_r <= debug_req_pending_age_r + 16'd1;
+                if (debug_req_pending_age_r == (CORE_REQ_TIMEOUT_CYCLES - 1))
+                    debug_req_pending_timeout_flag_r <= 1'b1;
+            end else begin
+                debug_req_pending_age_r <= 16'd0;
+            end
+        end else begin
+            debug_req_pending_age_r <= 16'd0;
+        end
+`endif
 
         // Accept new request
         if (req_valid && !req_pending) begin
@@ -185,12 +260,22 @@ always @(posedge core_clk or negedge core_rstn) begin
             req_wen_r     <= req_wen;
             req_flag_core <= ~req_flag_core;  // Toggle to signal UI domain
             req_pending   <= 1'b1;
+`ifdef DDR3_BRIDGE_AUDIT
+            debug_core_req_accept_count_r <= debug_core_req_accept_count_r + 32'd1;
+            debug_last_req_addr_r         <= req_addr;
+            debug_last_req_write_r        <= req_write;
+`endif
         end
 
         // Capture response
         if (resp_pulse_core) begin
+`ifdef DDR3_BRIDGE_AUDIT
+            if (!req_pending)
+                debug_duplicate_resp_core_flag_r <= 1'b1;
+            debug_last_resp_data_r <= resp_data_core_sync1;
+`endif
             req_pending <= 1'b0;
-            resp_data_r <= resp_data_ui;  // Stable by the time resp_flag arrives
+            resp_data_r <= resp_data_core_sync1;
         end
     end
 end
@@ -202,14 +287,32 @@ always @(posedge ui_clk or negedge ui_rstn) begin
         req_flag_ui_sync  <= 3'b0;
         req_flag_ui_prev  <= 1'b0;
         req_pending_ui    <= 1'b0;
+        req_addr_ui_sync0 <= 32'd0;
+        req_addr_ui_sync1 <= 32'd0;
+        req_write_ui_sync0 <= 1'b0;
+        req_write_ui_sync1 <= 1'b0;
+        req_wdata_ui_sync0 <= 32'd0;
+        req_wdata_ui_sync1 <= 32'd0;
+        req_wen_ui_sync0  <= 4'd0;
+        req_wen_ui_sync1  <= 4'd0;
     end else begin
         req_flag_ui_sync  <= {req_flag_ui_sync[1:0], req_flag_core};
         req_flag_ui_prev  <= req_flag_ui;
-        // Latch pulse into a level-based pending flag
+        req_addr_ui_sync0 <= req_addr_r;
+        req_addr_ui_sync1 <= req_addr_ui_sync0;
+        req_write_ui_sync0 <= req_write_r;
+        req_write_ui_sync1 <= req_write_ui_sync0;
+        req_wdata_ui_sync0 <= req_wdata_r;
+        req_wdata_ui_sync1 <= req_wdata_ui_sync0;
+        req_wen_ui_sync0  <= req_wen_r;
+        req_wen_ui_sync1  <= req_wen_ui_sync0;
+        // Latch pulse into a level-based pending flag. Preserve a newly
+        // arrived request if it lands in the same cycle that UI_IDLE consumes
+        // the previous one; clearing in that case drops the next transaction
+        // and wedges the core-side requester forever waiting on a response.
         if (req_pulse_ui)
             req_pending_ui <= 1'b1;
-        // Cleared when FSM transitions out of UI_IDLE (see FSM below)
-        if (ui_state == UI_IDLE && req_pending_ui && init_calib_complete)
+        else if (ui_state == UI_IDLE && req_pending_ui && init_calib_complete)
             req_pending_ui <= 1'b0;
     end
 end
@@ -217,16 +320,6 @@ end
 // ═════════════════════════════════════════════════════════════════════════════
 // UI domain: AXI transaction FSM
 // ═════════════════════════════════════════════════════════════════════════════
-
-localparam UI_IDLE      = 3'd0;
-localparam UI_RD_ADDR   = 3'd1;
-localparam UI_RD_DATA   = 3'd2;
-localparam UI_WR_ADDR   = 3'd3;
-localparam UI_WR_DATA   = 3'd4;
-localparam UI_WR_RESP   = 3'd5;
-localparam UI_DONE      = 3'd6;
-
-reg [2:0] ui_state;
 
 // Latch request parameters in UI domain
 reg [31:0] ui_addr;
@@ -253,16 +346,51 @@ always @(posedge ui_clk or negedge ui_rstn) begin
         m_axi_wstrb     <= {(AXI_DATA_W/8){1'b0}};
         m_axi_arvalid   <= 1'b0;
         m_axi_araddr    <= {AXI_ADDR_W{1'b0}};
+`ifdef DDR3_BRIDGE_AUDIT
+        debug_ui_req_consume_count_r <= 32'd0;
+        debug_axi_ar_count_r         <= 32'd0;
+        debug_axi_r_count_r          <= 32'd0;
+        debug_axi_aw_count_r         <= 32'd0;
+        debug_axi_w_count_r          <= 32'd0;
+        debug_axi_b_count_r          <= 32'd0;
+        debug_resp_toggle_count_r    <= 32'd0;
+        debug_ui_state_stuck_flag_r  <= 1'b0;
+        debug_duplicate_resp_ui_flag_r <= 1'b0;
+        debug_ui_state_age_r         <= 16'd0;
+        debug_ui_state_prev_r        <= 3'd0;
+        debug_prev_bvalid_r          <= 1'b0;
+        debug_prev_rvalid_r          <= 1'b0;
+`endif
     end else begin
+`ifdef DDR3_BRIDGE_AUDIT
+        if (ui_state != UI_IDLE) begin
+            if (ui_state == debug_ui_state_prev_r) begin
+                if (debug_ui_state_age_r != 16'hFFFF)
+                    debug_ui_state_age_r <= debug_ui_state_age_r + 16'd1;
+                if (debug_ui_state_age_r == (UI_STATE_TIMEOUT_CYCLES - 1))
+                    debug_ui_state_stuck_flag_r <= 1'b1;
+            end else begin
+                debug_ui_state_age_r <= 16'd0;
+            end
+        end else begin
+            debug_ui_state_age_r <= 16'd0;
+        end
+        debug_ui_state_prev_r <= ui_state;
+        debug_prev_bvalid_r   <= m_axi_bvalid;
+        debug_prev_rvalid_r   <= m_axi_rvalid;
+`endif
         case (ui_state)
             UI_IDLE: begin
                 if (req_pending_ui && init_calib_complete) begin
-                    // Latch request from core domain (stable by now)
-                    ui_addr  <= req_addr_r;
-                    ui_write <= req_write_r;
-                    ui_wdata <= req_wdata_r;
-                    ui_wen   <= req_wen_r;
-                    if (req_write_r)
+                    // Latch request from synchronized UI-domain copies.
+                    ui_addr  <= req_addr_ui_sync1;
+                    ui_write <= req_write_ui_sync1;
+                    ui_wdata <= req_wdata_ui_sync1;
+                    ui_wen   <= req_wen_ui_sync1;
+`ifdef DDR3_BRIDGE_AUDIT
+                    debug_ui_req_consume_count_r <= debug_ui_req_consume_count_r + 32'd1;
+`endif
+                    if (req_write_ui_sync1)
                         ui_state <= UI_WR_ADDR;
                     else
                         ui_state <= UI_RD_ADDR;
@@ -279,6 +407,10 @@ always @(posedge ui_clk or negedge ui_rstn) begin
             UI_RD_DATA: begin
                 if (m_axi_arready)
                     m_axi_arvalid <= 1'b0;
+`ifdef DDR3_BRIDGE_AUDIT
+                if (m_axi_rvalid && !debug_prev_rvalid_r)
+                    debug_axi_r_count_r <= debug_axi_r_count_r + 32'd1;
+`endif
                 if (m_axi_rvalid) begin
                     // Extract the 32-bit word from the 256-bit response
                     case (word_offset)
@@ -333,6 +465,10 @@ always @(posedge ui_clk or negedge ui_rstn) begin
             end
 
             UI_WR_RESP: begin
+`ifdef DDR3_BRIDGE_AUDIT
+                if (m_axi_bvalid && !debug_prev_bvalid_r)
+                    debug_axi_b_count_r <= debug_axi_b_count_r + 32'd1;
+`endif
                 if (m_axi_bvalid) begin
                     resp_data_ui <= 32'd0;  // Write response has no data
                     ui_state     <= UI_DONE;
@@ -340,12 +476,28 @@ always @(posedge ui_clk or negedge ui_rstn) begin
             end
 
             UI_DONE: begin
+`ifdef DDR3_BRIDGE_AUDIT
+                debug_resp_toggle_count_r <= debug_resp_toggle_count_r + 32'd1;
+`endif
                 resp_flag_ui <= ~resp_flag_ui;  // Toggle to signal core domain
                 ui_state     <= UI_IDLE;
             end
 
             default: ui_state <= UI_IDLE;
         endcase
+
+`ifdef DDR3_BRIDGE_AUDIT
+        if (m_axi_arvalid && m_axi_arready)
+            debug_axi_ar_count_r <= debug_axi_ar_count_r + 32'd1;
+        if (m_axi_awvalid && m_axi_awready)
+            debug_axi_aw_count_r <= debug_axi_aw_count_r + 32'd1;
+        if (m_axi_wvalid && m_axi_wready)
+            debug_axi_w_count_r <= debug_axi_w_count_r + 32'd1;
+
+        if ((m_axi_rvalid && (ui_state != UI_RD_DATA)) ||
+            (m_axi_bvalid && (ui_state != UI_WR_RESP)))
+            debug_duplicate_resp_ui_flag_r <= 1'b1;
+`endif
     end
 end
 

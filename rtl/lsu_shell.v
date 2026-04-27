@@ -31,7 +31,7 @@
 
 module lsu_shell #(
     parameter TAG_W = 5,
-    parameter ORDER_ID_W = 16,
+    parameter ORDER_ID_W = `METADATA_ORDER_ID_W,
     parameter EPOCH_W = 8
 )(
     input  wire               clk,
@@ -42,6 +42,8 @@ module lsu_shell #(
     input  wire [0:0]         flush_tid,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t0,
     input  wire [EPOCH_W-1:0] flush_new_epoch_t1,
+    input  wire [EPOCH_W-1:0] current_epoch_t0,
+    input  wire [EPOCH_W-1:0] current_epoch_t1,
     input  wire               flush_order_valid,
     input  wire [ORDER_ID_W-1:0] flush_order_id,
 
@@ -65,6 +67,14 @@ module lsu_shell #(
     input  wire [2:0]         req_fu,            // FU type (FU_LOAD/FU_STORE)
     input  wire               req_mem2reg,       // Load to register
 
+    // ROB head query: side-effecting MMIO loads may only issue at ROB head.
+    input  wire               rob_head_valid_t0,
+    input  wire [ORDER_ID_W-1:0] rob_head_order_id_t0,
+    input  wire               rob_head_flushed_t0,
+    input  wire               rob_head_valid_t1,
+    input  wire [ORDER_ID_W-1:0] rob_head_order_id_t1,
+    input  wire               rob_head_flushed_t1,
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Response Interface (to writeback stage)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -83,6 +93,10 @@ module lsu_shell #(
     // Response data (for loads)
     output reg  [31:0]        resp_rdata,        // Load data (sign/unsign extended)
 
+    // Early wakeup for IQ dependency tracking
+    output wire               resp_early_wakeup_valid,
+    output wire [TAG_W-1:0]   resp_early_wakeup_tag,
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Legacy Memory Interface (to stage_mem / data_memory) - for loads only
     // Kept for backward compatibility when use_mem_subsys=0
@@ -98,16 +112,17 @@ module lsu_shell #(
     input  wire               use_mem_subsys,    // 1=use mem_subsys, 0=legacy
 
     // M1 Request (D-side)
-    output reg                m1_req_valid,
+    output wire               m1_req_valid,
     input  wire               m1_req_ready,
-    output reg  [31:0]        m1_req_addr,
-    output reg                m1_req_write,      // 0=read, 1=write
-    output reg  [31:0]        m1_req_wdata,
-    output reg  [3:0]         m1_req_wen,        // Byte-wise write enable
+    output wire [31:0]        m1_req_addr,
+    output wire               m1_req_write,      // 0=read, 1=write
+    output wire [31:0]        m1_req_wdata,
+    output wire [3:0]         m1_req_wen,        // Byte-wise write enable
 
     // M1 Response
     input  wire               m1_resp_valid,
     input  wire [31:0]        m1_resp_data,
+    input  wire               m1_resp_l1d_hit,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ROB Commit Interface (pass through to Store Buffer)
@@ -127,11 +142,25 @@ module lsu_shell #(
     output wire [31:0]        sb_mem_write_data,
     output wire [3:0]         sb_mem_write_wen,
     input  wire               sb_mem_write_ready,
+    output wire               debug_store_buffer_empty,
+    output wire [2:0]         debug_store_buffer_count_t0,
+    output wire [2:0]         debug_store_buffer_count_t1,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Load Hazard Output (to scoreboard for stalling)
     // ═══════════════════════════════════════════════════════════════════════════
-    output wire               load_hazard          // Load must be retried
+    output wire               load_hazard,          // Load must be retried
+
+    // HPM event
+    output wire               hpm_sb_stall_event,
+
+    // Speculation firewall debug
+    output wire               debug_spec_mmio_load_blocked,
+    output wire               debug_spec_mmio_load_violation,
+    output wire               debug_mmio_load_at_rob_head,
+    output wire               debug_older_store_blocked_mmio_load,
+    output reg                debug_lsu_cooldown_set,
+    output reg                debug_lsu_cooldown_skipped_l1hit
 );
 
 // =============================================================================
@@ -152,12 +181,38 @@ wire                     sb_mem_write_ready_mux;
 wire [31:0]              sb_forward_data;
 wire                     sb_forward_valid;
 wire                     sb_load_hazard;
+wire                     sb_older_store_pending_for_load;
+wire                     sb_debug_empty;
+wire [2:0]               sb_debug_count_t0;
+wire [2:0]               sb_debug_count_t1;
+wire                     sb_stall_event;
+wire                     sb_drain_urgent;
 
 // Load vs Store classification
 wire is_load  = req_valid && !req_wen;
 wire is_store = req_valid && req_wen;
 wire store_enqueue_fire;
 wire legacy_load_issue_fire;
+
+wire req_addr_is_mmio_0x13 = (req_addr[31:16] == 16'h1300);
+wire req_addr_is_clint     = (req_addr >= `CLINT_BASE) && (req_addr <= `CLINT_MTIME_HI);
+wire req_addr_is_plic      = (req_addr >= `PLIC_BASE) && (req_addr <= `PLIC_CLAIM_COMPLETE);
+wire req_addr_is_mmio      = req_addr_is_mmio_0x13 || req_addr_is_clint || req_addr_is_plic;
+wire req_is_mmio_load      = is_load && req_addr_is_mmio;
+
+wire req_at_rob_head_t0 =
+    rob_head_valid_t0 && !rob_head_flushed_t0 &&
+    (rob_head_order_id_t0 == req_order_id);
+wire req_at_rob_head_t1 =
+    rob_head_valid_t1 && !rob_head_flushed_t1 &&
+    (rob_head_order_id_t1 == req_order_id);
+wire req_at_rob_head = req_tid ? req_at_rob_head_t1 : req_at_rob_head_t0;
+wire mmio_load_spec_block = req_is_mmio_load && !req_at_rob_head;
+wire mmio_load_older_store_block =
+    req_is_mmio_load && req_at_rob_head && sb_older_store_pending_for_load;
+wire req_flush_kill =
+    req_valid && flush && (req_tid == flush_tid) &&
+    (!flush_order_valid || (req_order_id > flush_order_id));
 
 
 
@@ -171,15 +226,39 @@ wire legacy_load_issue_fire;
 // Note: We check store buffer capacity here without creating a combinational loop
 // by checking capacity directly rather than depending on store_req_valid
 
-// State machine must be idle to accept new requests
+// State machine must be idle to accept most new requests.  A returning M1 load
+// response can also accept the next non-forwarded load in the same cycle: the
+// response path consumes the old pending metadata, while the state machine
+// captures the new request with nonblocking assignments.
 wire state_machine_idle = (lsu_state == LSU_IDLE);
+wire mem_subsys_load_resp_fire =
+                use_mem_subsys && (lsu_state == LSU_WAIT_RESP) &&
+                m1_resp_valid && !m1_txn_is_drain;
+wire load_resp_accept_slot = mem_subsys_load_resp_fire;
+
+assign resp_early_wakeup_valid =
+    mem_subsys_load_resp_fire && pending_valid && !(flush && flush_kills_pending) &&
+    !pending_wen && pending_regs_write && pending_mem2reg;
+assign resp_early_wakeup_tag = pending_tag;
+
+// After completing an M1 transaction, hold off accepting new requests
+// until the store buffer has drained below the full threshold.
+// This prevents store buffer starvation during long-latency loads.
+reg m1_cooldown_r;
+wire sb_has_pending_stores = (sb_debug_count_t0 > 0) || (sb_debug_count_t1 > 0);
+wire m1_drain_holdoff = m1_cooldown_r && sb_has_pending_stores;
 
 // Accept stores when store buffer has space and state machine idle
-wire store_accept = sb_store_accept && state_machine_idle;
+wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff &&
+                    !req_flush_kill;
 
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
-wire load_accept = !sb_load_hazard && state_machine_idle;
+wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
+                   !req_flush_kill &&
+                   !mmio_load_spec_block && !mmio_load_older_store_block &&
+                   (state_machine_idle ||
+                    (load_resp_accept_slot && !sb_forward_valid));
 
 assign req_accept = is_store ? store_accept : load_accept;
 assign store_enqueue_fire = is_store && req_accept;
@@ -207,6 +286,8 @@ store_buffer #(
     .flush_tid              (flush_tid),
     .flush_new_epoch_t0     (flush_new_epoch_t0),
     .flush_new_epoch_t1     (flush_new_epoch_t1),
+    .current_epoch_t0       (current_epoch_t0),
+    .current_epoch_t1       (current_epoch_t1),
     .flush_order_valid      (flush_order_valid),
     .flush_order_id         (flush_order_id),
 
@@ -249,7 +330,13 @@ store_buffer #(
 
     .forward_data           (sb_forward_data),
     .forward_valid          (sb_forward_valid),
-    .load_hazard            (sb_load_hazard)
+    .load_hazard            (sb_load_hazard),
+    .older_store_pending_for_load(sb_older_store_pending_for_load),
+    .debug_empty            (sb_debug_empty),
+    .debug_count_t0         (sb_debug_count_t0),
+    .debug_count_t1         (sb_debug_count_t1),
+    .sb_stall_event         (sb_stall_event),
+    .sb_drain_urgent        (sb_drain_urgent)
 );
 
 // Export Store Buffer memory interface
@@ -257,6 +344,10 @@ assign sb_mem_write_valid = sb_mem_write_valid_int;
 assign sb_mem_write_addr  = sb_mem_write_addr_int;
 assign sb_mem_write_data  = sb_mem_write_data_int;
 assign sb_mem_write_wen   = sb_mem_write_wen_int;
+assign debug_store_buffer_empty = sb_debug_empty;
+assign hpm_sb_stall_event = sb_stall_event;
+assign debug_store_buffer_count_t0 = sb_debug_count_t0;
+assign debug_store_buffer_count_t1 = sb_debug_count_t1;
 
 // =============================================================================
 // Task 6: State Machine for Variable-Latency Memory Access
@@ -269,6 +360,11 @@ localparam LSU_WAIT_RESP = 2'b10;  // Waiting for response
 localparam LSU_RESP      = 2'b11;  // Response ready
 
 reg [1:0] lsu_state;
+reg               m1_req_valid_r;
+reg [31:0]        m1_req_addr_r;
+reg               m1_req_write_r;
+reg [31:0]        m1_req_wdata_r;
+reg [3:0]         m1_req_wen_r;
 
 // Pending request registers (for both legacy and mem_subsys modes)
 reg               pending_valid;
@@ -289,45 +385,133 @@ reg [31:0]        pending_forward_data;   // Forwarded data
 // Raw memory data register (for mem_subsys mode)
 reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
+reg               dbg_beacon_block_reported_r;
 wire              flush_hits_pending =
                     pending_valid && (pending_tid == flush_tid);
+// Only kill when there IS a pending speculative request to kill.
+// The old `!pending_valid || ...` made the flush branch vacuously
+// true when idle, which silently dropped new requests arriving in
+// the same cycle as a flush (the if/else skipped the state machine).
 wire              flush_kills_pending =
-                    !pending_valid ||
-                    (flush_hits_pending &&
-                     (!flush_order_valid || (pending_order_id > flush_order_id)));
+                    pending_valid &&
+                    flush_hits_pending &&
+                    (!flush_order_valid || (pending_order_id > flush_order_id));
+wire              pending_flush_kill = flush && flush_kills_pending;
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
-                                ((lsu_state == LSU_IDLE) && !req_valid) :
+                                ((lsu_state == LSU_IDLE) &&
+                                 (sb_drain_urgent || !(req_valid && req_accept))) :
                                 sb_mem_write_ready;
+
+wire mem_subsys_load_issue_fire =
+    use_mem_subsys && req_valid && req_accept && is_load && !sb_forward_valid;
+wire store_accept_resp_fire =
+    (lsu_state == LSU_IDLE) && req_valid && req_accept && is_store;
+
+assign m1_req_valid = mem_subsys_load_issue_fire ? 1'b1 : m1_req_valid_r;
+assign m1_req_addr  = mem_subsys_load_issue_fire ? req_addr : m1_req_addr_r;
+assign m1_req_write = mem_subsys_load_issue_fire ? 1'b0 : m1_req_write_r;
+assign m1_req_wdata = mem_subsys_load_issue_fire ? 32'd0 : m1_req_wdata_r;
+assign m1_req_wen   = mem_subsys_load_issue_fire ? 4'b0000 : m1_req_wen_r;
+
+wire pending_at_rob_head_t0 =
+    rob_head_valid_t0 && !rob_head_flushed_t0 &&
+    (rob_head_order_id_t0 == pending_order_id);
+wire pending_at_rob_head_t1 =
+    rob_head_valid_t1 && !rob_head_flushed_t1 &&
+    (rob_head_order_id_t1 == pending_order_id);
+wire pending_at_rob_head = pending_tid ? pending_at_rob_head_t1 : pending_at_rob_head_t0;
+wire m1_req_addr_is_mmio_0x13 = (m1_req_addr[31:16] == 16'h1300);
+wire m1_req_addr_is_clint     = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
+wire m1_req_addr_is_plic      = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
+wire m1_req_addr_is_mmio      = m1_req_addr_is_mmio_0x13 || m1_req_addr_is_clint || m1_req_addr_is_plic;
+wire current_mmio_load_violation =
+    mem_subsys_load_issue_fire && req_addr_is_mmio && !req_at_rob_head;
+wire pending_mmio_load_violation =
+    m1_req_valid_r && !m1_req_write_r && m1_req_addr_is_mmio &&
+    !(pending_valid && pending_at_rob_head);
+
+assign debug_spec_mmio_load_blocked = req_valid && mmio_load_spec_block;
+assign debug_mmio_load_at_rob_head = req_valid && req_is_mmio_load && req_at_rob_head;
+assign debug_older_store_blocked_mmio_load =
+    req_valid && mmio_load_older_store_block;
+assign debug_spec_mmio_load_violation =
+    use_mem_subsys && (current_mmio_load_violation || pending_mmio_load_violation);
 
 // State machine
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         lsu_state         <= LSU_IDLE;
         pending_valid     <= 1'b0;
-        m1_req_valid      <= 1'b0;
+        m1_req_valid_r    <= 1'b0;
+        m1_req_addr_r     <= 32'd0;
+        m1_req_write_r    <= 1'b0;
+        m1_req_wdata_r    <= 32'd0;
+        m1_req_wen_r      <= 4'd0;
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
+        dbg_beacon_block_reported_r <= 1'b0;
+        m1_cooldown_r     <= 1'b0;
+        debug_lsu_cooldown_set <= 1'b0;
+        debug_lsu_cooldown_skipped_l1hit <= 1'b0;
     end else begin
-        if (flush && !m1_txn_is_drain && flush_kills_pending) begin
+        debug_lsu_cooldown_set <= 1'b0;
+        debug_lsu_cooldown_skipped_l1hit <= 1'b0;
+        if (!sb_has_pending_stores)
+            m1_cooldown_r <= 1'b0;
+        if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
+            dbg_beacon_block_reported_r <= 1'b0;
+        end
+        if (!m1_txn_is_drain && pending_flush_kill) begin
             // On flush, abort speculative load requests, but never discard a
             // committed store-buffer drain that has already been handed off.
             // Branch redirects only kill younger requests from the flushed thread.
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
             $display("[LSU FLUSH] pending_valid=%0b pending_tid=%0d pending_order=%0d flush_tid=%0d flush_order_valid=%0b flush_order=%0d @%0t",
                      pending_valid, pending_tid, pending_order_id,
                      flush_tid, flush_order_valid, flush_order_id, $time);
             `endif
-            lsu_state       <= LSU_IDLE;
             pending_valid   <= 1'b0;
-            m1_req_valid    <= 1'b0;
+            m1_req_valid_r  <= 1'b0;
             m1_txn_is_drain <= 1'b0;
+            // Allow drain to proceed concurrently with flush — committed
+            // stores must reach memory even during continuous trap/mret cycles.
+            if (lsu_state == LSU_IDLE && use_mem_subsys &&
+                sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
+                m1_txn_is_drain <= 1'b1;
+                lsu_state       <= LSU_REQ;
+                m1_req_valid_r  <= 1'b1;
+                m1_req_addr_r   <= sb_mem_write_addr_int;
+                m1_req_write_r  <= 1'b1;
+                m1_req_wdata_r  <= sb_mem_write_data_int;
+                m1_req_wen_r    <= sb_mem_write_wen_int;
+            end else begin
+                lsu_state       <= LSU_IDLE;
+            end
         end else begin
         case (lsu_state)
             LSU_IDLE: begin
-                // Ready to accept new request
-                if (req_valid && req_accept) begin
-                    `ifndef SYNTHESIS
+                // When store buffer is nearly full with committed stores,
+                // prioritize drain over new request acceptance to prevent
+                // store buffer starvation during long-latency loads.
+                if (use_mem_subsys && sb_drain_urgent &&
+                    sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
+                    pending_valid       <= 1'b0;
+                    m1_txn_is_drain     <= 1'b1;
+                    lsu_state           <= LSU_REQ;
+                    m1_req_valid_r      <= 1'b1;
+                    m1_req_addr_r       <= sb_mem_write_addr_int;
+                    m1_req_write_r      <= 1'b1;
+                    m1_req_wdata_r      <= sb_mem_write_data_int;
+                    m1_req_wen_r        <= sb_mem_write_wen_int;
+                end else if (req_valid && req_accept) begin
+`ifdef VERBOSE_SIM_LOGS
+                    if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                        $display("[DBG_LSU_ACCEPT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                                 $time, req_order_id, req_tag, req_addr, req_wdata, req_func3, req_tid);
+                    end
+`endif
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU ACCEPT] kind=%s tid=%0d order=%0d tag=%0d func3=%0d addr=%h wdata=%h rd=%0d",
                              req_wen ? "STORE" : "LOAD ", req_tid, req_order_id, req_tag,
                              req_func3, req_addr, req_wdata, req_rd);
@@ -350,42 +534,78 @@ always @(posedge clk or negedge rstn) begin
                     m1_txn_is_drain       <= 1'b0;
 
                     if (use_mem_subsys && is_load && !sb_forward_valid) begin
-                        // Load with mem_subsys: need to send request
-                        lsu_state     <= LSU_REQ;
-                        m1_req_valid  <= 1'b1;
-                        m1_req_addr   <= req_addr;
-                        m1_req_write  <= 1'b0;  // Read
-                        m1_req_wdata  <= 32'd0;
-                        m1_req_wen    <= 4'b0000;
+                        // The load request is already visible on M1 in this
+                        // cycle. Only park it if M1 cannot accept it now.
+                        if (m1_req_ready) begin
+                            lsu_state      <= LSU_WAIT_RESP;
+                            m1_req_valid_r <= 1'b0;
+                        end else begin
+                            lsu_state      <= LSU_REQ;
+                            m1_req_valid_r <= 1'b1;
+                            m1_req_addr_r  <= req_addr;
+                            m1_req_write_r <= 1'b0;  // Read
+                            m1_req_wdata_r <= 32'd0;
+                            m1_req_wen_r   <= 4'b0000;
+                        end
                     end else if (!use_mem_subsys && is_load && !sb_forward_valid) begin
                         // Legacy load: issue the read only for the accepted request,
                         // then wait one cycle to sample the returned data.
                         lsu_state     <= LSU_REQ;
                     end else if (is_store) begin
-                        // Store: complete immediately (speculative)
-                        lsu_state     <= LSU_RESP;
+                        // Store: complete speculatively as it enters the SB.
+                        lsu_state     <= LSU_IDLE;
+                        pending_valid <= 1'b0;
                     end else begin
                         // Load with forwarding or legacy mode: single cycle
                         lsu_state     <= LSU_RESP;
                     end
+                end else if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                             !dbg_beacon_block_reported_r) begin
+`ifdef VERBOSE_SIM_LOGS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
                 end else if (use_mem_subsys && sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
                     // Drain one committed store-buffer entry through mem_subsys M1.
+`ifdef VERBOSE_SIM_LOGS
+                    if (sb_mem_write_addr_int == `DEBUG_BEACON_EVT_ADDR) begin
+                        $display("[DBG_LSU_DRAIN] t=%0t addr=%h wdata=%h wen=%b",
+                                 $time, sb_mem_write_addr_int, sb_mem_write_data_int, sb_mem_write_wen_int);
+                    end
+`endif
                     pending_valid       <= 1'b0;
                     m1_txn_is_drain     <= 1'b1;
                     lsu_state           <= LSU_REQ;
-                    m1_req_valid        <= 1'b1;
-                    m1_req_addr         <= sb_mem_write_addr_int;
-                    m1_req_write        <= 1'b1;
-                    m1_req_wdata        <= sb_mem_write_data_int;
-                    m1_req_wen          <= sb_mem_write_wen_int;
+                    m1_req_valid_r      <= 1'b1;
+                    m1_req_addr_r       <= sb_mem_write_addr_int;
+                    m1_req_write_r      <= 1'b1;
+                    m1_req_wdata_r      <= sb_mem_write_data_int;
+                    m1_req_wen_r        <= sb_mem_write_wen_int;
                 end
             end
 
             LSU_REQ: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifdef VERBOSE_SIM_LOGS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 if (use_mem_subsys) begin
                     // Waiting for mem_subsys to accept request
                     if (m1_req_ready) begin
-                        m1_req_valid <= 1'b0;
+`ifdef VERBOSE_SIM_LOGS
+                        if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                            $display("[DBG_LSU_REQ_GNT] t=%0t addr=%h wdata=%h wen=%b",
+                                     $time, m1_req_addr, m1_req_wdata, m1_req_wen);
+                        end
+`endif
+                        m1_req_valid_r <= 1'b0;
                         lsu_state    <= LSU_WAIT_RESP;
                     end
                 end else begin
@@ -398,23 +618,86 @@ always @(posedge clk or negedge rstn) begin
             end
 
             LSU_WAIT_RESP: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifdef VERBOSE_SIM_LOGS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
-                    `ifndef SYNTHESIS
+`ifdef VERBOSE_SIM_LOGS
+                    if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                        $display("[DBG_LSU_RESP_SEEN] t=%0t drain=%0d addr=%h data=%h",
+                                 $time, m1_txn_is_drain, m1_req_addr, m1_resp_data);
+                    end
+`endif
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[LSU RESP] drain=%0d addr=%h raw=%h shaped=%h",
                              m1_txn_is_drain, pending_addr, m1_resp_data, mem_data_shaped);
                     `endif
                     if (m1_txn_is_drain) begin
                         lsu_state       <= LSU_IDLE;
                         m1_txn_is_drain <= 1'b0;
+                    end else if (req_valid && req_accept && is_load && !sb_forward_valid) begin
+                        // Complete the old load and launch/capture the next
+                        // load in the same cycle.  resp_* below still observes
+                        // the old pending metadata for this response.
+                        pending_valid         <= 1'b1;
+                        pending_tid           <= req_tid;
+                        pending_order_id      <= req_order_id;
+                        pending_epoch         <= req_epoch;
+                        pending_tag           <= req_tag;
+                        pending_rd            <= req_rd;
+                        pending_func3         <= req_func3;
+                        pending_regs_write    <= req_regs_write;
+                        pending_fu            <= req_fu;
+                        pending_mem2reg       <= req_mem2reg;
+                        pending_wen           <= req_wen;
+                        pending_addr          <= req_addr;
+                        pending_forward_valid <= 1'b0;
+                        pending_forward_data  <= 32'd0;
+                        m1_txn_is_drain       <= 1'b0;
+                        if (m1_req_ready) begin
+                            lsu_state      <= LSU_WAIT_RESP;
+                            m1_req_valid_r <= 1'b0;
+                        end else begin
+                            lsu_state      <= LSU_REQ;
+                            m1_req_valid_r <= 1'b1;
+                            m1_req_addr_r  <= req_addr;
+                            m1_req_write_r <= 1'b0;
+                            m1_req_wdata_r <= 32'd0;
+                            m1_req_wen_r   <= 4'b0000;
+                        end
                     end else begin
-                        raw_mem_rdata <= m1_resp_data;
-                        lsu_state     <= LSU_RESP;
+                        raw_mem_rdata   <= m1_resp_data;
+                        lsu_state       <= LSU_IDLE;
+                        pending_valid   <= 1'b0;
+                        m1_txn_is_drain <= 1'b0;
+                        if (m1_resp_l1d_hit) begin
+                            m1_cooldown_r <= 1'b0;
+                            debug_lsu_cooldown_skipped_l1hit <= 1'b1;
+                        end else begin
+                            m1_cooldown_r <= 1'b1;
+                            debug_lsu_cooldown_set <= 1'b1;
+                        end
                     end
                 end
             end
 
             LSU_RESP: begin
+                if (req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR) &&
+                    !dbg_beacon_block_reported_r) begin
+`ifdef VERBOSE_SIM_LOGS
+                    $display("[DBG_LSU_BLOCK] t=%0t state=%0d idle=%0b sb_accept=%0b count_t0=%0d count_t1=%0d order=%0d tag=%0d addr=%h",
+                             $time, lsu_state, state_machine_idle, sb_store_accept,
+                             sb_debug_count_t0, sb_debug_count_t1, req_order_id, req_tag, req_addr);
+`endif
+                    dbg_beacon_block_reported_r <= 1'b1;
+                end
                 // Response ready, will be consumed by writeback
                 lsu_state       <= LSU_IDLE;
                 pending_valid   <= 1'b0;
@@ -438,9 +721,8 @@ assign mem_read = legacy_load_issue_fire ? 4'b1111 : 4'b0000;
 // =============================================================================
 
 wire [1:0]  addr_in_word = pending_addr[1:0];
-
 // Both legacy and mem_subsys paths capture data into raw_mem_rdata before LSU_RESP.
-wire [31:0] raw_mem_data = raw_mem_rdata;
+wire [31:0] raw_mem_data = mem_subsys_load_resp_fire ? m1_resp_data : raw_mem_rdata;
 
 // Combinational load data shaping for memory data (same logic as stage_wb)
 reg [31:0] mem_data_shaped;
@@ -542,8 +824,19 @@ always @(posedge clk or negedge rstn) begin
         resp_fu           <= 3'd0;
         resp_rdata        <= 32'd0;
     end else begin
-        // Response valid when in RESP state
-        if (lsu_state == LSU_RESP) begin
+        if (store_accept_resp_fire) begin
+            resp_valid        <= 1'b1;
+            resp_tid          <= req_tid;
+            resp_order_id     <= req_order_id;
+            resp_epoch        <= req_epoch;
+            resp_tag          <= req_tag;
+            resp_rd           <= req_rd;
+            resp_func3        <= req_func3;
+            resp_regs_write   <= 1'b0;
+            resp_fu           <= req_fu;
+            resp_rdata        <= 32'd0;
+        end else if (((lsu_state == LSU_RESP) || mem_subsys_load_resp_fire) &&
+                     !pending_flush_kill) begin
             if (!pending_wen) begin
                 // Load response
                 resp_valid        <= 1'b1;

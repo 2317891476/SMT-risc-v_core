@@ -79,6 +79,16 @@ PROFILES = {
         "uart_expect_text": "Z",
         "uart_send_delay_ms": 800,
     },
+    "uart_echo_raw": {
+        "top": "adam_riscv_ax7203_uart_echo_raw_top",
+        "tb": "tb_ax7203_uart_echo_raw_smoke",
+        "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_raw_smoke.sv",
+        "rom": None,
+        "expect_token": "[AX7203_UART_ECHO_RAW] PASS",
+        "uart_send_text": "Z",
+        "uart_expect_text": "Z",
+        "uart_send_delay_ms": 800,
+    },
 }
 
 
@@ -331,7 +341,7 @@ def main() -> int:
     parser.add_argument("--send-text", default="")
     parser.add_argument("--send-hex", default="")
     parser.add_argument("--expect-text", default="")
-    parser.add_argument("--rs-depth", type=int, default=16)
+    parser.add_argument("--rs-depth", type=int, default=48)
     parser.add_argument("--fetch-buffer-depth", type=int, default=16)
     parser.add_argument("--core-clk-mhz", type=float, default=10.0)
     args = parser.parse_args()

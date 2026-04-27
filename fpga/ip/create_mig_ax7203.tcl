@@ -25,6 +25,19 @@ if {![file exists $prj_file]} {
     return -code error "MIG PRJ file missing"
 }
 
+# Vivado on Windows can leave a partially delivered MIG tree behind after a
+# failed run. The next generate_target then trips over the stale destination
+# when it tries to rename "_tmp/mig_7series_0" into place. Clean the previous
+# generated directory up front so each project creation starts from a known
+# state.
+set project_dir [file normalize [get_property DIRECTORY [current_project]]]
+set project_name [get_property NAME [current_project]]
+set mig_gen_dir [file normalize "$project_dir/${project_name}.gen/sources_1/ip/mig_7series_0"]
+if {[file exists $mig_gen_dir]} {
+    puts "INFO: Removing stale MIG generated directory: $mig_gen_dir"
+    file delete -force $mig_gen_dir
+}
+
 # Create MIG IP (use version wildcard to adapt to Vivado version)
 create_ip -name mig_7series -vendor xilinx.com -library ip \
           -module_name mig_7series_0

@@ -55,34 +55,32 @@ module bypass_network #(
     output wire [1:0]          fwd_src_b
 );
 
-// ─── Forwarding match detection (must match BOTH rd and thread ID) ──────────
-wire p0_match_a = pipe0_valid && pipe0_rd_wen && (pipe0_rd != 5'd0) && (pipe0_rd == ro_rs1_addr) && (pipe0_tid == ro_tid);
-wire p1_match_a = pipe1_valid && pipe1_rd_wen && (pipe1_rd != 5'd0) && (pipe1_rd == ro_rs1_addr) && (pipe1_tid == ro_tid);
-wire mm_match_a = mem_valid   && mem_rd_wen   && (mem_rd   != 5'd0) && (mem_rd   == ro_rs1_addr) && (mem_tid   == ro_tid);
+// ─── Forwarding match detection ─────────────────────────────────────────────
+// Pipeline-stage forwarding (pipe0/pipe1/mem) is DISABLED for the OoO+PRF
+// backend.  With rename + PRF + WAKE_HOLD ≥ 1, the PRF already contains the
+// correct value by the time the consumer issues (1 cycle after wakeup).
+// Matching on architectural register addresses would be incorrect in OoO
+// because multiple in-flight instructions can target the same arch reg.
+// The tag-indexed result buffer (tagbuf) is still used for same-cycle
+// forwarding keyed on the producing *tag*, which is unique.
 
-wire p0_match_b = pipe0_valid && pipe0_rd_wen && (pipe0_rd != 5'd0) && (pipe0_rd == ro_rs2_addr) && (pipe0_tid == ro_tid);
-wire p1_match_b = pipe1_valid && pipe1_rd_wen && (pipe1_rd != 5'd0) && (pipe1_rd == ro_rs2_addr) && (pipe1_tid == ro_tid);
-wire mm_match_b = mem_valid   && mem_rd_wen   && (mem_rd   != 5'd0) && (mem_rd   == ro_rs2_addr) && (mem_tid   == ro_tid);
+wire p0_match_a = 1'b0;
+wire p1_match_a = 1'b0;
+wire mm_match_a = 1'b0;
 
-// ─── Priority MUX: pipe0 > pipe1 > mem > result-buffer > regfile ────────────
-assign op_a = p0_match_a ? pipe0_data :
-              p1_match_a ? pipe1_data :
-              mm_match_a ? mem_data   :
-              tagbuf_rs1_valid ? tagbuf_rs1_data :
-                           ro_rs1_regdata;
+wire p0_match_b = 1'b0;
+wire p1_match_b = 1'b0;
+wire mm_match_b = 1'b0;
 
-assign op_b = p0_match_b ? pipe0_data :
-              p1_match_b ? pipe1_data :
-              mm_match_b ? mem_data   :
-              tagbuf_rs2_valid ? tagbuf_rs2_data :
-                           ro_rs2_regdata;
+// ─── Priority MUX: result-buffer (tag-indexed) > PRF ────────────────────────
+assign op_a = tagbuf_rs1_valid ? tagbuf_rs1_data :
+                                 ro_rs1_regdata;
+
+assign op_b = tagbuf_rs2_valid ? tagbuf_rs2_data :
+                                 ro_rs2_regdata;
 
 // Debug indicators
-assign fwd_src_a = p0_match_a ? 2'b01 :
-                   p1_match_a ? 2'b10 :
-                   (mm_match_a || tagbuf_rs1_valid) ? 2'b11 : 2'b00;
-assign fwd_src_b = p0_match_b ? 2'b01 :
-                   p1_match_b ? 2'b10 :
-                   (mm_match_b || tagbuf_rs2_valid) ? 2'b11 : 2'b00;
+assign fwd_src_a = tagbuf_rs1_valid ? 2'b11 : 2'b00;
+assign fwd_src_b = tagbuf_rs2_valid ? 2'b11 : 2'b00;
 
 endmodule

@@ -30,6 +30,43 @@ Boolean Done;
 
 long Begin_Time, End_Time, User_Time;
 long Microseconds, Dhrystones_Per_Second;
+unsigned long long Bench_Start_Cycles, Bench_Stop_Cycles;
+unsigned long long Bench_Start_Instret, Bench_Stop_Instret;
+unsigned long long Bench_Total_Cycles, Bench_Total_Instret;
+unsigned long Bench_Ipc_X1000;
+
+/* HPM event counters (mhpmcounter3..9) */
+unsigned long long Bench_Start_HPM[7], Bench_Stop_HPM[7];
+unsigned long long Bench_Total_HPM[7];
+
+/* Inline HPM reads (avoid jump table / indirect branch pattern that triggers
+ * an OoO core hazard when multiple HPM reads appear back-to-back). */
+#define DHRY_HPM_READ64(LO, HI, OUT)                                           \
+    do {                                                                       \
+        uint32_t _h0, _l, _h1;                                                 \
+        do {                                                                   \
+            __asm__ volatile("csrr %0, " #HI : "=r"(_h0));                     \
+            __asm__ volatile("csrr %0, " #LO : "=r"(_l));                      \
+            __asm__ volatile("csrr %0, " #HI : "=r"(_h1));                     \
+        } while (_h0 != _h1);                                                  \
+        (OUT) = (((unsigned long long)_h1) << 32) | (unsigned long long)_l;    \
+    } while (0)
+
+static void dhry_sample_hpm(unsigned long long *dst) {
+    DHRY_HPM_READ64(0xB03, 0xB83, dst[0]);
+    DHRY_HPM_READ64(0xB04, 0xB84, dst[1]);
+    DHRY_HPM_READ64(0xB05, 0xB85, dst[2]);
+    DHRY_HPM_READ64(0xB06, 0xB86, dst[3]);
+    DHRY_HPM_READ64(0xB07, 0xB87, dst[4]);
+    DHRY_HPM_READ64(0xB08, 0xB88, dst[5]);
+    DHRY_HPM_READ64(0xB09, 0xB89, dst[6]);
+}
+
+#if defined(AX7203_FIXED_DHRYSTONE_RUNS)
+#define AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS AX7203_FIXED_DHRYSTONE_RUNS
+#elif defined(VERILATOR_MAINLINE)
+#define AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS 10
+#endif
 
 int main (int argc, char **argv)
 {
@@ -40,6 +77,7 @@ int main (int argc, char **argv)
   Enumeration Enum_Loc;
   Str_30 Str_1_Loc;
   Str_30 Str_2_Loc;
+  unsigned long long instret_delta;
   REG int Run_Index;
   REG int Number_Of_Runs;
 
@@ -53,6 +91,9 @@ int main (int argc, char **argv)
   board_uart_putc('\n');
 
   Number_Of_Runs = NUMBER_OF_RUNS;
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
+  Number_Of_Runs = AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS;
+#endif
 
   Next_Ptr_Glob = (Rec_Pointer)alloca(sizeof(Rec_Type));
   Ptr_Glob = (Rec_Pointer)alloca(sizeof(Rec_Type));
@@ -73,7 +114,7 @@ int main (int argc, char **argv)
   board_uart_putc('D');
   board_uart_putc('H');
   board_uart_putc('\n');
-  board_printf("BENCH START DHRYSTONE\n");
+  board_printf("DHRYSTONE START\n");
   debug_printf("\n");
   debug_printf("Dhrystone Benchmark, Version %s\n", Version);
   if (Reg) {
@@ -88,6 +129,9 @@ int main (int argc, char **argv)
   while (!Done) {
     debug_printf("Trying %d runs through Dhrystone:\n", Number_Of_Runs);
 
+    Bench_Start_Cycles = board_read_mcycle64();
+    Bench_Start_Instret = board_read_minstret64();
+    dhry_sample_hpm(Bench_Start_HPM);
     setStats(1);
     Start_Timer();
 
@@ -122,18 +166,34 @@ int main (int argc, char **argv)
 
     Stop_Timer();
     setStats(0);
+    Bench_Stop_Cycles = board_read_mcycle64();
+    Bench_Stop_Instret = board_read_minstret64();
+    dhry_sample_hpm(Bench_Stop_HPM);
+    {
+      int _h;
+      for (_h = 0; _h < 7; ++_h) {
+        Bench_Total_HPM[_h] = Bench_Stop_HPM[_h] - Bench_Start_HPM[_h];
+      }
+    }
 
     User_Time = End_Time - Begin_Time;
+    Bench_Total_Cycles = Bench_Stop_Cycles - Bench_Start_Cycles;
+    Bench_Total_Instret = Bench_Stop_Instret - Bench_Start_Instret;
 
     if (User_Time < Too_Small_Time) {
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
+      Done = true;
+#else
       printf("Measured time too small to obtain meaningful results\n");
       Number_Of_Runs = Number_Of_Runs * 10;
       printf("\n");
+#endif
     } else {
       Done = true;
     }
   }
 
+#ifndef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   debug_printf("Final values of the variables used in the benchmark:\n");
   debug_printf("\n");
   debug_printf("Int_Glob:            %d\n", Int_Glob);
@@ -183,19 +243,50 @@ int main (int argc, char **argv)
   debug_printf("Str_2_Loc:           %s\n", Str_2_Loc);
   debug_printf("        should be:   DHRYSTONE PROGRAM, 2'ND STRING\n");
   debug_printf("\n");
+#endif
 
+  instret_delta = Bench_Total_Instret;
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
+  Microseconds = 0;
+  Dhrystones_Per_Second = 0;
+#else
   Microseconds = ((User_Time / Number_Of_Runs) * Mic_secs_Per_Second) / HZ;
   Dhrystones_Per_Second = (HZ * Number_Of_Runs) / User_Time;
+#endif
+  if (Bench_Total_Cycles != 0ULL) {
+    Bench_Ipc_X1000 = (unsigned long)((instret_delta * 1000ULL) / Bench_Total_Cycles);
+  } else {
+    Bench_Ipc_X1000 = 0UL;
+  }
 
+  printf("BENCH CYCLES: %u\n", (unsigned)Bench_Total_Cycles);
+  printf("BENCH INSTRET: %u\n", (unsigned)Bench_Total_Instret);
+  printf("BENCH IPC_X1000: %u\n", (unsigned)Bench_Ipc_X1000);
+  printf("BENCH BR_MISPREDICT: %u\n", (unsigned)Bench_Total_HPM[0]);
+  printf("BENCH ICACHE_MISS: %u\n",   (unsigned)Bench_Total_HPM[1]);
+  printf("BENCH DCACHE_MISS: %u\n",   (unsigned)Bench_Total_HPM[2]);
+  printf("BENCH L2_MISS: %u\n",       (unsigned)Bench_Total_HPM[3]);
+  printf("BENCH SB_STALL: %u\n",      (unsigned)Bench_Total_HPM[4]);
+  printf("BENCH ISSUE_BUBBLE: %u\n",  (unsigned)Bench_Total_HPM[5]);
+  printf("BENCH ROCC_BUSY: %u\n",     (unsigned)Bench_Total_HPM[6]);
+#ifndef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
   printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
   printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
-  printf("BENCH DONE DHRYSTONE\n");
+#endif
+  printf("DHRYSTONE DONE\n");
+#ifdef AX7203_DHRYSTONE_EFFECTIVE_FIXED_RUNS
+  return 0;
+#else
   for (;;) {
     board_delay_ms(250);
+    printf("BENCH CYCLES: %u\n", (unsigned)Bench_Total_Cycles);
+    printf("BENCH INSTRET: %u\n", (unsigned)Bench_Total_Instret);
+    printf("BENCH IPC_X1000: %u\n", (unsigned)Bench_Ipc_X1000);
     printf("Microseconds for one run through Dhrystone: %ld\n", Microseconds);
     printf("Dhrystones per Second:                      %ld\n", Dhrystones_Per_Second);
-    printf("BENCH DONE DHRYSTONE\n");
+    printf("DHRYSTONE DONE\n");
   }
+#endif
 }
 
 Proc_1 (Ptr_Val_Par)

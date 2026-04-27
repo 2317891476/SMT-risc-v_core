@@ -113,9 +113,10 @@ proc ax7203_build_board_rom {script_dir} {
         error "Missing ROM builder script: $rom_build_py"
     }
 
-    set default_rom "$script_dir/../rom/test_fpga_uart_board_diag.s"
+    set default_rom "$script_dir/../rom/test_fpga_ddr3_mainline.s"
     set rom_asm [file normalize [ax7203_env_or_default AX7203_ROM_ASM $default_rom]]
     set rom_march [ax7203_env_or_default AX7203_ROM_MARCH ""]
+    set merge_mem_subsys [expr {[ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 0] ? 1 : 0}]
 
     if {![file exists $rom_asm]} {
         error "Board ROM source not found: $rom_asm"
@@ -144,6 +145,9 @@ proc ax7203_build_board_rom {script_dir} {
     set script_args [list $rom_build_py --asm $rom_asm]
     if {$rom_march ne ""} {
         lappend script_args --march $rom_march
+    }
+    if {$merge_mem_subsys} {
+        lappend script_args --merge-mem-subsys
     }
 
     set last_err ""

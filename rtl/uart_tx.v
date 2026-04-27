@@ -108,12 +108,13 @@ module uart_tx_autoboot (
     };
 
     // State machine
-    localparam [2:0] S_IDLE    = 3'b000;
-    localparam [2:0] S_START   = 3'b001;
-    localparam [2:0] S_WAIT    = 3'b010;
-    localparam [2:0] S_NEXT    = 3'b011;
-    localparam [2:0] S_DONE    = 3'b100;
-    localparam [2:0] S_DELAY   = 3'b101;  // Delay between characters
+    localparam [2:0] S_IDLE       = 3'b000;
+    localparam [2:0] S_START      = 3'b001;
+    localparam [2:0] S_WAIT_BUSY  = 3'b010;
+    localparam [2:0] S_WAIT_DONE  = 3'b011;
+    localparam [2:0] S_NEXT       = 3'b100;
+    localparam [2:0] S_DONE       = 3'b101;
+    localparam [2:0] S_DELAY      = 3'b110;  // Delay between characters
 
     reg [2:0] state;
     reg [4:0] char_idx;      // Character index (0-23)
@@ -181,12 +182,19 @@ module uart_tx_autoboot (
                         default: tx_data <= 8'h00;
                     endcase
                     tx_start <= 1'b1;
-                    state    <= S_WAIT;
+                    state    <= S_WAIT_BUSY;
                 end
 
-                S_WAIT: begin
-                    // Hold tx_start for a second cycle to ensure UART sees it
-                    tx_start <= 1'b0;
+                S_WAIT_BUSY: begin
+                    // Don't advance until the UART has actually consumed tx_start
+                    // and raised busy for the current byte.
+                    if (uart_busy) begin
+                        state <= S_WAIT_DONE;
+                    end
+                end
+
+                S_WAIT_DONE: begin
+                    // Now wait for the launched character to fully drain.
                     if (!uart_busy) begin
                         state <= S_NEXT;
                     end

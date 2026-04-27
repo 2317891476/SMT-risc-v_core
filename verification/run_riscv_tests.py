@@ -26,6 +26,9 @@ ROM_DIR = PROJECT_ROOT / "rom"
 GCC = "riscv-none-elf-gcc"
 OBJCOPY = "riscv-none-elf-objcopy"
 
+# FPGA-matching config flag (set from --fpga-config CLI argument)
+_FPGA_CONFIG = False
+
 # Our memory map
 TEXT_BASE = "0x00000000"
 DATA_BASE = "0x00001000"
@@ -292,8 +295,12 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
 
 def run_simulation():
     """Run the simulation"""
+    extra_defines = ""
+    if _FPGA_CONFIG:
+        extra_defines = "-DSIM_SCOREBOARD_RS_DEPTH=48 -DSIM_SCOREBOARD_RS_IDX_W=6 "
     compile_cmd = (
         "iverilog -g2012 -s tb -o out_iverilog/bin/tb_riscv_test.out "
+        f"{extra_defines}"
         "-DTEST_ID=0 "
         "-I ../rtl ../rtl/*.v "
         "../libs/REG_ARRAY/SRAM/ram_bfm.v tb.sv"
@@ -450,7 +457,11 @@ def main():
                         default="riscv-tests", help="Test suite to run")
     parser.add_argument("--download", action="store_true", help="Force download even if exists")
     parser.add_argument("--categories", nargs="+", help="Categories to run")
+    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_TAG_DEPTH=48, RS_TAG_W=6)")
     args = parser.parse_args()
+
+    global _FPGA_CONFIG
+    _FPGA_CONFIG = args.fpga_config
     
     print("=" * 60)
     print("  RISC-V Tests Runner for AdamRiscv")

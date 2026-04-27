@@ -7,7 +7,11 @@ static inline volatile uint32_t *mmio32(uintptr_t addr) {
 }
 
 static inline void board_mmio_relax(void) {
+#ifdef VERILATOR_MAINLINE
+    __asm__ volatile("" ::: "memory");
+#else
     __asm__ volatile("nop\nnop\nnop");
+#endif
 }
 
 static inline unsigned char board_relaxed_load_u8(const volatile unsigned char *addr) {
@@ -22,10 +26,14 @@ static inline void board_relaxed_store_u8(volatile unsigned char *addr, unsigned
 }
 
 static void board_uart_tx_delay(void) {
+#ifdef VERILATOR_MAINLINE
+    return;
+#else
     unsigned long cycles = (AX7203_CPU_HZ / 115200UL) * 12UL;
     while (cycles-- != 0UL) {
         __asm__ volatile("nop");
     }
+#endif
 }
 
 void board_delay_cycles(uint32_t cycles) {
@@ -272,17 +280,38 @@ void board_tube_write(uint8_t value) {
 }
 
 void board_runtime_init(void) {
-    // The AX7203 FPGA benchmark flow preinitializes the backing data RAM to
-    // zero before loading .rodata/.data, so .bss already comes up cleared.
-    // Skipping the byte-wise software clear keeps benchmark smoke tests from
-    // spending most of their simulated time in startup.
+#ifdef AX7203_CLEAR_BSS
+    unsigned char *p;
+    for (p = &__bss_start; p < &__bss_end; ++p) {
+        *p = 0;
+    }
+#endif
     board_uart_init();
     board_tube_write(0x04);
 }
 
 void board_uart_putc(char ch) {
+    while (!(*mmio32(AX7203_UART_STATUS_ADDR) & AX7203_UART_STATUS_TX_READY)) {
+        board_mmio_relax();
+    }
     *mmio32(AX7203_UART_TXDATA_ADDR) = (uint32_t)(uint8_t)ch;
     board_uart_tx_delay();
+}
+
+void __attribute__((noinline)) board_print_u32(uint32_t val) {
+    char buf[10];
+    int pos = 0;
+    if (val == 0u) {
+        board_uart_putc('0');
+        return;
+    }
+    while (val != 0u) {
+        buf[pos++] = (char)('0' + (val % 10u));
+        val /= 10u;
+    }
+    while (pos-- > 0) {
+        board_uart_putc(buf[pos]);
+    }
 }
 
 int board_uart_try_getc(uint8_t *byte_out) {
@@ -307,6 +336,51 @@ uint64_t board_read_mcycle64(void) {
     } while (hi0 != hi1);
 
     return (((uint64_t)hi1) << 32) | (uint64_t)lo;
+}
+
+uint64_t board_read_minstret64(void) {
+    uint32_t hi0;
+    uint32_t lo;
+    uint32_t hi1;
+
+    do {
+        __asm__ volatile("rdinstreth %0" : "=r"(hi0));
+        __asm__ volatile("rdinstret %0" : "=r"(lo));
+        __asm__ volatile("rdinstreth %0" : "=r"(hi1));
+    } while (hi0 != hi1);
+
+    return (((uint64_t)hi1) << 32) | (uint64_t)lo;
+}
+
+/* Read mhpmcounterN as 64-bit value via M-mode CSR addresses 0xB03..0xB09 (lo) / 0xB83..0xB89 (hi).
+ * Glitch-free read: re-sample hi if it changed across the 32-bit lo read.
+ * Surrounded with fence to drain the OoO pipeline and avoid CSR-vs-MMIO ordering hazards. */
+#define AX7203_HPM_READ64(LO_CSR, HI_CSR, OUT)                          \
+    do {                                                                \
+        uint32_t _hi0, _lo, _hi1;                                       \
+        __asm__ volatile("fence" ::: "memory");                         \
+        do {                                                            \
+            __asm__ volatile("csrr %0, " #HI_CSR : "=r"(_hi0));         \
+            __asm__ volatile("csrr %0, " #LO_CSR : "=r"(_lo));          \
+            __asm__ volatile("csrr %0, " #HI_CSR : "=r"(_hi1));         \
+        } while (_hi0 != _hi1);                                         \
+        __asm__ volatile("fence" ::: "memory");                         \
+        (OUT) = (((uint64_t)_hi1) << 32) | (uint64_t)_lo;               \
+    } while (0)
+
+uint64_t board_read_hpmcounter64(int idx) {
+    uint64_t v = 0ULL;
+    switch (idx) {
+        case 3: AX7203_HPM_READ64(0xB03, 0xB83, v); break;
+        case 4: AX7203_HPM_READ64(0xB04, 0xB84, v); break;
+        case 5: AX7203_HPM_READ64(0xB05, 0xB85, v); break;
+        case 6: AX7203_HPM_READ64(0xB06, 0xB86, v); break;
+        case 7: AX7203_HPM_READ64(0xB07, 0xB87, v); break;
+        case 8: AX7203_HPM_READ64(0xB08, 0xB88, v); break;
+        case 9: AX7203_HPM_READ64(0xB09, 0xB89, v); break;
+        default: v = 0ULL; break;
+    }
+    return v;
 }
 
 int board_vprintf(const char *fmt, va_list ap) {

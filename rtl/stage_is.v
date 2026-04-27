@@ -86,12 +86,13 @@ always @(*) begin
     is_fu = `FU_NOP;
     case (opcode)
         `Rtype: begin
-            // RV32M multiplication instructions (func3 0,1,2,3,4 with func7=0000001)
-            // MUL, MULH, MULHSU, MULHU need FU_MUL
-            // Note: func7_code is inst[30] (func7[5]), but MUL uses func7=0000001
-            // SUB uses func7=0100000, so we need to check func7[0] (inst[25])
-            if (func7_mul && (func3 == 3'd0 || func3 == 3'd1 || func3 == 3'd2 || func3 == 3'd3 || func3 == 3'd4)) begin
+            // RV32M instructions: func7=0000001 (inst[25]=1)
+            // func3 0-3: MUL, MULH, MULHSU, MULHU → FU_MUL
+            // func3 4-7: DIV, DIVU, REM, REMU → FU_DIV
+            if (func7_mul && !func3[2]) begin
                 is_fu = `FU_MUL;
+            end else if (func7_mul && func3[2]) begin
+                is_fu = `FU_DIV;
             end else begin
                 is_fu = `FU_INT1;  // R-type ALU -> Pipe 1
             end

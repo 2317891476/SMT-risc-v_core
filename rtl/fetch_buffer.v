@@ -30,6 +30,8 @@ module fetch_buffer #(
     input  wire [31:0] push_inst,      // instruction word
     input  wire [31:0] push_pc,        // instruction PC
     input  wire [0:0]  push_tid,       // thread ID
+    input  wire        push_pred_taken,
+    input  wire [31:0] push_pred_target,
     output wire        push_ready,     // buffer can accept (not full for this thread)
 
     // ─── Pop port 0 (to Decoder 0, oldest instruction) ──────────
@@ -37,12 +39,16 @@ module fetch_buffer #(
     output wire [31:0] pop0_inst,      // instruction word
     output wire [31:0] pop0_pc,        // instruction PC
     output wire [0:0]  pop0_tid,       // thread ID
+    output wire        pop0_pred_taken,
+    output wire [31:0] pop0_pred_target,
 
     // ─── Pop port 1 (to Decoder 1, second-oldest, same thread) ──
     output wire        pop1_valid,     // slot 1 valid AND same thread as slot 0
     output wire [31:0] pop1_inst,
     output wire [31:0] pop1_pc,
     output wire [0:0]  pop1_tid,
+    output wire        pop1_pred_taken,
+    output wire [31:0] pop1_pred_target,
 
     // ─── Consume (from decode stage) ─────────────────────────────
     input  wire        consume_0,      // decode consumed slot 0
@@ -55,6 +61,8 @@ localparam IDX_W = $clog2(DEPTH);
 reg [31:0] buf_inst [0:DEPTH-1];
 reg [31:0] buf_pc   [0:DEPTH-1];
 reg [0:0]  buf_tid  [0:DEPTH-1];
+reg        buf_pred_taken [0:DEPTH-1];
+reg [31:0] buf_pred_target[0:DEPTH-1];
 reg        buf_valid[0:DEPTH-1];
 
 // FIFO pointers
@@ -82,6 +90,8 @@ assign pop0_valid = !fifo_empty && buf_valid[tail_idx];
 assign pop0_inst  = buf_inst[tail_idx];
 assign pop0_pc    = buf_pc[tail_idx];
 assign pop0_tid   = buf_tid[tail_idx];
+assign pop0_pred_taken  = buf_pred_taken[tail_idx];
+assign pop0_pred_target = buf_pred_target[tail_idx];
 
 // Slot 1 valid only if: count >= 2, same thread, and both valid
 wire slot1_exists;
@@ -90,6 +100,8 @@ assign pop1_valid = slot1_exists && (buf_tid[tail_idx_p1] == buf_tid[tail_idx]);
 assign pop1_inst  = buf_inst[tail_idx_p1];
 assign pop1_pc    = buf_pc[tail_idx_p1];
 assign pop1_tid   = buf_tid[tail_idx_p1];
+assign pop1_pred_taken  = buf_pred_taken[tail_idx_p1];
+assign pop1_pred_target = buf_pred_target[tail_idx_p1];
 
 integer i;
 
@@ -102,6 +114,8 @@ always @(posedge clk or negedge rstn) begin
             buf_inst[i]  <= 32'd0;
             buf_pc[i]    <= 32'd0;
             buf_tid[i]   <= 1'b0;
+            buf_pred_taken[i]  <= 1'b0;
+            buf_pred_target[i] <= 32'd0;
         end
     end
     else begin
@@ -143,6 +157,8 @@ always @(posedge clk or negedge rstn) begin
                 buf_inst[head[IDX_W-1:0]]  <= push_inst;
                 buf_pc[head[IDX_W-1:0]]    <= push_pc;
                 buf_tid[head[IDX_W-1:0]]   <= push_tid;
+                buf_pred_taken[head[IDX_W-1:0]]  <= push_pred_taken;
+                buf_pred_target[head[IDX_W-1:0]] <= push_pred_target;
                 buf_valid[head[IDX_W-1:0]] <= 1'b1;
                 head <= head + 1;
             end

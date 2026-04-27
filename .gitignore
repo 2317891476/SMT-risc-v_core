@@ -83,3 +83,4 @@ verification/adapter/
 # OS generated
 .DS_Store
 Thumbs.db
+./verilator/

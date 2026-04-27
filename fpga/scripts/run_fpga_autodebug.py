@@ -155,7 +155,7 @@ def write_overall_summary(
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--port", default="COM5")
-    parser.add_argument("--rs-depth", type=int, default=16)
+    parser.add_argument("--rs-depth", type=int, default=48)
     parser.add_argument("--fetch-buffer-depth", type=int, default=16)
     parser.add_argument("--core-clk-mhz", type=float, default=10.0)
     parser.add_argument("--main-capture-seconds", type=int, default=4)

@@ -43,11 +43,15 @@ void board_uart_putc(char ch);
 int board_uart_try_getc(uint8_t *byte_out);
 void board_tube_write(uint8_t value);
 uint64_t board_read_mcycle64(void);
+uint64_t board_read_minstret64(void);
+/* HPM counters: idx in [3..9], maps to mhpmcounter3..9 */
+uint64_t board_read_hpmcounter64(int idx);
 void board_delay_cycles(uint32_t cycles);
 void board_delay_ms(uint32_t ms);
 
 int board_vprintf(const char *fmt, va_list ap);
 int board_printf(const char *fmt, ...);
+void board_print_u32(uint32_t val);
 int printf(const char *fmt, ...);
 int sprintf(char *str, const char *fmt, ...);
 int putchar(int ch);

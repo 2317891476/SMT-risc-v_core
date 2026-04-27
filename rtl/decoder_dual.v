@@ -77,6 +77,7 @@ module decoder_dual (
     // ─── Backpressure: how many instructions consumed ───────────
     output wire        consume_0,      // decoder consumed inst0
     output wire        consume_1,      // decoder consumed inst1
+    input  wire        disp1_blocked,  // dispatch couldn't accept d1 (IQ full)
 
     // ─── CSR/SYSTEM outputs ─────────────────────────────────────
     output wire        dec0_is_csr,
@@ -299,7 +300,7 @@ assign dec1_tid          = inst1_tid;
 // Otherwise ROB/scoreboard backpressure silently drops instructions that were
 // decoded but never accepted.
 assign consume_0 = inst0_valid && !stall;
-assign consume_1 = dec1_valid_int && !stall;
+assign consume_1 = dec1_valid_int && !stall && !disp1_blocked;
 
 // ─── CSR/SYSTEM outputs ─────────────────────────────────────────────────────
 assign dec0_is_csr    = d0_is_csr;

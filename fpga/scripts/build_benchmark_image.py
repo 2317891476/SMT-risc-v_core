@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -133,7 +134,7 @@ def ensure_coremark_sources() -> Path:
 
 def build_common_flags(cpu_hz: int) -> list[str]:
     return [
-        "-march=rv32im",
+        "-march=rv32im_zicsr",
         "-mabi=ilp32",
         "-msave-restore",
         "-msmall-data-limit=0",
@@ -206,14 +207,45 @@ def parse_size_report(size_output: str) -> tuple[int, int, int]:
     return (int(fields[0]), int(fields[1]), int(fields[2]))
 
 
+def parse_symbol_addr(elf_path: Path, symbol_name: str) -> int:
+    nm = which_required("riscv-none-elf-nm")
+    proc = run_checked([nm, str(elf_path)], REPO_ROOT)
+    for line in proc.stdout.splitlines():
+        fields = line.split()
+        if len(fields) >= 3 and fields[2] == symbol_name:
+            return int(fields[0], 16)
+    raise SystemExit(f"Symbol not found in {elf_path}: {symbol_name}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmark", choices=("dhrystone", "coremark"), required=True)
     parser.add_argument("--cpu-hz", type=int, default=10_000_000)
     parser.add_argument("--dhrystone-runs", type=int, default=5000)
+    parser.add_argument("--fixed-dhrystone-runs", type=int, default=None)
     parser.add_argument("--coremark-iterations", type=int, default=10)
     parser.add_argument("--coremark-total-data-size", type=int, default=1200)
     parser.add_argument("--startup-delay-ms", type=int, default=0)
+    parser.add_argument(
+        "--verilator-mainline",
+        action="store_true",
+        help="Build the benchmark image with Verilator-only runtime fast paths enabled.",
+    )
+    parser.add_argument(
+        "--ddr3-xip",
+        action="store_true",
+        help="Link the benchmark for execution from DDR3 at 0x80000000.",
+    )
+    parser.add_argument(
+        "--emit-bin",
+        action="store_true",
+        help="Emit a flat binary image for the DDR3 UART loader.",
+    )
+    parser.add_argument(
+        "--manifest",
+        action="store_true",
+        help="Emit a JSON manifest next to the DDR3 binary.",
+    )
     args = parser.parse_args()
 
     gcc = which_required("riscv-none-elf-gcc")
@@ -222,11 +254,16 @@ def main() -> int:
 
     build_dir = BUILD_ROOT / args.benchmark
     build_dir.mkdir(parents=True, exist_ok=True)
-    elf_path = build_dir / f"{args.benchmark}.elf"
+    image_suffix = "ddr3" if args.ddr3_xip else "bram"
+    elf_path = build_dir / f"{args.benchmark}_{image_suffix}.elf"
+    bin_path = build_dir / f"{args.benchmark}_{image_suffix}.bin"
+    manifest_path = build_dir / f"{args.benchmark}_{image_suffix}.json"
     inst_hex = ROM_DIR / "inst.hex"
     data_hex = ROM_DIR / "data.hex"
 
     if args.benchmark == "dhrystone":
+        if args.fixed_dhrystone_runs is not None and args.fixed_dhrystone_runs <= 0:
+            raise SystemExit(f"fixed dhrystone runs must be positive, got {args.fixed_dhrystone_runs}")
         sources, cflags = build_dhrystone_sources(args.cpu_hz, args.dhrystone_runs, build_dir)
     else:
         sources, cflags = build_coremark_sources(
@@ -239,10 +276,37 @@ def main() -> int:
     if args.startup_delay_ms < 0:
         raise SystemExit(f"startup delay must be non-negative, got {args.startup_delay_ms}")
     cflags.append(f"-DAX7203_BENCH_STARTUP_DELAY_MS={args.startup_delay_ms}")
+    if args.fixed_dhrystone_runs is not None:
+        cflags.append(f"-DAX7203_FIXED_DHRYSTONE_RUNS={args.fixed_dhrystone_runs}")
+    if args.verilator_mainline:
+        cflags.append("-DVERILATOR_MAINLINE=1")
+    if args.ddr3_xip:
+        cflags.append("-DAX7203_CLEAR_BSS=1")
 
     for stale in (inst_hex, data_hex):
         if stale.exists():
             stale.unlink()
+
+    link_script = (
+        REPO_ROOT / "benchmarks" / "common_ax7203" / "ax7203_ddr3_xip.ld"
+        if args.ddr3_xip
+        else REPO_ROOT / "benchmarks" / "common_ax7203" / "ax7203_harvard_bench.ld"
+    )
+
+    board_runtime_src = str(REPO_ROOT / "benchmarks" / "common_ax7203" / "ax7203_board_runtime.c")
+    board_runtime_obj = str(build_dir / "ax7203_board_runtime.o")
+    other_sources = [s for s in sources if s != board_runtime_src]
+
+    compile_runtime_cmd = [
+        gcc,
+        *[f for f in cflags if not f.startswith("-O")],
+        "-O1",
+        "-c",
+        board_runtime_src,
+        "-o",
+        board_runtime_obj,
+    ]
+    run_checked(compile_runtime_cmd, ROM_DIR)
 
     link_cmd = [
         gcc,
@@ -251,8 +315,9 @@ def main() -> int:
         "-nostdlib",
         "-Wl,--build-id=none",
         "-Wl,--gc-sections",
-        f"-Wl,-T,{REPO_ROOT / 'benchmarks' / 'common_ax7203' / 'ax7203_harvard_bench.ld'}",
-        *sources,
+        f"-Wl,-T,{link_script}",
+        *other_sources,
+        board_runtime_obj,
         "-lgcc",
         "-o",
         str(elf_path),
@@ -261,6 +326,45 @@ def main() -> int:
     size_proc = run_checked([size, str(elf_path)], ROM_DIR)
 
     text_size, data_size, bss_size = parse_size_report(size_proc.stdout)
+    entry_addr = parse_symbol_addr(elf_path, "_start")
+
+    if args.ddr3_xip:
+        if args.emit_bin or args.manifest:
+            run_checked([objcopy, "-O", "binary", str(elf_path), str(bin_path)], REPO_ROOT)
+        if args.manifest:
+            payload = bin_path.read_bytes()
+            checksum = sum(payload) & 0xFFFFFFFF
+            manifest = {
+                "benchmark": args.benchmark,
+                "format": "ax7203-ddr3-uart-loader-v1",
+                "elf": str(elf_path),
+                "bin": str(bin_path),
+                "load_addr": 0x80000000,
+                "entry": entry_addr,
+                "size_bytes": len(payload),
+                "checksum32": checksum,
+                "cpu_hz": args.cpu_hz,
+                "text_size": text_size,
+                "data_size": data_size,
+                "bss_size": bss_size,
+            }
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="ascii")
+
+        print(f"Benchmark DDR3 image built: {args.benchmark}")
+        print(f"  cpu_hz  : {args.cpu_hz}")
+        print(f"  entry   : 0x{entry_addr:08X}")
+        print(f"  text    : {text_size}")
+        print(f"  data    : {data_size}")
+        print(f"  bss     : {bss_size}")
+        if bin_path.exists():
+            payload = bin_path.read_bytes()
+            print(f"  bin     : {bin_path}")
+            print(f"  size    : {len(payload)}")
+            print(f"  checksum: 0x{(sum(payload) & 0xFFFFFFFF):08X}")
+        if manifest_path.exists():
+            print(f"  manifest: {manifest_path}")
+        return 0
+
     if text_size > 16 * 1024:
         raise SystemExit(
             f"{args.benchmark} text image is too large for the 16KB instruction backing store: {text_size} bytes"

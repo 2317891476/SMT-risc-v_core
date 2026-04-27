@@ -15,6 +15,11 @@ module pc_mt #(
     input  wire [31:0]    br_addr_t0,       // branch target for thread 0
     input  wire [31:0]    br_addr_t1,       // branch target for thread 1
 
+    // Per-thread predicted redirect for the fetch just launched.
+    input  wire [N_T-1:0] pred_ctrl,         // [t] = predicted taken for thread t
+    input  wire [31:0]    pred_addr_t0,
+    input  wire [31:0]    pred_addr_t1,
+
     // Per-thread stall / flush
     input  wire [N_T-1:0] pc_stall,         // [t] = stall PC of thread t
     input  wire [N_T-1:0] flush,            // [t] = flush (branch misprediction) for thread t
@@ -34,6 +39,9 @@ reg [31:0] pc_next [0:N_T-1];
 wire [31:0] br_addr [0:N_T-1];
 assign br_addr[0] = br_addr_t0;
 assign br_addr[1] = br_addr_t1;
+wire [31:0] pred_addr [0:N_T-1];
+assign pred_addr[0] = pred_addr_t0;
+assign pred_addr[1] = pred_addr_t1;
 
 integer t;
 
@@ -42,10 +50,17 @@ integer t;
 // -----------------------------------------------------------
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
+`ifdef VERILATOR_MAINLINE_PRELOAD_BOOT
+        pc[0]      <= 32'h80000000;
+        pc_next[0] <= 32'h80000004;
+        pc[1]      <= THREAD1_BOOT_PC;
+        pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+`else
         pc[0]      <= 32'h00000000;
         pc_next[0] <= 32'h00000004;
         pc[1]      <= THREAD1_BOOT_PC;
         pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+`endif
     end
     else begin
         for (t = 0; t < N_T; t = t + 1) begin
@@ -60,8 +75,13 @@ always @(posedge clk or negedge rstn) begin
             end
             else if (pc_advance[t]) begin
                 // Advance only when IF actually launches a fetch for this thread.
-                pc[t]      <= pc_next[t];
-                pc_next[t] <= pc_next[t] + 32'h4;
+                if (pred_ctrl[t]) begin
+                    pc[t]      <= pred_addr[t];
+                    pc_next[t] <= pred_addr[t] + 32'h4;
+                end else begin
+                    pc[t]      <= pc_next[t];
+                    pc_next[t] <= pc_next[t] + 32'h4;
+                end
             end
             // else: not selected this cycle, hold
         end

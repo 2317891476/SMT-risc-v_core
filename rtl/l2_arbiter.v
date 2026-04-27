@@ -172,7 +172,7 @@ always @(posedge clk or negedge rstn) begin
         if (!active) begin
             // Start new transaction
             if (next_grant_m0) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[L2 ARB] grant M0 addr=%h", m0_req_addr);
                 `endif
                 active <= 1'b1;
@@ -185,7 +185,7 @@ always @(posedge clk or negedge rstn) begin
                 req_uncached_r <= 1'b0;
                 req_issued <= 1'b0;
             end else if (next_grant_m1) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[L2 ARB] grant M1 addr=%h write=%0b wdata=%h", m1_req_addr, m1_req_write, m1_req_wdata);
                 `endif
                 active <= 1'b1;
@@ -214,7 +214,7 @@ always @(posedge clk or negedge rstn) begin
             end
             // Transaction in progress - check for completion
             if (req_issued && l2_resp_valid && l2_resp_last) begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[L2 ARB] resp master=%0d data=%h", master_select, l2_resp_data);
                 `endif
                 active <= 1'b0;

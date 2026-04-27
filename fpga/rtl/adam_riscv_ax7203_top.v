@@ -109,19 +109,9 @@ wire core_uart_tx;
 wire core_clk_dbg;
 wire core_ready;
 wire core_retire_seen;
+wire [383:0] core_ddr3_fetch_debug_bus;
 wire       core_uart_byte_valid_dbg;
 wire [7:0] core_uart_byte_dbg;
-wire       core_uart_frame_seen;
-wire [3:0] core_uart_frame_count;
-wire [7:0] core_uart_frame_count_rolling;
-wire       core_uart_byte_valid;
-wire [7:0] core_uart_byte;
-wire       board_uart_tx;
-wire       board_uart_busy;
-reg        board_tx_start;
-reg [7:0]  board_tx_data;
-reg        board_pending_valid;
-reg [7:0]  board_pending_byte;
 
 // The core has FPGA_MODE defined internally, which causes it to:
 // 1. Instantiate clk_wiz_0 to convert sys_clk (200MHz) to core clock
@@ -140,7 +130,8 @@ adam_riscv u_adam_riscv (
     .debug_core_clk(core_clk_dbg),
     .debug_retire_seen(core_retire_seen),
     .debug_uart_tx_byte_valid(core_uart_byte_valid_dbg),
-    .debug_uart_tx_byte(core_uart_byte_dbg)
+    .debug_uart_tx_byte(core_uart_byte_dbg),
+    .debug_ddr3_fetch_bus(core_ddr3_fetch_debug_bus)
 `ifdef ENABLE_DDR3
     ,
     .ddr3_req_valid  (core_ddr3_req_valid),
@@ -155,37 +146,51 @@ adam_riscv u_adam_riscv (
 `endif
 );
 
-uart_tx #(
-    .CLK_DIV(1736)
-) u_board_uart_tx (
-    .clk      (sys_clk_200m  ),
-    .rst_n    (core_rst_n    ),
-    .tx_start (board_tx_start),
-    .tx_data  (board_tx_data ),
-    .tx       (board_uart_tx ),
-    .busy     (board_uart_busy)
-);
+`ifdef ENABLE_DDR3
+wire fetch_probe_ddr3_calib = mig_init_calib_complete;
+`else
+wire fetch_probe_ddr3_calib = 1'b1;
+`endif
 
-uart_rx_monitor #(
-    .CLK_DIV(1736)
-) u_core_uart_monitor (
-    .clk                (sys_clk_200m                ),
-    .rst_n              (core_rst_n                  ),
-    .rx                 (core_uart_tx                ),
-    .frame_seen         (core_uart_frame_seen        ),
-    .frame_count        (core_uart_frame_count       ),
-    .frame_count_rolling(core_uart_frame_count_rolling),
-    .byte_valid         (core_uart_byte_valid        ),
-    .byte_data          (core_uart_byte              )
+`ifdef DDR3_FETCH_DEBUG
+wire       fetch_probe_byte_valid;
+wire [7:0] fetch_probe_byte;
+wire       fetch_probe_serial_tx;
+wire       fetch_probe_serial_active;
+`ifndef FPGA_UART_CLK_DIV
+    `define FPGA_UART_CLK_DIV 217
+`endif
+
+uart_ddr3_fetch_probe_beacon #(
+    .CLK_DIV(`FPGA_UART_CLK_DIV)
+) u_ddr3_fetch_probe_beacon (
+    .clk                  (core_clk_dbg),
+    .rst_n                (core_ready),
+    .core_ready           (core_ready),
+    .ddr3_calib_done      (fetch_probe_ddr3_calib),
+    .core_uart_byte_valid (core_uart_byte_valid_dbg),
+    .core_uart_byte       (core_uart_byte_dbg),
+    .debug_bus            (core_ddr3_fetch_debug_bus),
+    .tx                   (fetch_probe_serial_tx),
+    .active               (fetch_probe_serial_active),
+    .debug_byte_valid     (fetch_probe_byte_valid),
+    .debug_byte           (fetch_probe_byte)
 );
+`else
+wire       fetch_probe_byte_valid = 1'b0;
+wire [7:0] fetch_probe_byte = 8'd0;
+wire       fetch_probe_serial_tx = 1'b1;
+wire       fetch_probe_serial_active = 1'b0;
+`endif
 
 // =============================================================================
 // UART Routing
 // =============================================================================
-// Re-serialize the core's byte-level MMIO UART events in the 200 MHz board
-// wrapper. This keeps the CPU-visible UART semantics unchanged while avoiding
-// a fragile serial-to-serial bridge on the physical board path.
-assign uart_tx = board_uart_tx;
+// Drive the physical UART directly from the core UART serializer.
+// The earlier serial-to-serial bridge in this wrapper could inject or drop
+// bytes under long ACK-heavy transfers, which is fatal for the DDR3 loader
+// protocol.
+assign uart_tx = fetch_probe_serial_active ? fetch_probe_serial_tx : core_uart_tx;
 
 // UART RX now feeds the core MMIO UART receiver directly.
 
@@ -217,35 +222,11 @@ end
 
 always @(posedge sys_clk_200m or negedge core_rst_n) begin
     if (!core_rst_n) begin
-        board_tx_start       <= 1'b0;
-        board_tx_data        <= 8'd0;
-        board_pending_valid  <= 1'b0;
-        board_pending_byte   <= 8'd0;
         uart_tx_sync      <= 2'b11;
         uart_led_hold_cnt <= 25'd0;
         uart_led_visible  <= 1'b0;
     end else begin
-        board_tx_start <= 1'b0;
-
-        if (!board_uart_busy && board_pending_valid) begin
-            board_tx_data      <= board_pending_byte;
-            board_tx_start     <= 1'b1;
-            board_pending_valid <= 1'b0;
-            if (core_uart_byte_valid) begin
-                board_pending_byte  <= core_uart_byte;
-                board_pending_valid <= 1'b1;
-            end
-        end else if (core_uart_byte_valid) begin
-            if (!board_uart_busy) begin
-                board_tx_data  <= core_uart_byte;
-                board_tx_start <= 1'b1;
-            end else if (!board_pending_valid) begin
-                board_pending_byte  <= core_uart_byte;
-                board_pending_valid <= 1'b1;
-            end
-        end
-
-        uart_tx_sync <= {uart_tx_sync[0], board_uart_tx};
+        uart_tx_sync <= {uart_tx_sync[0], uart_tx};
         if (uart_tx_edge) begin
             // Stretch UART line toggles into a visible ~100 ms LED pulse.
             uart_led_hold_cnt <= 25'd19_999_999;
@@ -280,9 +261,6 @@ assign led[4] = ~uart_led_visible;         // ext LED4
 wire _unused_core_clk_dbg = core_clk_dbg;
 wire _unused_core_uart_byte_valid_dbg = core_uart_byte_valid_dbg;
 wire [7:0] _unused_core_uart_byte_dbg = core_uart_byte_dbg;
-wire _unused_core_uart_frame_seen = core_uart_frame_seen;
-wire [3:0] _unused_core_uart_frame_count = core_uart_frame_count;
-wire [7:0] _unused_core_uart_frame_count_rolling = core_uart_frame_count_rolling;
 
 // =============================================================================
 // DDR3 SDRAM Controller (MIG 7-Series) + CDC Bridge

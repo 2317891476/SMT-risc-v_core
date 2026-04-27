@@ -96,7 +96,7 @@ always @(posedge clk or negedge rstn) begin
 
         if (w_regs_en_0 && (w_regs_addr_0 != 5'd0)) begin
 
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
 
             $display("WRITE T%0d x%0d = %h (port0)", w_thread_id_0, w_regs_addr_0, w_regs_data_0);
 
@@ -110,7 +110,7 @@ always @(posedge clk or negedge rstn) begin
 
         if (w_regs_en_1 && (w_regs_addr_1 != 5'd0)) begin
 
-            `ifndef SYNTHESIS
+            `ifdef VERBOSE_SIM_LOGS
 
             $display("WRITE T%0d x%0d = %h (port1)", w_thread_id_1, w_regs_addr_1, w_regs_data_1);
 

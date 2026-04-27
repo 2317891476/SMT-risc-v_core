@@ -492,14 +492,14 @@ always @(posedge clk) begin
                      u_adam_riscv.rob1_full,
                      $time);
             $display("[ROB WIN DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_flushed=%0b h_tag=%0d h_ord=%0d @%0t",
-                     u_adam_riscv.u_rob_lite.rob_head[0],
-                     u_adam_riscv.u_rob_lite.rob_tail[0],
-                     u_adam_riscv.u_rob_lite.rob_count[0],
-                     u_adam_riscv.u_rob_lite.rob_valid[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_complete[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_flushed[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_tag[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_order_id[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_head[0],
+                     u_adam_riscv.u_rob.rob_tail[0],
+                     u_adam_riscv.u_rob.rob_count[0],
+                     u_adam_riscv.u_rob.rob_valid[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_complete[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_flushed[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_tag[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_order_id[0][u_adam_riscv.u_rob.rob_head[0]],
                      $time);
         end
         if (u_adam_riscv.ext_timer_irq || u_adam_riscv.ext_external_irq ||
@@ -522,24 +522,24 @@ always @(posedge clk) begin
         if ((u_adam_riscv.dec0_pc >= 32'h00000054) &&
             (u_adam_riscv.dec0_pc <= 32'h0000005c)) begin
             $display("[ROB DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_tag=%0d @%0t",
-                     u_adam_riscv.u_rob_lite.rob_head[0],
-                     u_adam_riscv.u_rob_lite.rob_tail[0],
-                     u_adam_riscv.u_rob_lite.rob_count[0],
-                     u_adam_riscv.u_rob_lite.rob_valid[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_complete[0][u_adam_riscv.u_rob_lite.rob_head[0]],
-                     u_adam_riscv.u_rob_lite.rob_tag[0][u_adam_riscv.u_rob_lite.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_head[0],
+                     u_adam_riscv.u_rob.rob_tail[0],
+                     u_adam_riscv.u_rob.rob_count[0],
+                     u_adam_riscv.u_rob.rob_valid[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_complete[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_tag[0][u_adam_riscv.u_rob.rob_head[0]],
                      $time);
-            $display("[SB DBG] tag1 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d | tag2 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d @%0t",
-                     u_adam_riscv.u_scoreboard.win_valid[0],
-                     u_adam_riscv.u_scoreboard.win_issued[0],
-                     u_adam_riscv.u_scoreboard.win_ready[0],
-                     u_adam_riscv.u_scoreboard.win_qj[0],
-                     u_adam_riscv.u_scoreboard.win_qk[0],
-                     u_adam_riscv.u_scoreboard.win_valid[1],
-                     u_adam_riscv.u_scoreboard.win_issued[1],
-                     u_adam_riscv.u_scoreboard.win_ready[1],
-                     u_adam_riscv.u_scoreboard.win_qj[1],
-                     u_adam_riscv.u_scoreboard.win_qk[1],
+            $display("[IQ INT DBG] slot0 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d | slot1 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d @%0t",
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_valid[0],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_issued[0],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_ready[0],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qj[0],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qk[0],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_valid[1],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_issued[1],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_ready[1],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qj[1],
+                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qk[1],
                      $time);
         end
     end
@@ -561,13 +561,18 @@ always @(posedge clk) begin
     if (rst) begin
         heartbeat_counter <= heartbeat_counter + 32'd1;
         if (heartbeat_counter % 1000 == 0) begin
-            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b rst=%b @%0t",
+            $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b stall=%b rob_stall=%b sb_stall=%b br_pending=%b rob_count=%0d rst=%b @%0t",
                      heartbeat_counter,
                      u_adam_riscv.dec0_pc,
                      u_adam_riscv.if_valid,
                      u_adam_riscv.if_inst,
                      u_adam_riscv.dec0_valid,
                      u_adam_riscv.fb_pop0_valid,
+                     u_adam_riscv.stall,
+                     u_adam_riscv.rob_disp_stall,
+                     u_adam_riscv.sb_disp_stall,
+                     u_adam_riscv.sb_branch_pending_any,
+                     u_adam_riscv.u_rob.rob_count[0],
                      rst,
                      $time);
         end

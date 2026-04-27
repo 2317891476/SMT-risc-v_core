@@ -37,8 +37,14 @@ module exec_pipe1 #(
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
     input  wire [0:0]         in_tid,
-    input  wire [15:0]        in_order_id,   // Metadata from scoreboard
+    input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,   // Metadata from scoreboard
     input  wire [7:0]         in_epoch,
+
+    // Flush can kill a held memory request before the LSU accepts it.
+    input  wire               flush,
+    input  wire [0:0]         flush_tid,
+    input  wire               flush_order_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
 
     // ─── ALU / AGU result (1-cycle path) ────────────────────────
     output wire               alu_out_valid,
@@ -48,6 +54,7 @@ module exec_pipe1 #(
     output wire               alu_out_regs_write,
     output wire [2:0]         alu_out_fu,
     output wire [0:0]         alu_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] alu_out_order_id,
 
     // ─── Memory interface (to D-TLB / DCache) ──────────────────
     output wire               mem_req_valid,
@@ -62,7 +69,7 @@ module exec_pipe1 #(
     output wire [2:0]         mem_req_fu,
     output wire               mem_req_mem2reg,
     output wire [0:0]         mem_req_tid,
-    output wire [15:0]        mem_req_order_id,
+    output wire [`METADATA_ORDER_ID_W-1:0] mem_req_order_id,
     output wire [7:0]         mem_req_epoch,
 
     // ─── Multiplier result (3-cycle path) ───────────────────────
@@ -72,13 +79,26 @@ module exec_pipe1 #(
     output wire [4:0]         mul_out_rd,
     output wire               mul_out_regs_write,
     output wire [2:0]         mul_out_fu,
-    output wire [0:0]         mul_out_tid
+    output wire [0:0]         mul_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] mul_out_order_id,
+
+    // ─── Divider result (33-cycle path) ─────────────────────────
+    output wire               div_out_valid,
+    output wire [TAG_W-1:0]   div_out_tag,
+    output wire [31:0]        div_out_result,
+    output wire [4:0]         div_out_rd,
+    output wire               div_out_regs_write,
+    output wire [2:0]         div_out_fu,
+    output wire [0:0]         div_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] div_out_order_id,
+    output wire               div_busy
 );
 
 // ─── Routing logic ──────────────────────────────────────────────────────────
 wire is_mem_op = in_mem_read || in_mem_write;
 wire is_mul_op = (in_fu == `FU_MUL);
-wire is_alu_op = in_valid && !is_mem_op && !is_mul_op;
+wire is_div_op = (in_fu == `FU_DIV);
+wire is_alu_op = in_valid && !is_mem_op && !is_mul_op && !is_div_op;
 
 // ─── ALU path (same logic as pipe0 but no branch) ──────────────────────────
 wire [3:0] alu_ctrl;
@@ -123,13 +143,40 @@ mul_unit #(.TAG_W(TAG_W)) u_mul (
     .in_regs_write (in_regs_write ),
     .in_fu         (in_fu         ),
     .in_tid        (in_tid        ),
+    .in_order_id   (in_order_id   ),
     .out_valid     (mul_out_valid     ),
     .out_tag       (mul_out_tag       ),
     .out_result    (mul_out_result    ),
     .out_rd        (mul_out_rd        ),
     .out_regs_write(mul_out_regs_write),
     .out_fu        (mul_out_fu        ),
-    .out_tid       (mul_out_tid       )
+    .out_tid       (mul_out_tid       ),
+    .out_order_id  (mul_out_order_id  )
+);
+
+// ─── DIV Unit ───────────────────────────────────────────────────────────────
+div_unit #(.TAG_W(TAG_W)) u_div (
+    .clk           (clk           ),
+    .rstn          (rstn          ),
+    .in_valid      (in_valid && is_div_op),
+    .in_tag        (in_tag        ),
+    .in_op_a       (in_op_a       ),
+    .in_op_b       (in_op_b       ),
+    .in_func3      (in_func3      ),
+    .in_rd         (in_rd         ),
+    .in_regs_write (in_regs_write ),
+    .in_fu         (in_fu         ),
+    .in_tid        (in_tid        ),
+    .in_order_id   (in_order_id   ),
+    .out_valid     (div_out_valid     ),
+    .out_tag       (div_out_tag       ),
+    .out_result    (div_out_result    ),
+    .out_rd        (div_out_rd        ),
+    .out_regs_write(div_out_regs_write),
+    .out_fu        (div_out_fu        ),
+    .out_tid       (div_out_tid       ),
+    .out_order_id  (div_out_order_id  ),
+    .busy          (div_busy          )
 );
 
 // ─── ALU output (INT + AGU share, but only one active at a time) ────────────
@@ -144,7 +191,7 @@ reg [4:0]  alu_out_rd_r;
 reg        alu_out_regs_write_r;
 reg [2:0]  alu_out_fu_r;
 reg [0:0]  alu_out_tid_r;
-reg [15:0] alu_out_order_id_r;
+reg [`METADATA_ORDER_ID_W-1:0] alu_out_order_id_r;
 reg [7:0]  alu_out_epoch_r;
 reg        mem_req_valid_r;
 reg        mem_req_wen_r;
@@ -157,8 +204,16 @@ reg        mem_req_regs_write_r;
 reg [2:0]  mem_req_fu_r;
 reg        mem_req_mem2reg_r;
 reg [0:0]  mem_req_tid_r;
-reg [15:0] mem_req_order_id_r;
+reg [`METADATA_ORDER_ID_W-1:0] mem_req_order_id_r;
 reg [7:0]  mem_req_epoch_r;
+reg        dbg_beacon_wait_reported_r;
+
+wire held_mem_req_flush_kill =
+    mem_req_valid_r && flush && (mem_req_tid_r == flush_tid) &&
+    (!flush_order_valid || (mem_req_order_id_r > flush_order_id));
+wire incoming_mem_req_flush_kill =
+    in_valid && is_mem_op && flush && (in_tid == flush_tid) &&
+    (!flush_order_valid || (in_order_id > flush_order_id));
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -169,7 +224,7 @@ always @(posedge clk or negedge rstn) begin
         alu_out_regs_write_r <= 1'b0;
         alu_out_fu_r         <= 3'd0;
         alu_out_tid_r        <= 1'b0;
-        alu_out_order_id_r   <= 16'd0;
+        alu_out_order_id_r   <= {`METADATA_ORDER_ID_W{1'b0}};
         alu_out_epoch_r      <= 8'd0;
         mem_req_valid_r      <= 1'b0;
         mem_req_wen_r        <= 1'b0;
@@ -182,8 +237,9 @@ always @(posedge clk or negedge rstn) begin
         mem_req_fu_r         <= 3'd0;
         mem_req_mem2reg_r    <= 1'b0;
         mem_req_tid_r        <= 1'b0;
-        mem_req_order_id_r   <= 16'd0;
+        mem_req_order_id_r   <= {`METADATA_ORDER_ID_W{1'b0}};
         mem_req_epoch_r      <= 8'd0;
+        dbg_beacon_wait_reported_r <= 1'b0;
     end else begin
         alu_out_valid_r      <= is_alu_op;
         alu_out_tag_r        <= in_tag;
@@ -195,11 +251,22 @@ always @(posedge clk or negedge rstn) begin
         alu_out_order_id_r   <= in_order_id;
         alu_out_epoch_r      <= in_epoch;
 
-        if (mem_req_valid_r && mem_req_accept) begin
+        if (held_mem_req_flush_kill) begin
             mem_req_valid_r <= 1'b0;
+            dbg_beacon_wait_reported_r <= 1'b0;
+        end else if (mem_req_valid_r && mem_req_accept) begin
+            mem_req_valid_r <= 1'b0;
+            dbg_beacon_wait_reported_r <= 1'b0;
         end
 
-        if (in_valid && is_mem_op) begin
+        if (in_valid && is_mem_op && !incoming_mem_req_flush_kill &&
+            (!mem_req_valid_r || mem_req_accept || held_mem_req_flush_kill)) begin
+`ifdef VERBOSE_SIM_LOGS
+            if (in_mem_write && (eff_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                $display("[DBG_EP1_STORE] t=%0t pc=%h order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                         $time, in_pc, in_order_id, in_tag, eff_addr, in_op_b, in_func3, in_tid);
+            end
+`endif
             mem_req_valid_r      <= 1'b1;
             mem_req_wen_r        <= in_mem_write;
             mem_req_addr_r       <= eff_addr;
@@ -213,6 +280,22 @@ always @(posedge clk or negedge rstn) begin
             mem_req_tid_r        <= in_tid;
             mem_req_order_id_r   <= in_order_id;
             mem_req_epoch_r      <= in_epoch;
+            dbg_beacon_wait_reported_r <= 1'b0;
+        end else if (in_valid && is_mem_op && mem_req_valid_r && !mem_req_accept &&
+                     !held_mem_req_flush_kill && !incoming_mem_req_flush_kill) begin
+`ifdef VERBOSE_SIM_LOGS
+            $display("[EP1_MEM_HOLD] t=%0t held_order=%0d held_addr=%h new_order=%0d new_addr=%h",
+                     $time, mem_req_order_id_r, mem_req_addr_r, in_order_id, eff_addr);
+`endif
+        end else if (mem_req_valid_r && !mem_req_accept && !held_mem_req_flush_kill &&
+                     mem_req_wen_r && (mem_req_addr_r == `DEBUG_BEACON_EVT_ADDR) &&
+                     !dbg_beacon_wait_reported_r) begin
+`ifdef VERBOSE_SIM_LOGS
+            $display("[DBG_EP1_WAIT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
+                     $time, mem_req_order_id_r, mem_req_tag_r, mem_req_addr_r,
+                     mem_req_wdata_r, mem_req_func3_r, mem_req_tid_r);
+`endif
+            dbg_beacon_wait_reported_r <= 1'b1;
         end
     end
 end
@@ -224,6 +307,7 @@ assign alu_out_rd         = alu_out_rd_r;
 assign alu_out_regs_write = alu_out_regs_write_r;
 assign alu_out_fu         = alu_out_fu_r;
 assign alu_out_tid        = alu_out_tid_r;
+assign alu_out_order_id   = alu_out_order_id_r;
 
 // ─── Memory request output ─────────────────────────────────────────────────
 // Hold memory requests until the LSU accepts them. A one-cycle pulse here can be

@@ -32,6 +32,7 @@ def run_checked(cmd: list[str], cwd: Path) -> None:
 def main() -> int:
     repo_root = Path(__file__).resolve().parents[2]
     rom_dir = repo_root / "rom"
+    merge_script = Path(__file__).resolve().with_name("merge_hex_for_mem_subsys.py")
 
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -44,6 +45,17 @@ def main() -> int:
         "--march",
         default=None,
         help="Optional -march override. Defaults to an inferred value from the file name.",
+    )
+    parser.add_argument(
+        "--merge-mem-subsys",
+        action="store_true",
+        help="Also regenerate rom/mem_subsys_ram.hex from inst.hex + data.hex",
+    )
+    parser.add_argument(
+        "--define",
+        action="append",
+        default=[],
+        help="Optional preprocessor define(s) passed to gcc as -DNAME or -DNAME=VALUE.",
     )
     args = parser.parse_args()
 
@@ -67,21 +79,21 @@ def main() -> int:
         if stale.exists():
             stale.unlink()
 
-    run_checked(
-        [
-            gcc,
-            "-nostdlib",
-            "-nostartfiles",
-            "-Wl,--build-id=none",
-            "-Wl,-T,harvard_link.ld",
-            f"-march={march}",
-            "-mabi=ilp32",
-            str(asm_path),
-            "-o",
-            str(elf_path),
-        ],
-        cwd=rom_dir,
-    )
+    gcc_cmd = [
+        gcc,
+        "-nostdlib",
+        "-nostartfiles",
+        "-Wl,--build-id=none",
+        "-Wl,-T,harvard_link.ld",
+        f"-march={march}",
+        "-mabi=ilp32",
+    ]
+    if args.define:
+        gcc_cmd.extend(["-x", "assembler-with-cpp"])
+        gcc_cmd.extend(f"-D{define}" for define in args.define)
+    gcc_cmd.extend([str(asm_path), "-o", str(elf_path)])
+
+    run_checked(gcc_cmd, cwd=rom_dir)
 
     run_checked(
         [objcopy, "-j", ".text", "-O", "verilog", str(elf_path), str(inst_hex)],
@@ -102,10 +114,29 @@ def main() -> int:
     if not data_hex.exists():
         data_hex.write_text("// empty data image\n00000000\n", encoding="ascii")
 
+    if args.merge_mem_subsys:
+        if not merge_script.exists():
+            raise SystemExit(f"Missing mem_subsys merge script: {merge_script}")
+        run_checked(
+            [
+                sys.executable,
+                str(merge_script),
+                "--inst",
+                str(inst_hex),
+                "--data",
+                str(data_hex),
+                "--output",
+                str(rom_dir / "mem_subsys_ram.hex"),
+            ],
+            cwd=repo_root,
+        )
+
     print(f"ROM image built from {asm_path}")
     print(f"  march   : {march}")
     print(f"  inst.hex: {inst_hex}")
     print(f"  data.hex: {data_hex}")
+    if args.merge_mem_subsys:
+        print(f"  merged  : {rom_dir / 'mem_subsys_ram.hex'}")
     return 0
 
 

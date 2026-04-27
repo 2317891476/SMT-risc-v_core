@@ -8,11 +8,14 @@
 //   - Exposes refill interface for connection to mem_subsys
 // =============================================================================
 module inst_memory #(
-    parameter IROM_SPACE = 4096
+    parameter IROM_SPACE = 4096,
+    parameter ICACHE_SIZE = 8192,
+    parameter OMIT_BACKING_STORE = 0
 )(
     input  wire       clk,
     input  wire       rstn,
     input  wire       req_valid,
+    output wire       req_ready,
     input  wire [31:0] inst_addr,
     input  wire [0:0]  req_tid,           // Thread ID for request
     output wire [31:0] inst_o,
@@ -22,6 +25,8 @@ module inst_memory #(
 
     // Epoch and flush interface from top level
     input  wire [3:0]  current_epoch,     // Current epoch for stale detection
+    input  wire [3:0]  current_epoch_t0,  // Per-thread epochs for async refill completion
+    input  wire [3:0]  current_epoch_t1,
     input  wire        flush,             // Flush signal
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -37,7 +42,17 @@ module inst_memory #(
     input  wire        ext_mem_resp_last,
     output wire        ext_mem_resp_ready,
     input  wire [31:0] ext_mem_bypass_data,
-    input  wire        use_external_refill  // 1=use external refill, 0=internal
+    input  wire        use_external_refill,  // 1=use external refill, 0=internal
+
+    // DDR3/XIP fetch debug summary
+    output wire [7:0]  debug_ic_high_miss_count,
+    output wire [7:0]  debug_ic_mem_req_count,
+    output wire [7:0]  debug_ic_mem_resp_count,
+    output wire [7:0]  debug_ic_cpu_resp_count,
+    output wire [7:0]  debug_ic_state_flags,
+
+    // HPM event
+    output wire        icache_miss_event
 );
 
 // Internal signals
@@ -45,6 +60,7 @@ wire [31:0] icache_resp_data;
 wire [0:0]  icache_resp_tid;
 wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
+wire        icache_req_ready;
 wire [31:0] backing_store_data_raw;
 wire [31:0] backing_store_data;
 reg  [0:0]  legacy_resp_tid_r;
@@ -95,8 +111,9 @@ always @(posedge clk or negedge rstn) begin
 end
 
 // ICache instance - synchronous interface
+// 2026-04-22: enlarged from 2KB to 8KB to fit Dhrystone code (~7.5KB) → IPC boost
 icache #(
-    .CACHE_SIZE   (2048),
+    .CACHE_SIZE   (ICACHE_SIZE),
     .LINE_SIZE    (32),
     .WAYS         (1),
     .ADDR_WIDTH   (32),
@@ -107,6 +124,7 @@ icache #(
 
     // Synchronous interface
     .cpu_req_valid    (req_valid         ),
+    .cpu_req_ready    (icache_req_ready  ),
     .cpu_req_addr     (inst_addr         ),
     .cpu_req_tid      (req_tid           ),
     .cpu_resp_data    (icache_resp_data  ),
@@ -116,6 +134,8 @@ icache #(
 
     // Epoch
     .current_epoch    (current_epoch     ),
+    .current_epoch_t0 (current_epoch_t0  ),
+    .current_epoch_t1 (current_epoch_t1  ),
     .flush            (flush             ),
 
     // Memory interface for fills
@@ -128,7 +148,14 @@ icache #(
     .mem_resp_ready   (icache_mem_resp_ready),
 
     // Bypass from direct backing store read
-    .bypass_data      (miss_bypass_data)
+    .bypass_data      (miss_bypass_data),
+
+    .debug_high_miss_count(debug_ic_high_miss_count),
+    .debug_mem_req_count  (debug_ic_mem_req_count),
+    .debug_mem_resp_count (debug_ic_mem_resp_count),
+    .debug_cpu_resp_count (debug_ic_cpu_resp_count),
+    .debug_state_flags    (debug_ic_state_flags),
+    .icache_miss_event   (icache_miss_event)
 );
 
 // External refill interface assignments
@@ -179,5 +206,6 @@ assign inst_o      = use_external_refill ? icache_resp_data  : backing_store_dat
 assign resp_tid    = use_external_refill ? icache_resp_tid   : legacy_resp_tid_r;
 assign resp_epoch  = use_external_refill ? icache_resp_epoch : legacy_resp_epoch_r;
 assign resp_valid  = use_external_refill ? icache_resp_valid : legacy_resp_valid_r;
+assign req_ready   = use_external_refill ? icache_req_ready  : 1'b1;
 
 endmodule

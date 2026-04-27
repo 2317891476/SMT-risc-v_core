@@ -309,7 +309,7 @@ always @(posedge clk or negedge rstn) begin
                 refill_cnt <= 4'd0;
                 
                 if (req_valid) begin
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[L2 CACHE] accept addr=%h write=%0b uncached=%0b state=%0d",
                              req_addr, req_write, req_uncached, state);
                     `endif
@@ -334,7 +334,7 @@ always @(posedge clk or negedge rstn) begin
             end
             
             LOOKUP: begin
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[L2 CACHE] lookup addr=%h hit=%0b hit_way=%0d valid=%b%b%b%b tag=%h/%h/%h/%h",
                          addr, hit, hit_way,
                          way_valid[3], way_valid[2], way_valid[1], way_valid[0],
@@ -360,7 +360,7 @@ always @(posedge clk or negedge rstn) begin
                         active <= 1'b0;
                     end
                 end else begin
-                    `ifndef SYNTHESIS
+                    `ifdef VERBOSE_SIM_LOGS
                     $display("[L2 CACHE] miss addr=%h victim=%0d dirty=%0b",
                              addr, victim_way, way_dirty[victim_way]);
                     `endif
@@ -403,7 +403,7 @@ always @(posedge clk or negedge rstn) begin
             REFILL: begin
                 // Refill from RAM
                 data_array[req_set][victim_way][refill_cnt[2:0]] <= ram_rdata;
-                `ifndef SYNTHESIS
+                `ifdef VERBOSE_SIM_LOGS
                 $display("[L2 CACHE] refill cnt=%0d ram_addr=%h ram_rdata=%h victim=%0d",
                          refill_cnt, ram_addr, ram_rdata, victim_way);
                 `endif
