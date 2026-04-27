@@ -152,6 +152,16 @@ wire req_pulse_ui = (req_flag_ui != req_flag_ui_prev);
 // Fixes race where req_pulse_ui fires before init_calib_complete.
 reg  req_pending_ui;
 
+localparam UI_IDLE      = 3'd0;
+localparam UI_RD_ADDR   = 3'd1;
+localparam UI_RD_DATA   = 3'd2;
+localparam UI_WR_ADDR   = 3'd3;
+localparam UI_WR_DATA   = 3'd4;
+localparam UI_WR_RESP   = 3'd5;
+localparam UI_DONE      = 3'd6;
+
+reg [2:0] ui_state;
+
 // Synchronize response flag to core domain
 reg         resp_flag_ui;      // Toggle flag in UI domain
 (* ASYNC_REG = "TRUE" *) reg [2:0] resp_flag_core_sync;
@@ -310,16 +320,6 @@ end
 // ═════════════════════════════════════════════════════════════════════════════
 // UI domain: AXI transaction FSM
 // ═════════════════════════════════════════════════════════════════════════════
-
-localparam UI_IDLE      = 3'd0;
-localparam UI_RD_ADDR   = 3'd1;
-localparam UI_RD_DATA   = 3'd2;
-localparam UI_WR_ADDR   = 3'd3;
-localparam UI_WR_DATA   = 3'd4;
-localparam UI_WR_RESP   = 3'd5;
-localparam UI_DONE      = 3'd6;
-
-reg [2:0] ui_state;
 
 // Latch request parameters in UI domain
 reg [31:0] ui_addr;

@@ -8,7 +8,9 @@
 //   - Exposes refill interface for connection to mem_subsys
 // =============================================================================
 module inst_memory #(
-    parameter IROM_SPACE = 4096
+    parameter IROM_SPACE = 4096,
+    parameter ICACHE_SIZE = 8192,
+    parameter OMIT_BACKING_STORE = 0
 )(
     input  wire       clk,
     input  wire       rstn,
@@ -111,7 +113,7 @@ end
 // ICache instance - synchronous interface
 // 2026-04-22: enlarged from 2KB to 8KB to fit Dhrystone code (~7.5KB) → IPC boost
 icache #(
-    .CACHE_SIZE   (8192),
+    .CACHE_SIZE   (ICACHE_SIZE),
     .LINE_SIZE    (32),
     .WAYS         (1),
     .ADDR_WIDTH   (32),

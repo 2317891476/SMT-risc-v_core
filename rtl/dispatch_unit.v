@@ -19,6 +19,14 @@ module dispatch_unit #(
     parameter RS_DEPTH   = 16,
     parameter RS_IDX_W   = 4,
     parameter RS_TAG_W   = 5,
+    parameter INT_IQ_DEPTH = 8,
+    parameter INT_IQ_IDX_W = 3,
+    parameter MEM_IQ_DEPTH = 16,
+    parameter MEM_IQ_IDX_W = 4,
+    parameter MUL_IQ_DEPTH = 4,
+    parameter MUL_IQ_IDX_W = 2,
+    parameter DIV_IQ_DEPTH = 4,
+    parameter DIV_IQ_IDX_W = 2,
     parameter NUM_FU     = 8,
     parameter NUM_THREAD = 2
 )(
@@ -237,6 +245,11 @@ module dispatch_unit #(
     output wire        debug_spec_dispatch1,
     output wire        debug_branch_gated_mem_issue,
     output wire        debug_flush_killed_speculative,
+    output wire        debug_stall_iq_int_full,
+    output wire        debug_stall_iq_mem_full,
+    output wire        debug_stall_iq_mul_full,
+    output wire        debug_stall_iq_div_full,
+    output wire        debug_stall_rs_tag_empty,
 
     // ─── Writeback Ports ────────────────────────────────────────
     input  wire        wb0_valid,
@@ -270,6 +283,8 @@ module dispatch_unit #(
     input  wire        br_complete,
     input  wire [0:0]  br_complete_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] br_complete_order_id,
+    input  wire        branch_track_clear_t0,
+    input  wire        branch_track_clear_t1,
 
     // ─── RoCC ───────────────────────────────────────────────────
     input  wire        rocc_ready,
@@ -340,37 +355,37 @@ wire alloc1_wr = disp1_valid && disp1_regs_write && (disp1_rd != 5'd0);
 // Disp0 deps — no same-cycle forwarding from disp0 itself
 reg [RS_TAG_W-1:0] d0_src1, d0_src2;
 reg [`METADATA_ORDER_ID_W-1:0] d0_src1_order, d0_src2_order;
+reg [RS_TAG_W-1:0] d0_dep_t1, d0_dep_t2;
+reg d0_src1_commit_ready, d0_src2_commit_ready;
 always @(*) begin : dep_lookup_d0
-    reg [RS_TAG_W-1:0] t1, t2;
-    reg src1_commit_ready, src2_commit_ready;
-    t1 = reg_result[disp0_tid][disp0_rs1];
-    t2 = reg_result[disp0_tid][disp0_rs2];
-    src1_commit_ready =
-        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == t1) &&
+    d0_dep_t1 = reg_result[disp0_tid][disp0_rs1];
+    d0_dep_t2 = reg_result[disp0_tid][disp0_rs2];
+    d0_src1_commit_ready =
+        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == d0_dep_t1) &&
          (commit0_order_id == reg_result_order[disp0_tid][disp0_rs1])) ||
-        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == t1) &&
+        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == d0_dep_t1) &&
          (commit1_order_id == reg_result_order[disp0_tid][disp0_rs1]));
-    src2_commit_ready =
-        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == t2) &&
+    d0_src2_commit_ready =
+        (commit0_valid && (commit0_tid == disp0_tid) && (commit0_tag == d0_dep_t2) &&
          (commit0_order_id == reg_result_order[disp0_tid][disp0_rs2])) ||
-        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == t2) &&
+        (commit1_valid && (commit1_tid == disp0_tid) && (commit1_tag == d0_dep_t2) &&
          (commit1_order_id == reg_result_order[disp0_tid][disp0_rs2]));
 
     // d0_src1
     d0_src1_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp0_rs1_used)
         d0_src1 = {RS_TAG_W{1'b0}};
-    else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
-             tag_live_seq[t1] == reg_result_order[disp0_tid][disp0_rs1]) begin
-        if ((tag_ready_v[t1] && tag_ready_seq[t1] == reg_result_order[disp0_tid][disp0_rs1]) ||
-            src1_commit_ready)
+    else if (d0_dep_t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[d0_dep_t1] &&
+             tag_live_seq[d0_dep_t1] == reg_result_order[disp0_tid][disp0_rs1]) begin
+        if ((tag_ready_v[d0_dep_t1] && tag_ready_seq[d0_dep_t1] == reg_result_order[disp0_tid][disp0_rs1]) ||
+            d0_src1_commit_ready)
             d0_src1 = {RS_TAG_W{1'b0}};
-        else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
+        else if (wb0_valid && wb0_regs_write && wb0_tag == d0_dep_t1)
             d0_src1 = {RS_TAG_W{1'b0}};
-        else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
+        else if (wb1_valid && wb1_regs_write && wb1_tag == d0_dep_t1)
             d0_src1 = {RS_TAG_W{1'b0}};
         else begin
-            d0_src1 = t1;
+            d0_src1 = d0_dep_t1;
             d0_src1_order = reg_result_order[disp0_tid][disp0_rs1];
         end
     end
@@ -381,17 +396,17 @@ always @(*) begin : dep_lookup_d0
     d0_src2_order = {`METADATA_ORDER_ID_W{1'b0}};
     if (!disp0_rs2_used)
         d0_src2 = {RS_TAG_W{1'b0}};
-    else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
-             tag_live_seq[t2] == reg_result_order[disp0_tid][disp0_rs2]) begin
-        if ((tag_ready_v[t2] && tag_ready_seq[t2] == reg_result_order[disp0_tid][disp0_rs2]) ||
-            src2_commit_ready)
+    else if (d0_dep_t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[d0_dep_t2] &&
+             tag_live_seq[d0_dep_t2] == reg_result_order[disp0_tid][disp0_rs2]) begin
+        if ((tag_ready_v[d0_dep_t2] && tag_ready_seq[d0_dep_t2] == reg_result_order[disp0_tid][disp0_rs2]) ||
+            d0_src2_commit_ready)
             d0_src2 = {RS_TAG_W{1'b0}};
-        else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
+        else if (wb0_valid && wb0_regs_write && wb0_tag == d0_dep_t2)
             d0_src2 = {RS_TAG_W{1'b0}};
-        else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
+        else if (wb1_valid && wb1_regs_write && wb1_tag == d0_dep_t2)
             d0_src2 = {RS_TAG_W{1'b0}};
         else begin
-            d0_src2 = t2;
+            d0_src2 = d0_dep_t2;
             d0_src2_order = reg_result_order[disp0_tid][disp0_rs2];
         end
     end
@@ -402,20 +417,20 @@ end
 // Disp1 deps — check same-cycle RAW from disp0
 reg [RS_TAG_W-1:0] d1_src1, d1_src2;
 reg [`METADATA_ORDER_ID_W-1:0] d1_src1_order, d1_src2_order;
+reg [RS_TAG_W-1:0] d1_dep_t1, d1_dep_t2;
+reg d1_src1_commit_ready, d1_src2_commit_ready;
 always @(*) begin : dep_lookup_d1
-    reg [RS_TAG_W-1:0] t1, t2;
-    reg src1_commit_ready, src2_commit_ready;
-    t1 = reg_result[disp1_tid][disp1_rs1];
-    t2 = reg_result[disp1_tid][disp1_rs2];
-    src1_commit_ready =
-        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == t1) &&
+    d1_dep_t1 = reg_result[disp1_tid][disp1_rs1];
+    d1_dep_t2 = reg_result[disp1_tid][disp1_rs2];
+    d1_src1_commit_ready =
+        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == d1_dep_t1) &&
          (commit0_order_id == reg_result_order[disp1_tid][disp1_rs1])) ||
-        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == t1) &&
+        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == d1_dep_t1) &&
          (commit1_order_id == reg_result_order[disp1_tid][disp1_rs1]));
-    src2_commit_ready =
-        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == t2) &&
+    d1_src2_commit_ready =
+        (commit0_valid && (commit0_tid == disp1_tid) && (commit0_tag == d1_dep_t2) &&
          (commit0_order_id == reg_result_order[disp1_tid][disp1_rs2])) ||
-        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == t2) &&
+        (commit1_valid && (commit1_tid == disp1_tid) && (commit1_tag == d1_dep_t2) &&
          (commit1_order_id == reg_result_order[disp1_tid][disp1_rs2]));
 
     // d1_src1
@@ -426,17 +441,17 @@ always @(*) begin : dep_lookup_d1
         d1_src1 = free0_tag;
         d1_src1_order = disp0_order_id;
     end
-    else if (t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t1] &&
-             tag_live_seq[t1] == reg_result_order[disp1_tid][disp1_rs1]) begin
-        if ((tag_ready_v[t1] && tag_ready_seq[t1] == reg_result_order[disp1_tid][disp1_rs1]) ||
-            src1_commit_ready)
+    else if (d1_dep_t1 != {RS_TAG_W{1'b0}} && tag_live_valid_v[d1_dep_t1] &&
+             tag_live_seq[d1_dep_t1] == reg_result_order[disp1_tid][disp1_rs1]) begin
+        if ((tag_ready_v[d1_dep_t1] && tag_ready_seq[d1_dep_t1] == reg_result_order[disp1_tid][disp1_rs1]) ||
+            d1_src1_commit_ready)
             d1_src1 = {RS_TAG_W{1'b0}};
-        else if (wb0_valid && wb0_regs_write && wb0_tag == t1)
+        else if (wb0_valid && wb0_regs_write && wb0_tag == d1_dep_t1)
             d1_src1 = {RS_TAG_W{1'b0}};
-        else if (wb1_valid && wb1_regs_write && wb1_tag == t1)
+        else if (wb1_valid && wb1_regs_write && wb1_tag == d1_dep_t1)
             d1_src1 = {RS_TAG_W{1'b0}};
         else begin
-            d1_src1 = t1;
+            d1_src1 = d1_dep_t1;
             d1_src1_order = reg_result_order[disp1_tid][disp1_rs1];
         end
     end
@@ -451,17 +466,17 @@ always @(*) begin : dep_lookup_d1
         d1_src2 = free0_tag;
         d1_src2_order = disp0_order_id;
     end
-    else if (t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[t2] &&
-             tag_live_seq[t2] == reg_result_order[disp1_tid][disp1_rs2]) begin
-        if ((tag_ready_v[t2] && tag_ready_seq[t2] == reg_result_order[disp1_tid][disp1_rs2]) ||
-            src2_commit_ready)
+    else if (d1_dep_t2 != {RS_TAG_W{1'b0}} && tag_live_valid_v[d1_dep_t2] &&
+             tag_live_seq[d1_dep_t2] == reg_result_order[disp1_tid][disp1_rs2]) begin
+        if ((tag_ready_v[d1_dep_t2] && tag_ready_seq[d1_dep_t2] == reg_result_order[disp1_tid][disp1_rs2]) ||
+            d1_src2_commit_ready)
             d1_src2 = {RS_TAG_W{1'b0}};
-        else if (wb0_valid && wb0_regs_write && wb0_tag == t2)
+        else if (wb0_valid && wb0_regs_write && wb0_tag == d1_dep_t2)
             d1_src2 = {RS_TAG_W{1'b0}};
-        else if (wb1_valid && wb1_regs_write && wb1_tag == t2)
+        else if (wb1_valid && wb1_regs_write && wb1_tag == d1_dep_t2)
             d1_src2 = {RS_TAG_W{1'b0}};
         else begin
-            d1_src2 = t2;
+            d1_src2 = d1_dep_t2;
             d1_src2_order = reg_result_order[disp1_tid][disp1_rs2];
         end
     end
@@ -528,6 +543,18 @@ reg [BR_TRACK_IDX_W-1:0] br_head_t0, br_tail_t0;
 reg [BR_TRACK_IDX_W-1:0] br_head_t1, br_tail_t1;
 reg [`METADATA_ORDER_ID_W-1:0] br_order_fifo_t0 [0:BR_TRACK_DEPTH-1];
 reg [`METADATA_ORDER_ID_W-1:0] br_order_fifo_t1 [0:BR_TRACK_DEPTH-1];
+reg                         br_block_fifo_t0 [0:BR_TRACK_DEPTH-1];
+reg                         br_block_fifo_t1 [0:BR_TRACK_DEPTH-1];
+reg [5:0]                   br_block_pending_cnt_t0, br_block_pending_cnt_t1;
+integer bi;
+reg [5:0] next_count_t0;
+reg [5:0] next_block_count_t0;
+reg [BR_TRACK_IDX_W-1:0] next_head_t0;
+reg [BR_TRACK_IDX_W-1:0] next_tail_t0;
+reg [5:0] next_count_t1;
+reg [5:0] next_block_count_t1;
+reg [BR_TRACK_IDX_W-1:0] next_head_t1;
+reg [BR_TRACK_IDX_W-1:0] next_tail_t1;
 
 wire [`METADATA_ORDER_ID_W-1:0] pending_branch_order_id_t0 =
     (br_pending_cnt_t0 != 6'd0) ? br_order_fifo_t0[br_head_t0] :
@@ -537,6 +564,8 @@ wire [`METADATA_ORDER_ID_W-1:0] pending_branch_order_id_t1 =
                                   {`METADATA_ORDER_ID_W{1'b0}};
 wire pending_branch_t0 = (br_pending_cnt_t0 != 6'd0);
 wire pending_branch_t1 = (br_pending_cnt_t1 != 6'd0);
+wire dispatch_block_pending_t0 = (br_block_pending_cnt_t0 != 6'd0);
+wire dispatch_block_pending_t1 = (br_block_pending_cnt_t1 != 6'd0);
 assign branch_pending_any = pending_branch_t0 || pending_branch_t1;
 
 // IQ issue inhibit: Disabled — the branch dispatch stall is sufficient
@@ -554,11 +583,14 @@ wire br_push0_t0 = d0_go && disp0_br && (disp0_tid == 1'b0);
 wire br_push0_t1 = d0_go && disp0_br && (disp0_tid == 1'b1);
 wire br_push1_t0 = d1_go && disp1_br && (disp1_tid == 1'b0);
 wire br_push1_t1 = d1_go && disp1_br && (disp1_tid == 1'b1);
+wire br_push0_blocks_dispatch = disp0_br &&
+                                ((disp0_br_addr_mode == `J_REG) || disp0_regs_write);
+wire br_push1_blocks_dispatch = disp1_br &&
+                                ((disp1_br_addr_mode == `J_REG) || disp1_regs_write);
 
 // Branch tracking sequential logic
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        integer bi;
         branch_in_flight_t0 <= 1'b0;
         branch_in_flight_t1 <= 1'b0;
         br_pending_cnt_t0   <= 6'd0;
@@ -567,17 +599,24 @@ always @(posedge clk or negedge rstn) begin
         br_tail_t0 <= {BR_TRACK_IDX_W{1'b0}};
         br_head_t1 <= {BR_TRACK_IDX_W{1'b0}};
         br_tail_t1 <= {BR_TRACK_IDX_W{1'b0}};
+        br_block_pending_cnt_t0 <= 6'd0;
+        br_block_pending_cnt_t1 <= 6'd0;
         for (bi = 0; bi < BR_TRACK_DEPTH; bi = bi + 1) begin
             br_order_fifo_t0[bi] <= {`METADATA_ORDER_ID_W{1'b0}};
             br_order_fifo_t1[bi] <= {`METADATA_ORDER_ID_W{1'b0}};
+            br_block_fifo_t0[bi] <= 1'b0;
+            br_block_fifo_t1[bi] <= 1'b0;
         end
         spec_mem_after_branch_t0 <= 1'b0;
         spec_mem_after_branch_t1 <= 1'b0;
     end else begin
-        // Branch in flight cleared by br_complete or flush
-        if ((br_complete && (br_complete_tid == 1'b0)) || (flush && !flush_tid))
+        // Branch in flight cleared by br_complete, flush, or a top-level
+        // empty-ROB observation.  The empty-ROB clear prevents a stale branch
+        // tracker entry from becoming a hard dispatch deadlock after trap or
+        // interrupt recovery.
+        if ((br_complete && (br_complete_tid == 1'b0)) || (flush && !flush_tid) || branch_track_clear_t0)
             branch_in_flight_t0 <= 1'b0;
-        if ((br_complete && (br_complete_tid == 1'b1)) || (flush && flush_tid))
+        if ((br_complete && (br_complete_tid == 1'b1)) || (flush && flush_tid) || branch_track_clear_t1)
             branch_in_flight_t1 <= 1'b0;
 
         // Set on branch issue (from IQ_INT)
@@ -589,74 +628,105 @@ always @(posedge clk or negedge rstn) begin
         // Track unresolved branches in program order.  Side-effect and MEM
         // issue gates must compare against the oldest unresolved branch, not
         // the newest one, when dispatch is allowed to run past branches.
-        if (flush) begin
+        if (flush || branch_track_clear_t0 || branch_track_clear_t1) begin
             if (!flush_tid) begin
                 br_pending_cnt_t0 <= 6'd0;
                 br_head_t0 <= {BR_TRACK_IDX_W{1'b0}};
                 br_tail_t0 <= {BR_TRACK_IDX_W{1'b0}};
+                br_block_pending_cnt_t0 <= 6'd0;
                 spec_mem_after_branch_t0 <= 1'b0;
-            end else begin
+            end
+            if (flush_tid) begin
                 br_pending_cnt_t1 <= 6'd0;
                 br_head_t1 <= {BR_TRACK_IDX_W{1'b0}};
                 br_tail_t1 <= {BR_TRACK_IDX_W{1'b0}};
+                br_block_pending_cnt_t1 <= 6'd0;
+                spec_mem_after_branch_t1 <= 1'b0;
+            end
+            if (branch_track_clear_t0) begin
+                br_pending_cnt_t0 <= 6'd0;
+                br_head_t0 <= {BR_TRACK_IDX_W{1'b0}};
+                br_tail_t0 <= {BR_TRACK_IDX_W{1'b0}};
+                br_block_pending_cnt_t0 <= 6'd0;
+                spec_mem_after_branch_t0 <= 1'b0;
+            end
+            if (branch_track_clear_t1) begin
+                br_pending_cnt_t1 <= 6'd0;
+                br_head_t1 <= {BR_TRACK_IDX_W{1'b0}};
+                br_tail_t1 <= {BR_TRACK_IDX_W{1'b0}};
+                br_block_pending_cnt_t1 <= 6'd0;
                 spec_mem_after_branch_t1 <= 1'b0;
             end
         end
 
-        if (!flush || flush_tid) begin : br_fifo_update_t0
-            reg [5:0] next_count_t0;
-            reg [BR_TRACK_IDX_W-1:0] next_head_t0;
-            reg [BR_TRACK_IDX_W-1:0] next_tail_t0;
+        if ((!flush || flush_tid) && !branch_track_clear_t0) begin : br_fifo_update_t0
             next_count_t0 = br_pending_cnt_t0;
+            next_block_count_t0 = br_block_pending_cnt_t0;
             next_head_t0 = br_head_t0;
             next_tail_t0 = br_tail_t0;
 
             if (br_complete && (br_complete_tid == 1'b0) && (next_count_t0 != 6'd0)) begin
+                if (br_block_fifo_t0[next_head_t0] && (next_block_count_t0 != 6'd0))
+                    next_block_count_t0 = next_block_count_t0 - 6'd1;
                 next_head_t0 = next_head_t0 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t0 = next_count_t0 - 6'd1;
             end
             if (br_push0_t0) begin
                 br_order_fifo_t0[next_tail_t0] <= disp0_order_id;
+                br_block_fifo_t0[next_tail_t0] <= br_push0_blocks_dispatch;
                 next_tail_t0 = next_tail_t0 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t0 = next_count_t0 + 6'd1;
+                if (br_push0_blocks_dispatch)
+                    next_block_count_t0 = next_block_count_t0 + 6'd1;
             end
             if (br_push1_t0) begin
                 br_order_fifo_t0[next_tail_t0] <= disp1_order_id;
+                br_block_fifo_t0[next_tail_t0] <= br_push1_blocks_dispatch;
                 next_tail_t0 = next_tail_t0 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t0 = next_count_t0 + 6'd1;
+                if (br_push1_blocks_dispatch)
+                    next_block_count_t0 = next_block_count_t0 + 6'd1;
             end
             br_head_t0 <= next_head_t0;
             br_tail_t0 <= next_tail_t0;
             br_pending_cnt_t0 <= next_count_t0;
+            br_block_pending_cnt_t0 <= next_block_count_t0;
             if (next_count_t0 == 6'd0)
                 spec_mem_after_branch_t0 <= 1'b0;
         end
 
-        if (!flush || !flush_tid) begin : br_fifo_update_t1
-            reg [5:0] next_count_t1;
-            reg [BR_TRACK_IDX_W-1:0] next_head_t1;
-            reg [BR_TRACK_IDX_W-1:0] next_tail_t1;
+        if ((!flush || !flush_tid) && !branch_track_clear_t1) begin : br_fifo_update_t1
             next_count_t1 = br_pending_cnt_t1;
+            next_block_count_t1 = br_block_pending_cnt_t1;
             next_head_t1 = br_head_t1;
             next_tail_t1 = br_tail_t1;
 
             if (br_complete && (br_complete_tid == 1'b1) && (next_count_t1 != 6'd0)) begin
+                if (br_block_fifo_t1[next_head_t1] && (next_block_count_t1 != 6'd0))
+                    next_block_count_t1 = next_block_count_t1 - 6'd1;
                 next_head_t1 = next_head_t1 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t1 = next_count_t1 - 6'd1;
             end
             if (br_push0_t1) begin
                 br_order_fifo_t1[next_tail_t1] <= disp0_order_id;
+                br_block_fifo_t1[next_tail_t1] <= br_push0_blocks_dispatch;
                 next_tail_t1 = next_tail_t1 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t1 = next_count_t1 + 6'd1;
+                if (br_push0_blocks_dispatch)
+                    next_block_count_t1 = next_block_count_t1 + 6'd1;
             end
             if (br_push1_t1) begin
                 br_order_fifo_t1[next_tail_t1] <= disp1_order_id;
+                br_block_fifo_t1[next_tail_t1] <= br_push1_blocks_dispatch;
                 next_tail_t1 = next_tail_t1 + {{(BR_TRACK_IDX_W-1){1'b0}}, 1'b1};
                 next_count_t1 = next_count_t1 + 6'd1;
+                if (br_push1_blocks_dispatch)
+                    next_block_count_t1 = next_block_count_t1 + 6'd1;
             end
             br_head_t1 <= next_head_t1;
             br_tail_t1 <= next_tail_t1;
             br_pending_cnt_t1 <= next_count_t1;
+            br_block_pending_cnt_t1 <= next_block_count_t1;
             if (next_count_t1 == 6'd0)
                 spec_mem_after_branch_t1 <= 1'b0;
         end
@@ -685,16 +755,21 @@ wire iq_mem_full, iq_mem_almost_full;
 wire iq_mul_full, iq_mul_almost_full;
 wire iq_div_full, iq_div_almost_full;
 
-// Branch state is still tracked for diagnostics and for the MEM IQ issue gate
-// below, but dispatch itself is only limited by backend resources.
-wire d0_pending_branch = (disp0_tid == 1'b0) ? pending_branch_t0 : pending_branch_t1;
-wire d1_pending_branch = (disp1_tid == 1'b0) ? pending_branch_t0 : pending_branch_t1;
+// Branch state is tracked for diagnostics, MEM issue ordering, and the
+// conservative dispatch safety boundary.  Full branch-after dispatch exposed a
+// PRF isolation hole around JALR fallthrough speculation, so younger dispatch
+// remains blocked until the oldest unresolved branch completes.
+wire d0_pending_branch = (disp0_tid == 1'b0) ? dispatch_block_pending_t0 : dispatch_block_pending_t1;
+wire d1_pending_branch = (disp1_tid == 1'b0) ? dispatch_block_pending_t0 : dispatch_block_pending_t1;
 wire d0_after_branch = d0_pending_branch;
 wire d1_after_branch = d1_pending_branch ||
                        (d0_go && disp0_br && (disp0_tid == disp1_tid));
+wire d0_branch_safe = !d0_after_branch;
+wire d1_branch_safe = !d1_after_branch;
 
 // d0: target IQ has capacity?
-wire d0_cap_ok = (!d0_is_int || !iq_int_full) &&
+wire d0_cap_ok = d0_branch_safe &&
+                 (!d0_is_int || !iq_int_full) &&
                  (!d0_is_mem || !iq_mem_full) &&
                  (!d0_is_mul || !iq_mul_full) &&
                  (!d0_is_div || !iq_div_full);
@@ -712,7 +787,7 @@ wire d1_int_ok = !d1_is_int || ((d0_is_int && d0_go) ? !iq_int_almost_full : !iq
 wire d1_mem_ok = !d1_is_mem || ((d0_is_mem && d0_go) ? !iq_mem_almost_full : !iq_mem_full);
 wire d1_mul_ok = !d1_is_mul || ((d0_is_mul && d0_go) ? !iq_mul_almost_full : !iq_mul_full);
 wire d1_div_ok = !d1_is_div || ((d0_is_div && d0_go) ? !iq_div_almost_full : !iq_div_full);
-wire d1_cap_ok = d1_int_ok && d1_mem_ok && d1_mul_ok && d1_div_ok;
+wire d1_cap_ok = d1_branch_safe && d1_int_ok && d1_mem_ok && d1_mul_ok && d1_div_ok;
 
 // d1: need 2 tags total (d0 uses 1)
 wire d1_tag_ok = can_accept_2;
@@ -721,6 +796,25 @@ wire d1_go = disp1_valid && d0_go && d1_cap_ok && d1_tag_ok;
 
 // Signal upstream: d1 was valid but couldn't dispatch (d0 did go)
 assign disp1_blocked = disp1_valid && d0_go && !d1_go;
+
+// Dispatch resource diagnostics.  d0 stalls the whole decode/dispatch front;
+// d1 only throttles the second lane, but still identifies which backend
+// resource capped dispatch bandwidth in this cycle.
+assign debug_stall_iq_int_full =
+    (disp0_valid && d0_is_int && iq_int_full) ||
+    (disp1_valid && d0_go && d1_is_int && !d1_int_ok);
+assign debug_stall_iq_mem_full =
+    (disp0_valid && d0_is_mem && iq_mem_full) ||
+    (disp1_valid && d0_go && d1_is_mem && !d1_mem_ok);
+assign debug_stall_iq_mul_full =
+    (disp0_valid && d0_is_mul && iq_mul_full) ||
+    (disp1_valid && d0_go && d1_is_mul && !d1_mul_ok);
+assign debug_stall_iq_div_full =
+    (disp0_valid && d0_is_div && iq_div_full) ||
+    (disp1_valid && d0_go && d1_is_div && !d1_div_ok);
+assign debug_stall_rs_tag_empty =
+    (disp0_valid && d0_cap_ok && !d0_tag_ok) ||
+    (disp1_valid && d0_go && d1_cap_ok && !d1_tag_ok);
 
 // ═════════════════════════════════════════════════════════════════
 // 7. IQ Instantiation Wiring Helpers
@@ -785,6 +879,44 @@ wire                            iq_mem_flush_killed_any;
 wire                            iq_mul_flush_killed_any;
 wire                            iq_div_flush_killed_any;
 
+// MEM/MUL/DIV issue inhibition is consumed by the IQ instances below.  Keep
+// these declarations before the instances so Vivado does not create implicit
+// nets before seeing the real wires.
+reg mem_fu_busy, mul_fu_busy, div_fu_busy;
+reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
+reg [0:0]                      mem_fu_tid;
+wire mem_fu_wb_clear = wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE);
+wire mem_fu_blocks_issue = mem_fu_busy && !mem_fu_wb_clear;
+wire mem_issue_inhibit = mem_fu_blocks_issue ||
+                         (p1_mem_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b10));
+wire mul_issue_inhibit = mul_fu_busy ||
+                         (p1_mul_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b11));
+wire div_issue_inhibit = div_fu_busy ||
+                         (p1_div_cand_valid &&
+                          !(p1_winner_valid && p1_winner == 2'b01));
+
+wire mem_fu_flush_kill = mem_fu_busy &&
+                         (mem_fu_tid == flush_tid) &&
+                         (!flush_order_valid ||
+                          (mem_fu_order_id > flush_order_id));
+wire p1_mem_cand_flush_kill = flush &&
+                              p1_mem_cand_valid &&
+                              (p1_mem_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_mem_cand_order_id > flush_order_id));
+wire p1_mul_cand_flush_kill = flush &&
+                              p1_mul_cand_valid &&
+                              (p1_mul_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_mul_cand_order_id > flush_order_id));
+wire p1_div_cand_flush_kill = flush &&
+                              p1_div_cand_valid &&
+                              (p1_div_cand_tid == flush_tid) &&
+                              (!flush_order_valid ||
+                               (p1_div_cand_order_id > flush_order_id));
+
 // MUL IQ issue wires
 wire        mul_iss_valid;
 wire [RS_TAG_W-1:0] mul_iss_tag;
@@ -829,8 +961,8 @@ wire [`METADATA_EPOCH_W-1:0]    div_iss_epoch;
 // 8. Issue Queue — INT (8 entries, commit-time dealloc)
 // ═════════════════════════════════════════════════════════════════
 issue_queue #(
-    .IQ_DEPTH  (8),
-    .IQ_IDX_W  (3),
+    .IQ_DEPTH  (INT_IQ_DEPTH),
+    .IQ_IDX_W  (INT_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
     .NUM_THREAD(NUM_THREAD),
     .WAKE_HOLD (0),
@@ -965,10 +1097,10 @@ issue_queue #(
     // Issue inhibit
     .issue_inhibit_t0(issue_inhibit_t0),
     .issue_inhibit_t1(issue_inhibit_t1),
-    .issue_after_order_block_valid_t0(1'b0),
-    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_after_order_block_valid_t1(1'b0),
-    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_after_order_block_valid_t0(pending_branch_t0),
+    .issue_after_order_block_id_t0(pending_branch_order_id_t0),
+    .issue_after_order_block_valid_t1(pending_branch_t1),
+    .issue_after_order_block_id_t1(pending_branch_order_id_t1),
     .issue_side_effect_block_valid_t0(pending_branch_t0),
     .issue_side_effect_block_id_t0(pending_branch_order_id_t0),
     .issue_side_effect_block_valid_t1(pending_branch_t1),
@@ -985,8 +1117,8 @@ issue_queue #(
 // 9. Issue Queue — MEM (16 entries, commit-time dealloc, load-store ordering)
 // ═════════════════════════════════════════════════════════════════
 issue_queue #(
-    .IQ_DEPTH  (RS_DEPTH),
-    .IQ_IDX_W  (RS_IDX_W),
+    .IQ_DEPTH  (MEM_IQ_DEPTH),
+    .IQ_IDX_W  (MEM_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
     .NUM_THREAD(NUM_THREAD),
     .WAKE_HOLD (1),
@@ -1138,8 +1270,8 @@ issue_queue #(
 // 10. Issue Queue — MUL (4 entries, commit-time dealloc)
 // ═════════════════════════════════════════════════════════════════
 issue_queue #(
-    .IQ_DEPTH  (4),
-    .IQ_IDX_W  (2),
+    .IQ_DEPTH  (MUL_IQ_DEPTH),
+    .IQ_IDX_W  (MUL_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
     .NUM_THREAD(NUM_THREAD),
     .WAKE_HOLD (0),
@@ -1290,8 +1422,8 @@ issue_queue #(
 // 10b. Issue Queue — DIV (4 entries, commit-time dealloc)
 // ═════════════════════════════════════════════════════════════════
 issue_queue #(
-    .IQ_DEPTH  (4),
-    .IQ_IDX_W  (2),
+    .IQ_DEPTH  (DIV_IQ_DEPTH),
+    .IQ_IDX_W  (DIV_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
     .NUM_THREAD(NUM_THREAD),
     .WAKE_HOLD (0),
@@ -1448,40 +1580,6 @@ issue_queue #(
 //     the flush point. When that happens no WB1 arrives, so we must
 //     also clear mem_fu_busy here using the same younger-than test.
 // ═════════════════════════════════════════════════════════════════
-reg mem_fu_busy, mul_fu_busy, div_fu_busy;
-reg [`METADATA_ORDER_ID_W-1:0] mem_fu_order_id;
-reg [0:0]                      mem_fu_tid;
-wire mem_fu_wb_clear = wb1_valid && (wb1_fu == `FU_LOAD || wb1_fu == `FU_STORE);
-wire mem_fu_blocks_issue = mem_fu_busy && !mem_fu_wb_clear;
-wire mem_issue_inhibit = mem_fu_blocks_issue ||
-                         (p1_mem_cand_valid &&
-                          !(p1_winner_valid && p1_winner == 2'b10));
-wire mul_issue_inhibit = mul_fu_busy ||
-                         (p1_mul_cand_valid &&
-                          !(p1_winner_valid && p1_winner == 2'b11));
-wire div_issue_inhibit = div_fu_busy ||
-                         (p1_div_cand_valid &&
-                          !(p1_winner_valid && p1_winner == 2'b01));
-
-wire mem_fu_flush_kill = mem_fu_busy &&
-                         (mem_fu_tid == flush_tid) &&
-                         (!flush_order_valid ||
-                          (mem_fu_order_id > flush_order_id));
-wire p1_mem_cand_flush_kill = flush &&
-                              p1_mem_cand_valid &&
-                              (p1_mem_cand_tid == flush_tid) &&
-                              (!flush_order_valid ||
-                               (p1_mem_cand_order_id > flush_order_id));
-wire p1_mul_cand_flush_kill = flush &&
-                              p1_mul_cand_valid &&
-                              (p1_mul_cand_tid == flush_tid) &&
-                              (!flush_order_valid ||
-                               (p1_mul_cand_order_id > flush_order_id));
-wire p1_div_cand_flush_kill = flush &&
-                              p1_div_cand_valid &&
-                              (p1_div_cand_tid == flush_tid) &&
-                              (!flush_order_valid ||
-                               (p1_div_cand_order_id > flush_order_id));
 wire mem_raw_issue_flush_kill = flush &&
                                 mem_iss_valid &&
                                 (mem_iss_tid == flush_tid) &&

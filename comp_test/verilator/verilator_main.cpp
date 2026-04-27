@@ -84,6 +84,12 @@ struct Summary {
     uint64_t bench_rob_stall_cycles = 0;
     uint64_t bench_freelist_stall_cycles = 0;
     uint64_t bench_system_stall_cycles = 0;
+    uint64_t bench_stall_iq_int_full_cycles = 0;
+    uint64_t bench_stall_iq_mem_full_cycles = 0;
+    uint64_t bench_stall_iq_mul_full_cycles = 0;
+    uint64_t bench_stall_iq_div_full_cycles = 0;
+    uint64_t bench_stall_rs_tag_empty_cycles = 0;
+    uint64_t bench_stall_other_dispatch_cycles = 0;
     uint64_t bench_disp1_blocked_cycles = 0;
     uint64_t bench_dispatch_accept_cycles = 0;
     uint64_t bench_dispatch0_accept_count = 0;
@@ -107,6 +113,20 @@ struct Summary {
     uint64_t spec_mmio_load_violation_count = 0;
     uint64_t mmio_load_at_rob_head_count = 0;
     uint64_t older_store_blocked_mmio_load_cycles = 0;
+    uint64_t bench_lsu_idle_cycles = 0;
+    uint64_t bench_lsu_req_cycles = 0;
+    uint64_t bench_lsu_wait_resp_cycles = 0;
+    uint64_t bench_lsu_resp_cycles = 0;
+    uint64_t bench_lsu_load_accept_cycles = 0;
+    uint64_t bench_lsu_load_resp_cycles = 0;
+    uint64_t bench_lsu_back_to_back_load_accept_cycles = 0;
+    uint64_t bench_lsu_forwarded_load_cycles = 0;
+    uint64_t bench_lsu_load_hazard_cycles = 0;
+    uint64_t bench_lsu_m1_cooldown_cycles = 0;
+    uint64_t bench_dcache_hit_resp_cycles = 0;
+    uint64_t bench_lsu_cooldown_set_count = 0;
+    uint64_t bench_lsu_cooldown_skipped_l1hit_count = 0;
+    uint64_t bench_lsu_mmio_blocked_cycles = 0;
     std::string bench_branch_redirect_top_pcs;
     uint32_t rob_commit0_seen_count = 0;
     uint32_t rob_commit1_seen_count = 0;
@@ -187,6 +207,14 @@ struct Summary {
     uint32_t unexpected_uart_wb1_tag = 0;
     uint32_t unexpected_uart_wb1_fu = 0;
     uint32_t unexpected_uart_wb1_data = 0;
+    bool rodata_write_seen = false;
+    uint64_t rodata_write_cycle = 0;
+    uint32_t rodata_write_pc_t0 = 0;
+    uint32_t rodata_write_addr = 0;
+    uint32_t rodata_write_wdata = 0;
+    uint32_t rodata_write_wen = 0;
+    uint32_t rodata_write_order_id = 0;
+    uint32_t rodata_write_tag = 0;
     bool bad_uart_store_seen = false;
     uint64_t bad_uart_store_cycle = 0;
     uint32_t bad_uart_store_pc = 0;
@@ -213,6 +241,26 @@ struct Summary {
     uint32_t bad_uart_store_fwd_b = 0;
     uint32_t bad_uart_store_func3 = 0;
     uint32_t bad_uart_store_tid = 0;
+    uint32_t bad_uart_store_src2_last_pc = 0;
+    uint32_t bad_uart_store_src2_last_data = 0;
+    uint32_t bad_uart_store_src2_last_order_id = 0;
+    uint32_t bad_uart_store_src2_last_tag = 0;
+    uint32_t bad_uart_store_src2_last_rd = 0;
+    uint32_t bad_uart_store_src2_last_fu = 0;
+    uint32_t bad_uart_store_src2_last_src1_prs = 0;
+    uint32_t bad_uart_store_src2_last_src1_pc = 0;
+    uint32_t bad_uart_store_src2_last_src1_data = 0;
+    uint32_t bad_uart_store_src2_last_src1_order_id = 0;
+    uint32_t bad_uart_store_src2_last_src1_tag = 0;
+    uint32_t bad_uart_store_src2_last_src1_rd = 0;
+    uint32_t bad_uart_store_src2_last_src1_fu = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_prs = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_pc = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_data = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_order_id = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_tag = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_rd = 0;
+    uint32_t bad_uart_store_src2_last_src1_src1_fu = 0;
     bool strcpy_mv_seen = false;
     uint64_t strcpy_mv_cycle = 0;
     uint32_t strcpy_mv_pc = 0;
@@ -444,6 +492,14 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BenchRobStallCycles\": " << summary.bench_rob_stall_cycles << ",\n";
     ofs << "  \"BenchFreelistStallCycles\": " << summary.bench_freelist_stall_cycles << ",\n";
     ofs << "  \"BenchSystemStallCycles\": " << summary.bench_system_stall_cycles << ",\n";
+    ofs << "  \"BenchStallRobFullCycles\": " << summary.bench_rob_stall_cycles << ",\n";
+    ofs << "  \"BenchStallPrfEmptyCycles\": " << summary.bench_freelist_stall_cycles << ",\n";
+    ofs << "  \"BenchStallIqIntFullCycles\": " << summary.bench_stall_iq_int_full_cycles << ",\n";
+    ofs << "  \"BenchStallIqMemFullCycles\": " << summary.bench_stall_iq_mem_full_cycles << ",\n";
+    ofs << "  \"BenchStallIqMulFullCycles\": " << summary.bench_stall_iq_mul_full_cycles << ",\n";
+    ofs << "  \"BenchStallIqDivFullCycles\": " << summary.bench_stall_iq_div_full_cycles << ",\n";
+    ofs << "  \"BenchStallRsTagEmptyCycles\": " << summary.bench_stall_rs_tag_empty_cycles << ",\n";
+    ofs << "  \"BenchStallOtherDispatchCycles\": " << summary.bench_stall_other_dispatch_cycles << ",\n";
     ofs << "  \"BenchDisp1BlockedCycles\": " << summary.bench_disp1_blocked_cycles << ",\n";
     ofs << "  \"BenchDispatchAcceptCycles\": " << summary.bench_dispatch_accept_cycles << ",\n";
     ofs << "  \"BenchDispatch0AcceptCount\": " << summary.bench_dispatch0_accept_count << ",\n";
@@ -467,6 +523,20 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"SpecMmioLoadViolationCount\": " << summary.spec_mmio_load_violation_count << ",\n";
     ofs << "  \"MmioLoadAtRobHeadCount\": " << summary.mmio_load_at_rob_head_count << ",\n";
     ofs << "  \"OlderStoreBlockedMmioLoadCycles\": " << summary.older_store_blocked_mmio_load_cycles << ",\n";
+    ofs << "  \"BenchLsuIdleCycles\": " << summary.bench_lsu_idle_cycles << ",\n";
+    ofs << "  \"BenchLsuReqCycles\": " << summary.bench_lsu_req_cycles << ",\n";
+    ofs << "  \"BenchLsuWaitRespCycles\": " << summary.bench_lsu_wait_resp_cycles << ",\n";
+    ofs << "  \"BenchLsuRespCycles\": " << summary.bench_lsu_resp_cycles << ",\n";
+    ofs << "  \"BenchLsuLoadAcceptCycles\": " << summary.bench_lsu_load_accept_cycles << ",\n";
+    ofs << "  \"BenchLsuLoadRespCycles\": " << summary.bench_lsu_load_resp_cycles << ",\n";
+    ofs << "  \"BenchLsuBackToBackLoadAcceptCycles\": " << summary.bench_lsu_back_to_back_load_accept_cycles << ",\n";
+    ofs << "  \"BenchLsuForwardedLoadCycles\": " << summary.bench_lsu_forwarded_load_cycles << ",\n";
+    ofs << "  \"BenchLsuLoadHazardCycles\": " << summary.bench_lsu_load_hazard_cycles << ",\n";
+    ofs << "  \"BenchLsuM1CooldownCycles\": " << summary.bench_lsu_m1_cooldown_cycles << ",\n";
+    ofs << "  \"BenchDcacheHitRespCycles\": " << summary.bench_dcache_hit_resp_cycles << ",\n";
+    ofs << "  \"BenchLsuCooldownSetCount\": " << summary.bench_lsu_cooldown_set_count << ",\n";
+    ofs << "  \"BenchLsuCooldownSkippedL1HitCount\": " << summary.bench_lsu_cooldown_skipped_l1hit_count << ",\n";
+    ofs << "  \"BenchLsuMmioBlockedCycles\": " << summary.bench_lsu_mmio_blocked_cycles << ",\n";
     ofs << "  \"BenchBranchRedirectTopPcs\": \"" << json_escape(summary.bench_branch_redirect_top_pcs) << "\",\n";
     ofs << "  \"RobCommit0SeenCount\": " << summary.rob_commit0_seen_count << ",\n";
     ofs << "  \"RobCommit1SeenCount\": " << summary.rob_commit1_seen_count << ",\n";
@@ -547,6 +617,14 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"UnexpectedUartWb1Tag\": " << summary.unexpected_uart_wb1_tag << ",\n";
     ofs << "  \"UnexpectedUartWb1Fu\": " << summary.unexpected_uart_wb1_fu << ",\n";
     ofs << "  \"UnexpectedUartWb1Data\": " << summary.unexpected_uart_wb1_data << ",\n";
+    ofs << "  \"RodataWriteSeen\": " << (summary.rodata_write_seen ? "true" : "false") << ",\n";
+    ofs << "  \"RodataWriteCycle\": " << summary.rodata_write_cycle << ",\n";
+    ofs << "  \"RodataWritePcT0\": " << summary.rodata_write_pc_t0 << ",\n";
+    ofs << "  \"RodataWriteAddr\": " << summary.rodata_write_addr << ",\n";
+    ofs << "  \"RodataWriteWdata\": " << summary.rodata_write_wdata << ",\n";
+    ofs << "  \"RodataWriteWen\": " << summary.rodata_write_wen << ",\n";
+    ofs << "  \"RodataWriteOrderId\": " << summary.rodata_write_order_id << ",\n";
+    ofs << "  \"RodataWriteTag\": " << summary.rodata_write_tag << ",\n";
     ofs << "  \"BadUartStoreSeen\": " << (summary.bad_uart_store_seen ? "true" : "false") << ",\n";
     ofs << "  \"BadUartStoreCycle\": " << summary.bad_uart_store_cycle << ",\n";
     ofs << "  \"BadUartStorePc\": " << summary.bad_uart_store_pc << ",\n";
@@ -573,6 +651,26 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BadUartStoreFwdB\": " << summary.bad_uart_store_fwd_b << ",\n";
     ofs << "  \"BadUartStoreFunc3\": " << summary.bad_uart_store_func3 << ",\n";
     ofs << "  \"BadUartStoreTid\": " << summary.bad_uart_store_tid << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastPc\": " << summary.bad_uart_store_src2_last_pc << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastData\": " << summary.bad_uart_store_src2_last_data << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastOrderId\": " << summary.bad_uart_store_src2_last_order_id << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastTag\": " << summary.bad_uart_store_src2_last_tag << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastRd\": " << summary.bad_uart_store_src2_last_rd << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastFu\": " << summary.bad_uart_store_src2_last_fu << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Prs\": " << summary.bad_uart_store_src2_last_src1_prs << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Pc\": " << summary.bad_uart_store_src2_last_src1_pc << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Data\": " << summary.bad_uart_store_src2_last_src1_data << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1OrderId\": " << summary.bad_uart_store_src2_last_src1_order_id << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Tag\": " << summary.bad_uart_store_src2_last_src1_tag << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Rd\": " << summary.bad_uart_store_src2_last_src1_rd << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Fu\": " << summary.bad_uart_store_src2_last_src1_fu << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Prs\": " << summary.bad_uart_store_src2_last_src1_src1_prs << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Pc\": " << summary.bad_uart_store_src2_last_src1_src1_pc << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Data\": " << summary.bad_uart_store_src2_last_src1_src1_data << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1OrderId\": " << summary.bad_uart_store_src2_last_src1_src1_order_id << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Tag\": " << summary.bad_uart_store_src2_last_src1_src1_tag << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Rd\": " << summary.bad_uart_store_src2_last_src1_src1_rd << ",\n";
+    ofs << "  \"BadUartStoreSrc2LastSrc1Src1Fu\": " << summary.bad_uart_store_src2_last_src1_src1_fu << ",\n";
     ofs << "  \"StrcpyMvSeen\": " << (summary.strcpy_mv_seen ? "true" : "false") << ",\n";
     ofs << "  \"StrcpyMvCycle\": " << summary.strcpy_mv_cycle << ",\n";
     ofs << "  \"StrcpyMvPc\": " << summary.strcpy_mv_pc << ",\n";
@@ -1159,6 +1257,54 @@ int main(int argc, char** argv) {
 
         const bool uart_byte_fire = (top->debug_uart_tx_byte_valid != 0) && !prev_uart_tx_byte_valid;
         prev_uart_tx_byte_valid = top->debug_uart_tx_byte_valid != 0;
+        auto capture_uart_store_debug = [&]() {
+            summary.bad_uart_store_seen = top->debug_bad_uart_store_seen != 0;
+            summary.bad_uart_store_cycle = cycles;
+            summary.bad_uart_store_pc = top->debug_bad_uart_store_pc;
+            summary.bad_uart_store_addr = top->debug_bad_uart_store_addr;
+            summary.bad_uart_store_op_a = top->debug_bad_uart_store_op_a;
+            summary.bad_uart_store_op_b = top->debug_bad_uart_store_op_b;
+            summary.bad_uart_store_imm = top->debug_bad_uart_store_imm;
+            summary.bad_uart_store_order_id = top->debug_bad_uart_store_order_id;
+            summary.bad_uart_store_tag = top->debug_bad_uart_store_tag;
+            summary.bad_uart_store_rd = top->debug_bad_uart_store_rd;
+            summary.bad_uart_store_rs1 = top->debug_bad_uart_store_rs1;
+            summary.bad_uart_store_rs2 = top->debug_bad_uart_store_rs2;
+            summary.bad_uart_store_src1_tag = top->debug_bad_uart_store_src1_tag;
+            summary.bad_uart_store_src2_tag = top->debug_bad_uart_store_src2_tag;
+            summary.bad_uart_store_prs1 = top->debug_bad_uart_store_prs1;
+            summary.bad_uart_store_prs2 = top->debug_bad_uart_store_prs2;
+            summary.bad_uart_store_prf_a = top->debug_bad_uart_store_prf_a;
+            summary.bad_uart_store_prf_b = top->debug_bad_uart_store_prf_b;
+            summary.bad_uart_store_tagbuf_a_valid = top->debug_bad_uart_store_tagbuf_a_valid != 0;
+            summary.bad_uart_store_tagbuf_b_valid = top->debug_bad_uart_store_tagbuf_b_valid != 0;
+            summary.bad_uart_store_tagbuf_a_data = top->debug_bad_uart_store_tagbuf_a_data;
+            summary.bad_uart_store_tagbuf_b_data = top->debug_bad_uart_store_tagbuf_b_data;
+            summary.bad_uart_store_fwd_a = top->debug_bad_uart_store_fwd_a;
+            summary.bad_uart_store_fwd_b = top->debug_bad_uart_store_fwd_b;
+            summary.bad_uart_store_func3 = top->debug_bad_uart_store_func3;
+            summary.bad_uart_store_tid = top->debug_bad_uart_store_tid;
+            summary.bad_uart_store_src2_last_pc = top->debug_bad_uart_store_src2_last_pc;
+            summary.bad_uart_store_src2_last_data = top->debug_bad_uart_store_src2_last_data;
+            summary.bad_uart_store_src2_last_order_id = top->debug_bad_uart_store_src2_last_order_id;
+            summary.bad_uart_store_src2_last_tag = top->debug_bad_uart_store_src2_last_tag;
+            summary.bad_uart_store_src2_last_rd = top->debug_bad_uart_store_src2_last_rd;
+            summary.bad_uart_store_src2_last_fu = top->debug_bad_uart_store_src2_last_fu;
+            summary.bad_uart_store_src2_last_src1_prs = top->debug_bad_uart_store_src2_last_src1_prs;
+            summary.bad_uart_store_src2_last_src1_pc = top->debug_bad_uart_store_src2_last_src1_pc;
+            summary.bad_uart_store_src2_last_src1_data = top->debug_bad_uart_store_src2_last_src1_data;
+            summary.bad_uart_store_src2_last_src1_order_id = top->debug_bad_uart_store_src2_last_src1_order_id;
+            summary.bad_uart_store_src2_last_src1_tag = top->debug_bad_uart_store_src2_last_src1_tag;
+            summary.bad_uart_store_src2_last_src1_rd = top->debug_bad_uart_store_src2_last_src1_rd;
+            summary.bad_uart_store_src2_last_src1_fu = top->debug_bad_uart_store_src2_last_src1_fu;
+            summary.bad_uart_store_src2_last_src1_src1_prs = top->debug_bad_uart_store_src2_last_src1_src1_prs;
+            summary.bad_uart_store_src2_last_src1_src1_pc = top->debug_bad_uart_store_src2_last_src1_src1_pc;
+            summary.bad_uart_store_src2_last_src1_src1_data = top->debug_bad_uart_store_src2_last_src1_src1_data;
+            summary.bad_uart_store_src2_last_src1_src1_order_id = top->debug_bad_uart_store_src2_last_src1_src1_order_id;
+            summary.bad_uart_store_src2_last_src1_src1_tag = top->debug_bad_uart_store_src2_last_src1_src1_tag;
+            summary.bad_uart_store_src2_last_src1_src1_rd = top->debug_bad_uart_store_src2_last_src1_src1_rd;
+            summary.bad_uart_store_src2_last_src1_src1_fu = top->debug_bad_uart_store_src2_last_src1_src1_fu;
+        };
         if (uart_byte_fire) {
             const uint8_t byte = static_cast<uint8_t>(top->debug_uart_tx_byte);
             static const std::string kExpectedUartPrefix = "0\n1\n2\nDH\nDHRYSTONE START\r\n";
@@ -1193,6 +1339,7 @@ int main(int argc, char** argv) {
                 summary.unexpected_uart_wb1_tag = top->debug_wb1_tag;
                 summary.unexpected_uart_wb1_fu = top->debug_wb1_fu;
                 summary.unexpected_uart_wb1_data = top->debug_wb1_data;
+                capture_uart_store_debug();
             }
             ++summary.uart_tx_byte_seen_count;
             summary.last_uart_tx_byte = byte;
@@ -1205,33 +1352,8 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (!summary.bad_uart_store_seen && top->debug_bad_uart_store_seen) {
-            summary.bad_uart_store_seen = true;
-            summary.bad_uart_store_cycle = cycles;
-            summary.bad_uart_store_pc = top->debug_bad_uart_store_pc;
-            summary.bad_uart_store_addr = top->debug_bad_uart_store_addr;
-            summary.bad_uart_store_op_a = top->debug_bad_uart_store_op_a;
-            summary.bad_uart_store_op_b = top->debug_bad_uart_store_op_b;
-            summary.bad_uart_store_imm = top->debug_bad_uart_store_imm;
-            summary.bad_uart_store_order_id = top->debug_bad_uart_store_order_id;
-            summary.bad_uart_store_tag = top->debug_bad_uart_store_tag;
-            summary.bad_uart_store_rd = top->debug_bad_uart_store_rd;
-            summary.bad_uart_store_rs1 = top->debug_bad_uart_store_rs1;
-            summary.bad_uart_store_rs2 = top->debug_bad_uart_store_rs2;
-            summary.bad_uart_store_src1_tag = top->debug_bad_uart_store_src1_tag;
-            summary.bad_uart_store_src2_tag = top->debug_bad_uart_store_src2_tag;
-            summary.bad_uart_store_prs1 = top->debug_bad_uart_store_prs1;
-            summary.bad_uart_store_prs2 = top->debug_bad_uart_store_prs2;
-            summary.bad_uart_store_prf_a = top->debug_bad_uart_store_prf_a;
-            summary.bad_uart_store_prf_b = top->debug_bad_uart_store_prf_b;
-            summary.bad_uart_store_tagbuf_a_valid = top->debug_bad_uart_store_tagbuf_a_valid != 0;
-            summary.bad_uart_store_tagbuf_b_valid = top->debug_bad_uart_store_tagbuf_b_valid != 0;
-            summary.bad_uart_store_tagbuf_a_data = top->debug_bad_uart_store_tagbuf_a_data;
-            summary.bad_uart_store_tagbuf_b_data = top->debug_bad_uart_store_tagbuf_b_data;
-            summary.bad_uart_store_fwd_a = top->debug_bad_uart_store_fwd_a;
-            summary.bad_uart_store_fwd_b = top->debug_bad_uart_store_fwd_b;
-            summary.bad_uart_store_func3 = top->debug_bad_uart_store_func3;
-            summary.bad_uart_store_tid = top->debug_bad_uart_store_tid;
+        if (!summary.unexpected_uart_seen && top->debug_bad_uart_store_seen) {
+            capture_uart_store_debug();
         }
 
         if (!summary.strcpy_mv_seen && top->debug_strcpy_mv_seen) {
@@ -1438,6 +1560,19 @@ int main(int argc, char** argv) {
         if (top->debug_m1_req_valid && top->debug_m1_req_ready) {
             ++summary.m1_req_handshake_count;
             summary.last_m1_req_handshake_cycle = cycles;
+            if (!summary.rodata_write_seen &&
+                top->debug_m1_req_write &&
+                top->debug_m1_req_addr >= 0x80001a94u &&
+                top->debug_m1_req_addr < 0x80001f68u) {
+                summary.rodata_write_seen = true;
+                summary.rodata_write_cycle = cycles;
+                summary.rodata_write_pc_t0 = top->debug_pc_t0;
+                summary.rodata_write_addr = top->debug_m1_req_addr;
+                summary.rodata_write_wdata = top->debug_m1_req_wdata;
+                summary.rodata_write_wen = top->debug_m1_req_wen;
+                summary.rodata_write_order_id = top->debug_lsu_req_order_id;
+                summary.rodata_write_tag = top->debug_lsu_req_tag;
+            }
         }
         if (top->debug_ddr3_req_valid) {
             ++summary.ddr3_req_seen_count;
@@ -1531,6 +1666,17 @@ int main(int argc, char** argv) {
             const bool decode_valid = (top->debug_dec0_valid != 0) || (top->debug_dec1_valid != 0);
             const bool dispatch_accept = (top->debug_disp0_accepted != 0) || (top->debug_disp1_accepted != 0);
             const bool dispatch_stall = top->debug_stall != 0;
+            const bool stall_iq_int_full = top->debug_stall_iq_int_full != 0;
+            const bool stall_iq_mem_full = top->debug_stall_iq_mem_full != 0;
+            const bool stall_iq_mul_full = top->debug_stall_iq_mul_full != 0;
+            const bool stall_iq_div_full = top->debug_stall_iq_div_full != 0;
+            const bool stall_rs_tag_empty = top->debug_stall_rs_tag_empty != 0;
+            const bool sb_dispatch_stall_known =
+                stall_iq_int_full ||
+                stall_iq_mem_full ||
+                stall_iq_mul_full ||
+                stall_iq_div_full ||
+                stall_rs_tag_empty;
             const bool rob_empty = (top->debug_rob_count_t0 == 0) && (top->debug_rob_count_t1 == 0);
             const bool rob_head_wait =
                 ((top->debug_rob_count_t0 != 0) && (top->debug_rob_head_valid_t0 != 0) &&
@@ -1582,6 +1728,24 @@ int main(int argc, char** argv) {
             }
             if (top->debug_sys_disp_stall) {
                 ++summary.bench_system_stall_cycles;
+            }
+            if (stall_iq_int_full) {
+                ++summary.bench_stall_iq_int_full_cycles;
+            }
+            if (stall_iq_mem_full) {
+                ++summary.bench_stall_iq_mem_full_cycles;
+            }
+            if (stall_iq_mul_full) {
+                ++summary.bench_stall_iq_mul_full_cycles;
+            }
+            if (stall_iq_div_full) {
+                ++summary.bench_stall_iq_div_full_cycles;
+            }
+            if (stall_rs_tag_empty) {
+                ++summary.bench_stall_rs_tag_empty_cycles;
+            }
+            if (top->debug_sb_disp_stall && !sb_dispatch_stall_known) {
+                ++summary.bench_stall_other_dispatch_cycles;
             }
             if (top->debug_sb_disp1_blocked) {
                 ++summary.bench_disp1_blocked_cycles;
@@ -1643,6 +1807,54 @@ int main(int argc, char** argv) {
             }
             if (top->debug_commit_suppressed) {
                 ++summary.bench_commit_suppressed_count;
+            }
+            switch (top->debug_lsu_state & 0x3u) {
+                case 0u:
+                    ++summary.bench_lsu_idle_cycles;
+                    break;
+                case 1u:
+                    ++summary.bench_lsu_req_cycles;
+                    break;
+                case 2u:
+                    ++summary.bench_lsu_wait_resp_cycles;
+                    break;
+                case 3u:
+                    ++summary.bench_lsu_resp_cycles;
+                    break;
+                default:
+                    break;
+            }
+            if (top->debug_lsu_load_accept) {
+                ++summary.bench_lsu_load_accept_cycles;
+            }
+            if (top->debug_lsu_load_resp) {
+                ++summary.bench_lsu_load_resp_cycles;
+            }
+            if (top->debug_lsu_back_to_back_load_accept) {
+                ++summary.bench_lsu_back_to_back_load_accept_cycles;
+            }
+            if (top->debug_lsu_forwarded_load_accept) {
+                ++summary.bench_lsu_forwarded_load_cycles;
+            }
+            if (top->debug_lsu_req_valid && !top->debug_lsu_req_wen &&
+                top->debug_lsu_sb_load_hazard) {
+                ++summary.bench_lsu_load_hazard_cycles;
+            }
+            if (top->debug_lsu_m1_cooldown) {
+                ++summary.bench_lsu_m1_cooldown_cycles;
+            }
+            if (top->debug_m1_resp_valid && top->debug_m1_resp_l1d_hit) {
+                ++summary.bench_dcache_hit_resp_cycles;
+            }
+            if (top->debug_lsu_cooldown_set) {
+                ++summary.bench_lsu_cooldown_set_count;
+            }
+            if (top->debug_lsu_cooldown_skipped_l1hit) {
+                ++summary.bench_lsu_cooldown_skipped_l1hit_count;
+            }
+            if (top->debug_spec_mmio_load_blocked ||
+                top->debug_older_store_blocked_mmio_load) {
+                ++summary.bench_lsu_mmio_blocked_cycles;
             }
         }
 

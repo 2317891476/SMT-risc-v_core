@@ -122,6 +122,7 @@ module lsu_shell #(
     // M1 Response
     input  wire               m1_resp_valid,
     input  wire [31:0]        m1_resp_data,
+    input  wire               m1_resp_l1d_hit,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // ROB Commit Interface (pass through to Store Buffer)
@@ -157,7 +158,9 @@ module lsu_shell #(
     output wire               debug_spec_mmio_load_blocked,
     output wire               debug_spec_mmio_load_violation,
     output wire               debug_mmio_load_at_rob_head,
-    output wire               debug_older_store_blocked_mmio_load
+    output wire               debug_older_store_blocked_mmio_load,
+    output reg                debug_lsu_cooldown_set,
+    output reg                debug_lsu_cooldown_skipped_l1hit
 );
 
 // =============================================================================
@@ -449,7 +452,11 @@ always @(posedge clk or negedge rstn) begin
         m1_txn_is_drain   <= 1'b0;
         dbg_beacon_block_reported_r <= 1'b0;
         m1_cooldown_r     <= 1'b0;
+        debug_lsu_cooldown_set <= 1'b0;
+        debug_lsu_cooldown_skipped_l1hit <= 1'b0;
     end else begin
+        debug_lsu_cooldown_set <= 1'b0;
+        debug_lsu_cooldown_skipped_l1hit <= 1'b0;
         if (!sb_has_pending_stores)
             m1_cooldown_r <= 1'b0;
         if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
@@ -670,7 +677,13 @@ always @(posedge clk or negedge rstn) begin
                         lsu_state       <= LSU_IDLE;
                         pending_valid   <= 1'b0;
                         m1_txn_is_drain <= 1'b0;
-                        m1_cooldown_r   <= 1'b1;
+                        if (m1_resp_l1d_hit) begin
+                            m1_cooldown_r <= 1'b0;
+                            debug_lsu_cooldown_skipped_l1hit <= 1'b1;
+                        end else begin
+                            m1_cooldown_r <= 1'b1;
+                            debug_lsu_cooldown_set <= 1'b1;
+                        end
                     end
                 end
             end

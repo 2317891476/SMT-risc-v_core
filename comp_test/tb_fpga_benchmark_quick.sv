@@ -30,7 +30,7 @@ module tb_fpga_benchmark_quick;
     wire legacy_uart_write_fire = dut.gen_legacy_mem.u_legacy_mem_subsys.uart_write_fire;
     wire [7:0] legacy_uart_store_count = dut.gen_legacy_mem.u_legacy_mem_subsys.debug_uart_tx_store_count;
     wire [7:0] legacy_uart_status_load_count = dut.gen_legacy_mem.u_legacy_mem_subsys.debug_uart_status_load_count;
-    wire [4:0] sp_tag_t0 = dut.u_scoreboard.reg_result[0][2];
+    wire [5:0] sp_tag_t0 = dut.u_scoreboard.reg_result[0][2];
     wire [15:0] sp_tag_order_t0 = dut.u_scoreboard.reg_result_order[0][2];
     wire [31:0] sp_arch_t0 = dut.u_regs_mt.reg_bank[0][2];
     wire [31:0] x10_a0_t0 = dut.u_regs_mt.reg_bank[0][10];

@@ -110,13 +110,31 @@ wire smt_mode = `SMT_MODE;
 `endif
 localparam ROCC_ACCEL_ENABLE = `ENABLE_ROCC_ACCEL;
 
+`ifdef FPGA_MODE
+localparam ROB_DEPTH_CFG     = 16;
+localparam ROB_IDX_W_CFG     = 4;
+localparam BR_CKPT_DEPTH_CFG = 4;
+localparam BR_CKPT_IDX_W_CFG = 2;
+localparam CKPT_QUERY_ENABLE_CFG = 0;
+localparam SRC_REF_GUARD_ENABLE_CFG = 0;
+localparam NUM_PHYS_REG_CFG  = 48;
+localparam PHYS_REG_W_CFG    = 6;
+localparam NUM_FREE_CFG      = 16;
+localparam FL_DEPTH_CFG      = 48;
+localparam FL_IDX_W_CFG      = 6;
+`else
 localparam ROB_DEPTH_CFG     = 32;
 localparam ROB_IDX_W_CFG     = 5;
+localparam BR_CKPT_DEPTH_CFG = 32;
+localparam BR_CKPT_IDX_W_CFG = 5;
+localparam CKPT_QUERY_ENABLE_CFG = 1;
+localparam SRC_REF_GUARD_ENABLE_CFG = 1;
 localparam NUM_PHYS_REG_CFG  = 64;
 localparam PHYS_REG_W_CFG    = 6;
 localparam NUM_FREE_CFG      = 32;
 localparam FL_DEPTH_CFG      = 64;
 localparam FL_IDX_W_CFG      = 6;
+`endif
 
 // The full mem_subsys/L2 path is useful for simulation coverage, but board
 // bring-up can switch to a lighter legacy memory profile when LUT pressure is
@@ -134,6 +152,36 @@ localparam FL_IDX_W_CFG      = 6;
 `endif
 `ifndef FPGA_SCOREBOARD_RS_IDX_W
     `define FPGA_SCOREBOARD_RS_IDX_W 4
+`endif
+`ifndef FPGA_INT_IQ_DEPTH
+    `define FPGA_INT_IQ_DEPTH 8
+`endif
+`ifndef FPGA_INT_IQ_IDX_W
+    `define FPGA_INT_IQ_IDX_W 3
+`endif
+`ifndef FPGA_MEM_IQ_DEPTH
+    `define FPGA_MEM_IQ_DEPTH 8
+`endif
+`ifndef FPGA_MEM_IQ_IDX_W
+    `define FPGA_MEM_IQ_IDX_W 3
+`endif
+`ifndef FPGA_MUL_IQ_DEPTH
+    `define FPGA_MUL_IQ_DEPTH 2
+`endif
+`ifndef FPGA_MUL_IQ_IDX_W
+    `define FPGA_MUL_IQ_IDX_W 1
+`endif
+`ifndef FPGA_DIV_IQ_DEPTH
+    `define FPGA_DIV_IQ_DEPTH 2
+`endif
+`ifndef FPGA_DIV_IQ_IDX_W
+    `define FPGA_DIV_IQ_IDX_W 1
+`endif
+`ifndef FPGA_BPU_PHT_ENTRIES
+    `define FPGA_BPU_PHT_ENTRIES 128
+`endif
+`ifndef FPGA_ICACHE_SIZE
+    `define FPGA_ICACHE_SIZE 2048
 `endif
 `endif
 
@@ -192,18 +240,55 @@ syn_rst u_syn_rst(
 // RS/fetch profile without editing RTL constants by hand.
 `ifdef FPGA_MODE
 localparam FETCH_BUFFER_DEPTH_CFG = `FPGA_FETCH_BUFFER_DEPTH;
-localparam SCOREBOARD_RS_DEPTH_CFG = `FPGA_SCOREBOARD_RS_DEPTH;
-localparam SCOREBOARD_RS_IDX_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
+localparam RS_TAG_DEPTH_CFG = `FPGA_SCOREBOARD_RS_DEPTH;
+localparam RS_TAG_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
+localparam INT_IQ_DEPTH_CFG = `FPGA_INT_IQ_DEPTH;
+localparam INT_IQ_IDX_W_CFG = `FPGA_INT_IQ_IDX_W;
+localparam MEM_IQ_DEPTH_CFG = `FPGA_MEM_IQ_DEPTH;
+localparam MEM_IQ_IDX_W_CFG = `FPGA_MEM_IQ_IDX_W;
+localparam MUL_IQ_DEPTH_CFG = `FPGA_MUL_IQ_DEPTH;
+localparam MUL_IQ_IDX_W_CFG = `FPGA_MUL_IQ_IDX_W;
+localparam DIV_IQ_DEPTH_CFG = `FPGA_DIV_IQ_DEPTH;
+localparam DIV_IQ_IDX_W_CFG = `FPGA_DIV_IQ_IDX_W;
+localparam BPU_PHT_ENTRIES_CFG = `FPGA_BPU_PHT_ENTRIES;
+localparam ICACHE_SIZE_CFG = `FPGA_ICACHE_SIZE;
 `else
 `ifdef SIM_SCOREBOARD_RS_DEPTH
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
-localparam SCOREBOARD_RS_DEPTH_CFG = `SIM_SCOREBOARD_RS_DEPTH;
-localparam SCOREBOARD_RS_IDX_W_CFG = `SIM_SCOREBOARD_RS_IDX_W;
+localparam RS_TAG_DEPTH_CFG = `SIM_SCOREBOARD_RS_DEPTH;
+localparam RS_TAG_W_CFG = `SIM_SCOREBOARD_RS_IDX_W;
+localparam INT_IQ_DEPTH_CFG = 32;
+localparam INT_IQ_IDX_W_CFG = 5;
+localparam MEM_IQ_DEPTH_CFG = 16;
+localparam MEM_IQ_IDX_W_CFG = 4;
+localparam MUL_IQ_DEPTH_CFG = 4;
+localparam MUL_IQ_IDX_W_CFG = 2;
+localparam DIV_IQ_DEPTH_CFG = 4;
+localparam DIV_IQ_IDX_W_CFG = 2;
+localparam BPU_PHT_ENTRIES_CFG = 1024;
+localparam ICACHE_SIZE_CFG = 8192;
 `else
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
-localparam SCOREBOARD_RS_DEPTH_CFG = 16;
-localparam SCOREBOARD_RS_IDX_W_CFG = 4;
+localparam RS_TAG_DEPTH_CFG = 48;
+localparam RS_TAG_W_CFG = 6;
+localparam INT_IQ_DEPTH_CFG = 32;
+localparam INT_IQ_IDX_W_CFG = 5;
+localparam MEM_IQ_DEPTH_CFG = 16;
+localparam MEM_IQ_IDX_W_CFG = 4;
+localparam MUL_IQ_DEPTH_CFG = 4;
+localparam MUL_IQ_IDX_W_CFG = 2;
+localparam DIV_IQ_DEPTH_CFG = 4;
+localparam DIV_IQ_IDX_W_CFG = 2;
+localparam BPU_PHT_ENTRIES_CFG = 1024;
+localparam ICACHE_SIZE_CFG = 8192;
 `endif
+`endif
+localparam SCOREBOARD_RS_DEPTH_CFG = RS_TAG_DEPTH_CFG;
+localparam SCOREBOARD_RS_IDX_W_CFG = RS_TAG_W_CFG;
+`ifdef SYNTHESIS
+localparam IROM_BACKING_STORE_OMIT_CFG = USE_MEM_SUBSYS;
+`else
+localparam IROM_BACKING_STORE_OMIT_CFG = 0;
 `endif
 
 // ─── Thread Scheduler ──────────────────────────────────────────────────────
@@ -254,14 +339,14 @@ wire [2:0]  rocc_cmd_funct3;
 wire [4:0]  rocc_cmd_rd;
 wire [31:0] rocc_cmd_rs1_data;
 wire [31:0] rocc_cmd_rs2_data;
-wire [4:0]  rocc_cmd_tag;
+wire [RS_TAG_W_CFG-1:0]  rocc_cmd_tag;
 wire [0:0]  rocc_cmd_tid;
 
 wire        rocc_resp_valid;
 wire        rocc_resp_ready;
 wire [4:0]  rocc_resp_rd;
 wire [31:0] rocc_resp_data;
-wire [4:0]  rocc_resp_tag;
+wire [RS_TAG_W_CFG-1:0]  rocc_resp_tag;
 wire [0:0]  rocc_resp_tid;
 
 wire        rocc_mem_req_valid;
@@ -388,16 +473,18 @@ wire [31:0] m0_bypass_addr;
 wire [31:0] m0_bypass_data;
 wire        rob_commit0_valid, rob_commit1_valid;
 wire [4:0]  rob_commit0_rd, rob_commit1_rd;
-wire [4:0]  rob_commit0_tag, rob_commit1_tag;
+wire [RS_TAG_W_CFG-1:0]  rob_commit0_tag, rob_commit1_tag;
 wire        rob_commit0_has_result, rob_commit1_has_result;
 wire [31:0] rob_commit0_data, rob_commit1_data;
 wire [`METADATA_ORDER_ID_W-1:0] rob_commit0_order_id, rob_commit1_order_id;
 wire [31:0] rob_commit0_pc, rob_commit1_pc;
 wire        rob_commit0_is_store, rob_commit1_is_store;
 wire        rob_commit0_is_mret,  rob_commit1_is_mret;
+wire        rob_commit0_is_branch, rob_commit1_is_branch;
 wire [1:0]  rob_instr_retired;
 // Expanded ROB rename support outputs (Stage A: unused, wired to defaults)
 wire [PHYS_REG_W_CFG-1:0]  rob_commit0_prd_old, rob_commit1_prd_old;
+wire [PHYS_REG_W_CFG-1:0]  rob_commit0_prd_new, rob_commit1_prd_new;
 wire        rob_commit0_regs_write, rob_commit1_regs_write;
 wire        rob_recover_walk_active;
 wire        rob_recover_en;
@@ -410,7 +497,29 @@ wire        rob_head_valid_t0, rob_head_valid_t1;
 wire [`METADATA_ORDER_ID_W-1:0] rob_head_order_id_t0, rob_head_order_id_t1;
 wire        rob_head_flushed_t0, rob_head_flushed_t1;
 wire [ROB_IDX_W_CFG-1:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
-wire [4:0]  sb_disp0_tag, sb_disp1_tag;
+wire [RS_TAG_W_CFG-1:0]  sb_disp0_tag, sb_disp1_tag;
+wire        disp0_accepted, disp1_accepted;
+wire [PHYS_REG_W_CFG-1:0] rmt_prs0_1, rmt_prs0_2, rmt_prd0_old;
+wire [PHYS_REG_W_CFG-1:0] rmt_prs1_1, rmt_prs1_2, rmt_prd1_old;
+wire       rmt_prs0_1_ready, rmt_prs0_2_ready;
+wire       rmt_prs1_1_ready, rmt_prs1_2_ready;
+wire [PHYS_REG_W_CFG-1:0] fl_alloc0_prd, fl_alloc1_prd;
+wire       fl_can_alloc_1, fl_can_alloc_2;
+wire       fl_alloc0_rmt_mapped, fl_alloc1_rmt_mapped;
+wire       fl_alloc0_ckpt_live, fl_alloc1_ckpt_live;
+wire [NUM_PHYS_REG_CFG-1:0] rmt_mapped_mask_t0, rmt_mapped_mask_t1;
+wire       shadow_alloc0_valid, shadow_alloc1_valid;
+wire       commit0_free_direct_valid, commit1_free_direct_valid;
+wire       rmt_branch_ckpt_restore_hit;
+wire       fl_branch_ckpt_restore_hit;
+wire       rmt_branch_ckpt_any_live;
+wire       branch_ckpt_restore_hit;
+wire       freelist_rebuild_valid;
+wire [31:0] wb0_result_data, wb1_result_data;
+reg        phys_branch_quarantine [0:NUM_PHYS_REG_CFG-1];
+`ifndef FPGA_MODE
+reg [6:0]  phys_src_refcnt [0:NUM_PHYS_REG_CFG-1];
+`endif
 wire        iss0_is_csr;
 wire        iss0_is_mret;
 wire [11:0] iss0_csr_addr;
@@ -418,6 +527,12 @@ wire        iss0_is_rocc;
 wire [6:0]  iss0_rocc_funct7;
 wire        iss0_pred_taken;
 wire [31:0] iss0_pred_target;
+wire        iss0_valid;
+wire [RS_TAG_W_CFG-1:0]  iss0_tag;
+wire        iss0_flush_kill;
+wire        p1_winner_valid;
+wire        p1_winner_flush_kill;
+wire [RS_TAG_W_CFG-1:0] p1_issue_tag;
 reg         retire_seen_r;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -440,6 +555,37 @@ wire [7:0]  debug_ic_cpu_resp_count;
 wire [7:0]  debug_ic_state_flags;
 wire        hpm_icache_miss_event;
 wire        hpm_sb_stall_event;
+wire        lsu_req_accept;
+wire        lsu_resp_valid;
+wire [31:0] lsu_resp_rdata;
+wire [RS_TAG_W_CFG-1:0]  lsu_resp_tag;
+wire [4:0]  lsu_resp_rd;
+wire        lsu_resp_regs_write;
+wire [2:0]  lsu_resp_fu;
+wire [0:0]  lsu_resp_tid;
+wire [`METADATA_ORDER_ID_W-1:0] lsu_resp_order_id;
+wire        lsu_load_hazard;
+wire        lsu_early_wakeup_valid;
+wire [RS_TAG_W_CFG-1:0]  lsu_early_wakeup_tag;
+wire        lsu_debug_spec_mmio_load_blocked;
+wire        lsu_debug_spec_mmio_load_violation;
+wire        lsu_debug_mmio_load_at_rob_head;
+wire        lsu_debug_older_store_blocked_mmio_load;
+wire [0:0]  mem_wb_tid_r;
+wire        m1_req_valid;
+wire        m1_req_ready;
+wire [31:0] m1_req_addr;
+wire        m1_req_write;
+wire [31:0] m1_req_wdata;
+wire [3:0]  m1_req_wen;
+wire        m1_resp_valid;
+wire [31:0] m1_resp_data;
+wire        m1_resp_l1d_hit;
+wire        mem_subsys_ext_timer_irq;
+wire        mem_subsys_ext_external_irq;
+wire        mem_subsys_debug_uart_tx_byte_valid;
+wire        ext_timer_irq;
+wire        ext_external_irq;
 
 // Fetch buffer backpressure
 wire fb_push_ready;
@@ -463,7 +609,11 @@ wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'
                                   smt_flush;
 wire        combined_flush_any  = trap_redirect_valid || flush_any;
 
-stage_if u_stage_if(
+stage_if #(
+    .USE_EXTERNAL_REFILL_STATIC(IROM_BACKING_STORE_OMIT_CFG),
+    .BPU_PHT_ENTRIES(BPU_PHT_ENTRIES_CFG),
+    .ICACHE_SIZE(ICACHE_SIZE_CFG)
+) u_stage_if(
     .clk              (clk              ),
     .rstn             (rstn             ),
     .pc_stall         (stall            ),
@@ -654,12 +804,44 @@ wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
 wire disp1_valid_pre_rob = dec1_valid && !smt_flush[dec1_tid];
 assign rob_disp_stall = (disp0_valid_pre_rob && rob0_full) ||
                         (disp1_valid_pre_rob && rob1_full);
-// Freelist stall: prevent dispatch when freelist can't provide physical regs
+// Freelist stall: direct commit frees return to the FIFO immediately.  The
+// extra allocation guards keep an about-to-be-allocated PRF from colliding with
+// live RMT/checkpoint/source references while branch recovery is still in
+// flight; they do not delay stale-pdst return at commit.
 wire d0_needs_alloc = disp0_valid_pre_rob && dec0_regs_write && (dec0_rd != 5'd0);
 wire d1_needs_alloc = disp1_valid_pre_rob && dec1_regs_write && (dec1_rd != 5'd0);
-assign fl_disp_stall = (d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
-                       (d0_needs_alloc || d1_needs_alloc) ? !fl_can_alloc_1 :
-                       1'b0;
+wire d0_alloc_blocked_by_rmt_map = d0_needs_alloc && fl_alloc0_rmt_mapped;
+wire d1_alloc_blocked_by_rmt_map = d1_needs_alloc && fl_alloc1_rmt_mapped;
+wire d0_alloc_blocked_by_ckpt = d0_needs_alloc && fl_alloc0_ckpt_live;
+wire d1_alloc_blocked_by_ckpt = d1_needs_alloc && fl_alloc1_ckpt_live;
+`ifdef FPGA_MODE
+wire d0_alloc_blocked_by_src_ref = 1'b0;
+wire d1_alloc_blocked_by_src_ref = 1'b0;
+`else
+wire d0_alloc_blocked_by_src_ref = d0_needs_alloc &&
+                                   (fl_alloc0_prd != {PHYS_REG_W_CFG{1'b0}}) &&
+                                   (phys_src_refcnt[fl_alloc0_prd] != 7'd0);
+wire d1_alloc_blocked_by_src_ref = d1_needs_alloc &&
+                                   (fl_alloc1_prd != {PHYS_REG_W_CFG{1'b0}}) &&
+                                   (phys_src_refcnt[fl_alloc1_prd] != 7'd0);
+`endif
+wire d0_alloc_blocked_by_branch_quarantine = d0_needs_alloc &&
+                                             (fl_alloc0_prd != {PHYS_REG_W_CFG{1'b0}}) &&
+                                             phys_branch_quarantine[fl_alloc0_prd];
+wire d1_alloc_blocked_by_branch_quarantine = d1_needs_alloc &&
+                                             (fl_alloc1_prd != {PHYS_REG_W_CFG{1'b0}}) &&
+                                             phys_branch_quarantine[fl_alloc1_prd];
+assign fl_disp_stall = (((d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
+                        (d0_needs_alloc || d1_needs_alloc) ? !fl_can_alloc_1 :
+                        1'b0) ||
+                       d0_alloc_blocked_by_rmt_map ||
+                       d1_alloc_blocked_by_rmt_map ||
+                       d0_alloc_blocked_by_ckpt ||
+                       d1_alloc_blocked_by_ckpt ||
+                       d0_alloc_blocked_by_src_ref ||
+                       d1_alloc_blocked_by_src_ref ||
+                       d0_alloc_blocked_by_branch_quarantine ||
+                       d1_alloc_blocked_by_branch_quarantine);
 // Never dispatch in the same cycle as a redirect/flush. The IQ flush logic
 // runs before dispatch allocation, so allowing same-cycle dispatch can leak
 // wrong-path entries into the IQs after branch/trap redirects.
@@ -693,50 +875,118 @@ wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
 // These tables map RS tags to physical register addresses. They are written at
 // dispatch (alongside scoreboard allocation) and read at WB time (PRF write)
 // and at issue time (PRF source operand read).
-reg [PHYS_REG_W_CFG-1:0] tag_prd_map  [0:31];   // dest phys reg for each RS tag
-reg [PHYS_REG_W_CFG-1:0] tag_prs1_map [0:31];   // source 1 phys reg for each RS tag
-reg [PHYS_REG_W_CFG-1:0] tag_prs2_map [0:31];   // source 2 phys reg for each RS tag
-reg [0:0] tag_tid_map  [0:31];   // thread ID for each RS tag
+reg [PHYS_REG_W_CFG-1:0] tag_prd_map  [0:RS_TAG_DEPTH_CFG];   // dest phys reg for each RS tag
+reg [PHYS_REG_W_CFG-1:0] tag_prs1_map [0:RS_TAG_DEPTH_CFG];   // source 1 phys reg for each RS tag
+reg [PHYS_REG_W_CFG-1:0] tag_prs2_map [0:RS_TAG_DEPTH_CFG];   // source 2 phys reg for each RS tag
+reg [0:0] tag_tid_map  [0:RS_TAG_DEPTH_CFG];   // thread ID for each RS tag
+reg       tag_live_map [0:RS_TAG_DEPTH_CFG];
+reg       tag_src1_ref_active [0:RS_TAG_DEPTH_CFG];
+reg       tag_src2_ref_active [0:RS_TAG_DEPTH_CFG];
+reg [`METADATA_ORDER_ID_W-1:0] tag_order_map [0:RS_TAG_DEPTH_CFG];
 `ifdef VERILATOR_MAINLINE
-reg [31:0] tag_pc_map [0:31];
-reg [`METADATA_ORDER_ID_W-1:0] tag_order_map [0:31];
-reg [4:0] tag_rd_map [0:31];
+reg [31:0] tag_pc_map [0:RS_TAG_DEPTH_CFG];
+reg [4:0] tag_rd_map [0:RS_TAG_DEPTH_CFG];
 `endif
 integer tp_idx;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        for (tp_idx = 0; tp_idx < 32; tp_idx = tp_idx + 1) begin
+        for (tp_idx = 0; tp_idx <= RS_TAG_DEPTH_CFG; tp_idx = tp_idx + 1) begin
             tag_prd_map[tp_idx]  <= {PHYS_REG_W_CFG{1'b0}};
             tag_prs1_map[tp_idx] <= {PHYS_REG_W_CFG{1'b0}};
             tag_prs2_map[tp_idx] <= {PHYS_REG_W_CFG{1'b0}};
             tag_tid_map[tp_idx]  <= 1'b0;
+            tag_live_map[tp_idx] <= 1'b0;
+            tag_src1_ref_active[tp_idx] <= 1'b0;
+            tag_src2_ref_active[tp_idx] <= 1'b0;
+            tag_order_map[tp_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
 `ifdef VERILATOR_MAINLINE
             tag_pc_map[tp_idx] <= 32'd0;
-            tag_order_map[tp_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
             tag_rd_map[tp_idx] <= 5'd0;
 `endif
         end
     end else begin
-        if (disp0_accepted && sb_disp0_tag != 5'd0) begin
+        if (rob_commit0_valid && rob_commit0_tag != {RS_TAG_W_CFG{1'b0}}) begin
+            tag_prd_map[rob_commit0_tag]  <= {PHYS_REG_W_CFG{1'b0}};
+            tag_prs1_map[rob_commit0_tag] <= {PHYS_REG_W_CFG{1'b0}};
+            tag_prs2_map[rob_commit0_tag] <= {PHYS_REG_W_CFG{1'b0}};
+            tag_tid_map[rob_commit0_tag]  <= 1'b0;
+            tag_live_map[rob_commit0_tag] <= 1'b0;
+            tag_src1_ref_active[rob_commit0_tag] <= 1'b0;
+            tag_src2_ref_active[rob_commit0_tag] <= 1'b0;
+            tag_order_map[rob_commit0_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+`ifdef VERILATOR_MAINLINE
+            tag_pc_map[rob_commit0_tag] <= 32'd0;
+            tag_rd_map[rob_commit0_tag] <= 5'd0;
+`endif
+        end
+        if (rob_commit1_valid && rob_commit1_tag != {RS_TAG_W_CFG{1'b0}}) begin
+            tag_prd_map[rob_commit1_tag]  <= {PHYS_REG_W_CFG{1'b0}};
+            tag_prs1_map[rob_commit1_tag] <= {PHYS_REG_W_CFG{1'b0}};
+            tag_prs2_map[rob_commit1_tag] <= {PHYS_REG_W_CFG{1'b0}};
+            tag_tid_map[rob_commit1_tag]  <= 1'b0;
+            tag_live_map[rob_commit1_tag] <= 1'b0;
+            tag_src1_ref_active[rob_commit1_tag] <= 1'b0;
+            tag_src2_ref_active[rob_commit1_tag] <= 1'b0;
+            tag_order_map[rob_commit1_tag] <= {`METADATA_ORDER_ID_W{1'b0}};
+`ifdef VERILATOR_MAINLINE
+            tag_pc_map[rob_commit1_tag] <= 32'd0;
+            tag_rd_map[rob_commit1_tag] <= 5'd0;
+`endif
+        end
+        if (combined_flush_any) begin
+            for (tp_idx = 1; tp_idx <= RS_TAG_DEPTH_CFG; tp_idx = tp_idx + 1) begin
+                if (tag_live_map[tp_idx] &&
+                    (tag_tid_map[tp_idx] == flush_tid_mux) &&
+                    (!flush_is_order_based || (tag_order_map[tp_idx] > flush_order_id_mux))) begin
+                    tag_prd_map[tp_idx]  <= {PHYS_REG_W_CFG{1'b0}};
+                    tag_prs1_map[tp_idx] <= {PHYS_REG_W_CFG{1'b0}};
+                    tag_prs2_map[tp_idx] <= {PHYS_REG_W_CFG{1'b0}};
+                    tag_tid_map[tp_idx]  <= 1'b0;
+                    tag_live_map[tp_idx] <= 1'b0;
+                    tag_src1_ref_active[tp_idx] <= 1'b0;
+                    tag_src2_ref_active[tp_idx] <= 1'b0;
+                    tag_order_map[tp_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
+`ifdef VERILATOR_MAINLINE
+                    tag_pc_map[tp_idx] <= 32'd0;
+                    tag_rd_map[tp_idx] <= 5'd0;
+`endif
+                end
+            end
+        end
+        if (iss0_valid && !iss0_flush_kill && iss0_tag != {RS_TAG_W_CFG{1'b0}}) begin
+            tag_src1_ref_active[iss0_tag] <= 1'b0;
+            tag_src2_ref_active[iss0_tag] <= 1'b0;
+        end
+        if (p1_winner_valid && !p1_winner_flush_kill && p1_issue_tag != {RS_TAG_W_CFG{1'b0}}) begin
+            tag_src1_ref_active[p1_issue_tag] <= 1'b0;
+            tag_src2_ref_active[p1_issue_tag] <= 1'b0;
+        end
+        if (disp0_accepted && sb_disp0_tag != {RS_TAG_W_CFG{1'b0}}) begin
             tag_prd_map[sb_disp0_tag]  <= shadow_alloc0_valid ? fl_alloc0_prd : {PHYS_REG_W_CFG{1'b0}};
             tag_prs1_map[sb_disp0_tag] <= rmt_prs0_1;
             tag_prs2_map[sb_disp0_tag] <= rmt_prs0_2;
             tag_tid_map[sb_disp0_tag]  <= dec0_tid;
+            tag_live_map[sb_disp0_tag] <= 1'b1;
+            tag_src1_ref_active[sb_disp0_tag] <= dec0_rs1_used && (rmt_prs0_1 != {PHYS_REG_W_CFG{1'b0}});
+            tag_src2_ref_active[sb_disp0_tag] <= dec0_rs2_used && (rmt_prs0_2 != {PHYS_REG_W_CFG{1'b0}});
+            tag_order_map[sb_disp0_tag] <= disp0_order_id;
 `ifdef VERILATOR_MAINLINE
             tag_pc_map[sb_disp0_tag] <= dec0_pc;
-            tag_order_map[sb_disp0_tag] <= disp0_order_id;
             tag_rd_map[sb_disp0_tag] <= dec0_rd;
 `endif
         end
-        if (disp1_accepted && sb_disp1_tag != 5'd0) begin
+        if (disp1_accepted && sb_disp1_tag != {RS_TAG_W_CFG{1'b0}}) begin
             tag_prd_map[sb_disp1_tag]  <= shadow_alloc1_valid ? fl_alloc1_prd : {PHYS_REG_W_CFG{1'b0}};
             tag_prs1_map[sb_disp1_tag] <= rmt_prs1_1;
             tag_prs2_map[sb_disp1_tag] <= rmt_prs1_2;
             tag_tid_map[sb_disp1_tag]  <= dec1_tid;
+            tag_live_map[sb_disp1_tag] <= 1'b1;
+            tag_src1_ref_active[sb_disp1_tag] <= dec1_rs1_used && (rmt_prs1_1 != {PHYS_REG_W_CFG{1'b0}});
+            tag_src2_ref_active[sb_disp1_tag] <= dec1_rs2_used && (rmt_prs1_2 != {PHYS_REG_W_CFG{1'b0}});
+            tag_order_map[sb_disp1_tag] <= disp1_order_id;
 `ifdef VERILATOR_MAINLINE
             tag_pc_map[sb_disp1_tag] <= dec1_pc;
-            tag_order_map[sb_disp1_tag] <= disp1_order_id;
             tag_rd_map[sb_disp1_tag] <= dec1_rd;
 `endif
         end
@@ -744,17 +994,50 @@ always @(posedge clk or negedge rstn) begin
 end
 
 // ════════════════════════════════════════════════════════════════════════════
+integer phys_quarantine_idx;
+`ifndef FPGA_MODE
+integer phys_ref_idx;
+`endif
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (phys_quarantine_idx = 0; phys_quarantine_idx < NUM_PHYS_REG_CFG; phys_quarantine_idx = phys_quarantine_idx + 1)
+            phys_branch_quarantine[phys_quarantine_idx] <= 1'b0;
+    end else begin
+        if (!rmt_branch_ckpt_any_live) begin
+            for (phys_quarantine_idx = 0; phys_quarantine_idx < NUM_PHYS_REG_CFG; phys_quarantine_idx = phys_quarantine_idx + 1)
+                phys_branch_quarantine[phys_quarantine_idx] <= 1'b0;
+        end else begin
+            if (commit0_free_direct_valid)
+                phys_branch_quarantine[rob_commit0_prd_old] <= 1'b1;
+            if (commit1_free_direct_valid)
+                phys_branch_quarantine[rob_commit1_prd_old] <= 1'b1;
+        end
+    end
+end
+
+`ifndef FPGA_MODE
+always @(*) begin
+    for (phys_ref_idx = 0; phys_ref_idx < NUM_PHYS_REG_CFG; phys_ref_idx = phys_ref_idx + 1)
+        phys_src_refcnt[phys_ref_idx] = 7'd0;
+    for (phys_ref_idx = 1; phys_ref_idx <= RS_TAG_DEPTH_CFG; phys_ref_idx = phys_ref_idx + 1) begin
+        if (tag_src1_ref_active[phys_ref_idx] && tag_prs1_map[phys_ref_idx] != {PHYS_REG_W_CFG{1'b0}})
+            phys_src_refcnt[tag_prs1_map[phys_ref_idx]] = phys_src_refcnt[tag_prs1_map[phys_ref_idx]] + 1'b1;
+        if (tag_src2_ref_active[phys_ref_idx] && tag_prs2_map[phys_ref_idx] != {PHYS_REG_W_CFG{1'b0}})
+            phys_src_refcnt[tag_prs2_map[phys_ref_idx]] = phys_src_refcnt[tag_prs2_map[phys_ref_idx]] + 1'b1;
+    end
+end
+`endif
+
 // STAGE 4: Scoreboard (16-entry RS, Dual-Issue)
 // ════════════════════════════════════════════════════════════════════════════
 // Issue port 0 wires
-wire        iss0_valid;
-wire [4:0]  iss0_tag;
 wire [31:0] iss0_pc, iss0_imm;
 wire [2:0]  iss0_func3;
 wire        iss0_func7;
 wire [4:0]  iss0_rd, iss0_rs1, iss0_rs2;
 wire        iss0_rs1_used, iss0_rs2_used;
-wire [4:0]  iss0_src1_tag, iss0_src2_tag;
+wire [RS_TAG_W_CFG-1:0]  iss0_src1_tag, iss0_src2_tag;
 wire        iss0_br, iss0_mem_read, iss0_mem2reg;
 wire [2:0]  iss0_alu_op;
 wire        iss0_mem_write;
@@ -763,16 +1046,15 @@ wire        iss0_br_addr_mode, iss0_regs_write;
 wire [2:0]  iss0_fu;
 wire [0:0]  iss0_tid;
 
-wire        p1_winner_valid;
 wire [1:0]  p1_winner;
 wire        p1_mem_cand_valid;
-wire [4:0]  p1_mem_cand_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mem_cand_tag;
 wire [31:0] p1_mem_cand_pc, p1_mem_cand_imm;
 wire [2:0]  p1_mem_cand_func3;
 wire        p1_mem_cand_func7;
 wire [4:0]  p1_mem_cand_rd, p1_mem_cand_rs1, p1_mem_cand_rs2;
 wire        p1_mem_cand_rs1_used, p1_mem_cand_rs2_used;
-wire [4:0]  p1_mem_cand_src1_tag, p1_mem_cand_src2_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mem_cand_src1_tag, p1_mem_cand_src2_tag;
 wire        p1_mem_cand_br, p1_mem_cand_mem_read, p1_mem_cand_mem2reg;
 wire [2:0]  p1_mem_cand_alu_op;
 wire        p1_mem_cand_mem_write;
@@ -783,13 +1065,13 @@ wire [0:0]  p1_mem_cand_tid;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mem_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_mem_cand_epoch;
 wire        p1_mul_cand_valid;
-wire [4:0]  p1_mul_cand_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mul_cand_tag;
 wire [31:0] p1_mul_cand_pc, p1_mul_cand_imm;
 wire [2:0]  p1_mul_cand_func3;
 wire        p1_mul_cand_func7;
 wire [4:0]  p1_mul_cand_rd, p1_mul_cand_rs1, p1_mul_cand_rs2;
 wire        p1_mul_cand_rs1_used, p1_mul_cand_rs2_used;
-wire [4:0]  p1_mul_cand_src1_tag, p1_mul_cand_src2_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mul_cand_src1_tag, p1_mul_cand_src2_tag;
 wire        p1_mul_cand_br, p1_mul_cand_mem_read, p1_mul_cand_mem2reg;
 wire [2:0]  p1_mul_cand_alu_op;
 wire        p1_mul_cand_mem_write;
@@ -800,13 +1082,13 @@ wire [0:0]  p1_mul_cand_tid;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch;
 wire        p1_div_cand_valid;
-wire [4:0]  p1_div_cand_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_div_cand_tag;
 wire [31:0] p1_div_cand_pc, p1_div_cand_imm;
 wire [2:0]  p1_div_cand_func3;
 wire        p1_div_cand_func7;
 wire [4:0]  p1_div_cand_rd, p1_div_cand_rs1, p1_div_cand_rs2;
 wire        p1_div_cand_rs1_used, p1_div_cand_rs2_used;
-wire [4:0]  p1_div_cand_src1_tag, p1_div_cand_src2_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_div_cand_src1_tag, p1_div_cand_src2_tag;
 wire        p1_div_cand_br, p1_div_cand_mem_read, p1_div_cand_mem2reg;
 wire [2:0]  p1_div_cand_alu_op;
 wire        p1_div_cand_mem_write;
@@ -843,6 +1125,11 @@ wire        sb_debug_spec_dispatch0;
 wire        sb_debug_spec_dispatch1;
 wire        sb_debug_branch_gated_mem_issue;
 wire        sb_debug_flush_killed_speculative;
+wire        sb_debug_stall_iq_int_full;
+wire        sb_debug_stall_iq_mem_full;
+wire        sb_debug_stall_iq_mul_full;
+wire        sb_debug_stall_iq_div_full;
+wire        sb_debug_stall_rs_tag_empty;
 
 // Issue metadata wires
 wire [`METADATA_ORDER_ID_W-1:0] iss0_order_id;
@@ -850,16 +1137,27 @@ wire [`METADATA_EPOCH_W-1:0]    iss0_epoch;
 
 // Writeback port wires (from pipes)
 wire        wb0_valid, wb1_valid;
-wire [4:0]  wb0_tag,   wb1_tag;
+wire [RS_TAG_W_CFG-1:0]  wb0_tag,   wb1_tag;
 wire [4:0]  wb0_rd,    wb1_rd;
 wire        wb0_regs_write, wb1_regs_write;
 wire [2:0]  wb0_fu,    wb1_fu;
 wire [0:0]  wb0_tid,   wb1_tid;
+wire [`METADATA_ORDER_ID_W-1:0] wb0_order_id, wb1_order_id;
+wire        wb0_valid_safe, wb1_valid_safe;
+wire        lsu_early_wakeup_valid_safe;
 
 dispatch_unit #(
     .RS_DEPTH(SCOREBOARD_RS_DEPTH_CFG),
     .RS_IDX_W(SCOREBOARD_RS_IDX_W_CFG),
-    .RS_TAG_W(5)
+    .RS_TAG_W(RS_TAG_W_CFG),
+    .INT_IQ_DEPTH(INT_IQ_DEPTH_CFG),
+    .INT_IQ_IDX_W(INT_IQ_IDX_W_CFG),
+    .MEM_IQ_DEPTH(MEM_IQ_DEPTH_CFG),
+    .MEM_IQ_IDX_W(MEM_IQ_IDX_W_CFG),
+    .MUL_IQ_DEPTH(MUL_IQ_DEPTH_CFG),
+    .MUL_IQ_IDX_W(MUL_IQ_IDX_W_CFG),
+    .DIV_IQ_DEPTH(DIV_IQ_DEPTH_CFG),
+    .DIV_IQ_IDX_W(DIV_IQ_IDX_W_CFG)
 ) u_dispatch_unit (
     .clk         (clk              ),
     .rstn        (rstn             ),
@@ -1073,21 +1371,26 @@ dispatch_unit #(
     .debug_spec_dispatch1(sb_debug_spec_dispatch1),
     .debug_branch_gated_mem_issue(sb_debug_branch_gated_mem_issue),
     .debug_flush_killed_speculative(sb_debug_flush_killed_speculative),
+    .debug_stall_iq_int_full(sb_debug_stall_iq_int_full),
+    .debug_stall_iq_mem_full(sb_debug_stall_iq_mem_full),
+    .debug_stall_iq_mul_full(sb_debug_stall_iq_mul_full),
+    .debug_stall_iq_div_full(sb_debug_stall_iq_div_full),
+    .debug_stall_rs_tag_empty(sb_debug_stall_rs_tag_empty),
 
     // Writeback ports
-    .wb0_valid       (wb0_valid       ),
+    .wb0_valid       (wb0_valid_safe  ),
     .wb0_tag         (wb0_tag         ),
     .wb0_rd          (wb0_rd          ),
     .wb0_regs_write  (wb0_regs_write  ),
     .wb0_fu          (wb0_fu          ),
     .wb0_tid         (wb0_tid         ),
-    .wb1_valid       (wb1_valid       ),
+    .wb1_valid       (wb1_valid_safe  ),
     .wb1_tag         (wb1_tag         ),
     .wb1_rd          (wb1_rd          ),
     .wb1_regs_write  (wb1_regs_write  ),
     .wb1_fu          (wb1_fu          ),
     .wb1_tid         (wb1_tid         ),
-    .lsu_early_wakeup_valid(lsu_early_wakeup_valid),
+    .lsu_early_wakeup_valid(lsu_early_wakeup_valid_safe),
     .lsu_early_wakeup_tag(lsu_early_wakeup_tag),
     .commit0_valid   (rob_commit0_valid),
     .commit0_tag     (rob_commit0_tag  ),
@@ -1102,6 +1405,8 @@ dispatch_unit #(
     .br_complete     (scoreboard_br_complete),
     .br_complete_tid (scoreboard_br_complete_tid),
     .br_complete_order_id(scoreboard_br_complete_order_id),
+    .branch_track_clear_t0(!rob_head_valid_t0 && !rob_recover_walk_active),
+    .branch_track_clear_t1(!rob_head_valid_t1 && !rob_recover_walk_active),
 
     // RoCC backpressure
     .rocc_ready      (rocc_cmd_ready),
@@ -1110,6 +1415,9 @@ dispatch_unit #(
 
 wire       p1_issue_is_mem     = (p1_winner == 2'b10);
 wire       p1_issue_is_div     = (p1_winner == 2'b01);
+assign p1_issue_tag =
+                                  p1_issue_is_mem ? p1_mem_cand_tag :
+                                  p1_issue_is_div ? p1_div_cand_tag : p1_mul_cand_tag;
 wire [0:0] p1_issue_arch_tid   = p1_issue_is_mem ? p1_mem_cand_tid :
                                   p1_issue_is_div ? p1_div_cand_tid : p1_mul_cand_tid;
 wire [`METADATA_ORDER_ID_W-1:0] p1_issue_arch_order_id =
@@ -1131,22 +1439,22 @@ wire disp1_is_store = (dec1_fu == `FU_STORE);
 // Dispatch tag wires from scoreboard
 
 // Per-tag SYSTEM metadata (decoder → scoreboard issue sideband)
-reg        rs_is_csr  [0:31];
-reg        rs_is_mret [0:31];
-reg [11:0] rs_csr_addr[0:31];
-reg        rs_pred_taken [0:31];
-reg [31:0] rs_pred_target[0:31];
+reg        rs_is_csr  [0:RS_TAG_DEPTH_CFG];
+reg        rs_is_mret [0:RS_TAG_DEPTH_CFG];
+reg [11:0] rs_csr_addr[0:RS_TAG_DEPTH_CFG];
+reg        rs_pred_taken [0:RS_TAG_DEPTH_CFG];
+reg [31:0] rs_pred_target[0:RS_TAG_DEPTH_CFG];
 integer    sys_meta_idx;
 
 // Per-tag RoCC metadata (decoder → scoreboard issue sideband)
-reg        rs_is_rocc    [0:31];
-reg [6:0]  rs_rocc_funct7[0:31];
+reg        rs_is_rocc    [0:RS_TAG_DEPTH_CFG];
+reg [6:0]  rs_rocc_funct7[0:RS_TAG_DEPTH_CFG];
 integer    rocc_meta_idx;
 
 rob #(
     .ROB_DEPTH      (ROB_DEPTH_CFG),
     .ROB_IDX_W      (ROB_IDX_W_CFG),
-    .RS_TAG_W       (5),
+    .RS_TAG_W       (RS_TAG_W_CFG),
     .PHYS_REG_W     (PHYS_REG_W_CFG),
     .NUM_THREAD     (2)
 ) u_rob (
@@ -1195,14 +1503,14 @@ rob #(
     .disp1_rob_idx      (rob_disp1_rob_idx),
 
     // Writeback Port 0
-    .wb0_valid          (wb0_valid),
+    .wb0_valid          (wb0_valid_safe),
     .wb0_tag            (wb0_tag),
     .wb0_tid            (wb0_tid),
     .wb0_data           (wb0_result_data),
     .wb0_regs_write     (wb0_regs_write),
 
     // Writeback Port 1
-    .wb1_valid          (wb1_valid),
+    .wb1_valid          (wb1_valid_safe),
     .wb1_tag            (wb1_tag),
     .wb1_tid            (wb1_tid),
     .wb1_data           (wb1_result_data),
@@ -1232,11 +1540,15 @@ rob #(
     .commit1_is_store   (rob_commit1_is_store),
     .commit0_is_mret    (rob_commit0_is_mret),
     .commit1_is_mret    (rob_commit1_is_mret),
+    .commit0_is_branch  (rob_commit0_is_branch),
+    .commit1_is_branch  (rob_commit1_is_branch),
 
     // Rename Commit Outputs (Stage A: unused)
     .commit0_prd_old         (rob_commit0_prd_old),
+    .commit0_prd_new         (rob_commit0_prd_new),
     .commit0_regs_write_out  (rob_commit0_regs_write),
     .commit1_prd_old         (rob_commit1_prd_old),
+    .commit1_prd_new         (rob_commit1_prd_new),
     .commit1_regs_write_out  (rob_commit1_regs_write),
 
     // Recovery Walk Interface (Stage A: unused)
@@ -1248,6 +1560,12 @@ rob #(
     .recover_regs_write  (rob_recover_regs_write),
     .recover_tid         (rob_recover_tid),
     .debug_commit_suppressed(rob_debug_commit_suppressed),
+    .free_query0_prd     ({PHYS_REG_W_CFG{1'b0}}),
+    .free_query0_tid     (1'b0),
+    .free_query0_prd_old_live(),
+    .free_query1_prd     ({PHYS_REG_W_CFG{1'b0}}),
+    .free_query1_tid     (1'b1),
+    .free_query1_prd_old_live(),
     .head_valid_t0       (rob_head_valid_t0),
     .head_order_id_t0    (rob_head_order_id_t0),
     .head_flushed_t0     (rob_head_flushed_t0),
@@ -1260,22 +1578,52 @@ rob #(
 // STAGE 4b: Rename Map Table + Freelist (Shadow – not yet on critical path)
 // ════════════════════════════════════════════════════════════════════════════
 // Rename outputs (shadow – unused by scoreboard path for now)
-wire [PHYS_REG_W_CFG-1:0] rmt_prs0_1, rmt_prs0_2, rmt_prd0_old;
-wire [PHYS_REG_W_CFG-1:0] rmt_prs1_1, rmt_prs1_2, rmt_prd1_old;
-wire       rmt_prs0_1_ready, rmt_prs0_2_ready;
-wire       rmt_prs1_1_ready, rmt_prs1_2_ready;
 
 // Freelist outputs (shadow)
-wire [PHYS_REG_W_CFG-1:0] fl_alloc0_prd, fl_alloc1_prd;
-wire       fl_can_alloc_1, fl_can_alloc_2;
 
 // Shadow rename alloc valid: inst writes to rd != x0
-wire shadow_alloc0_valid = disp0_accepted && dec0_regs_write && (dec0_rd != 5'd0);
-wire shadow_alloc1_valid = disp1_accepted && dec1_regs_write && (dec1_rd != 5'd0);
+assign shadow_alloc0_valid = disp0_accepted && dec0_regs_write && (dec0_rd != 5'd0);
+assign shadow_alloc1_valid = disp1_accepted && dec1_regs_write && (dec1_rd != 5'd0);
+
+assign commit0_free_direct_valid = rob_commit0_valid && rob_commit0_regs_write &&
+                                   (rob_commit0_prd_old != {PHYS_REG_W_CFG{1'b0}});
+assign commit1_free_direct_valid = rob_commit1_valid && rob_commit1_regs_write &&
+                                   (rob_commit1_prd_old != {PHYS_REG_W_CFG{1'b0}});
+
+wire branch_ckpt_capture0_valid = disp0_accepted && dec0_br;
+wire branch_ckpt_capture1_valid = disp1_accepted && dec1_br;
+wire [1:0] branch_ckpt_capture0_alloc_count = {1'b0, shadow_alloc0_valid};
+wire [1:0] branch_ckpt_capture1_alloc_count =
+    {1'b0, (shadow_alloc0_valid && (dec0_tid == dec1_tid))} + {1'b0, shadow_alloc1_valid};
+wire branch_ckpt_restore = !trap_redirect_valid && pipe0_br_ctrl;
+assign branch_ckpt_restore_hit = rmt_branch_ckpt_restore_hit;
+reg  branch_ckpt_recover_active_r;
+wire rmt_branch_ckpt_recover_blocks_rob_walk =
+    branch_ckpt_recover_active_r || (branch_ckpt_restore && branch_ckpt_restore_hit);
+assign freelist_rebuild_valid =
+    fl_disp_stall &&
+    !rob_head_valid_t0 && !rob_head_valid_t1 &&
+    !rob_recover_walk_active &&
+    !rmt_branch_ckpt_any_live;
+wire [NUM_PHYS_REG_CFG-1:0] freelist_rebuild_mask =
+    dec0_tid ? rmt_mapped_mask_t1 : rmt_mapped_mask_t0;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        branch_ckpt_recover_active_r <= 1'b0;
+    end else if (branch_ckpt_restore) begin
+        branch_ckpt_recover_active_r <= branch_ckpt_restore_hit;
+    end else if (branch_ckpt_recover_active_r && !rob_recover_walk_active) begin
+        branch_ckpt_recover_active_r <= 1'b0;
+    end
+end
 
 rename_map_table #(
     .PHYS_REG_W   (PHYS_REG_W_CFG),
-    .NUM_PHYS_REG (NUM_PHYS_REG_CFG)
+    .NUM_PHYS_REG (NUM_PHYS_REG_CFG),
+    .BR_CKPT_DEPTH(BR_CKPT_DEPTH_CFG),
+    .BR_CKPT_IDX_W(BR_CKPT_IDX_W_CFG),
+    .ENABLE_CKPT_QUERY(CKPT_QUERY_ENABLE_CFG)
 ) u_rename_map_table (
     .clk            (clk),
     .rstn           (rstn),
@@ -1309,47 +1657,113 @@ rename_map_table #(
     .alloc1_rd      (dec1_rd),
     .alloc1_prd_new (fl_alloc1_prd),
     // CDB writeback (mark phys reg as ready at WB time)
-    .cdb0_valid     (wb0_valid && wb0_regs_write),
+    .cdb0_valid     (wb0_valid_safe && wb0_regs_write),
     .cdb0_prd       (tag_prd_map[wb0_tag]),
-    .cdb1_valid     (wb1_valid && wb1_regs_write),
+    .cdb1_valid     (wb1_valid_safe && wb1_regs_write),
     .cdb1_prd       (tag_prd_map[wb1_tag]),
     // Recovery
-    .recover_en     (rob_recover_en),
+    .recover_en     (rob_recover_en && !rmt_branch_ckpt_recover_blocks_rob_walk),
     .recover_rd     (rob_recover_rd),
     .recover_prd    (rob_recover_prd_old),
     .recover_tid    (rob_recover_tid),
     // Bulk reset
     .reset_to_arch  (1'b0),
-    .reset_tid      (1'b0)
+    .reset_tid      (1'b0),
+    .query0_prd     (fl_alloc0_prd),
+    .query0_tid     (dec0_tid),
+    .query0_mapped  (fl_alloc0_rmt_mapped),
+    .query1_prd     (fl_alloc1_prd),
+    .query1_tid     (dec0_tid),
+    .query1_mapped  (fl_alloc1_rmt_mapped),
+    .ckpt_query0_prd(fl_alloc0_prd),
+    .ckpt_query0_tid(dec0_tid),
+    .ckpt_query0_live(fl_alloc0_ckpt_live),
+    .ckpt_query1_prd(fl_alloc1_prd),
+    .ckpt_query1_tid(dec0_tid),
+    .ckpt_query1_live(fl_alloc1_ckpt_live),
+    .branch_ckpt_capture0_valid(branch_ckpt_capture0_valid),
+    .branch_ckpt_capture0_tid(dec0_tid),
+    .branch_ckpt_capture0_order_id(disp0_order_id),
+    .branch_ckpt_capture1_valid(branch_ckpt_capture1_valid),
+    .branch_ckpt_capture1_tid(dec1_tid),
+    .branch_ckpt_capture1_order_id(disp1_order_id),
+    .branch_ckpt_restore(branch_ckpt_restore),
+    .branch_ckpt_restore_tid(pipe0_br_tid),
+    .branch_ckpt_restore_order_id(pipe0_br_order_id),
+    .branch_ckpt_restore_hit(rmt_branch_ckpt_restore_hit),
+    .branch_ckpt_any_live(rmt_branch_ckpt_any_live),
+    .branch_ckpt_drop0_valid(rob_commit0_valid && rob_commit0_is_branch),
+    .branch_ckpt_drop0_tid(1'b0),
+    .branch_ckpt_drop0_order_id(rob_commit0_order_id),
+    .branch_ckpt_drop1_valid(rob_commit1_valid && rob_commit1_is_branch),
+    .branch_ckpt_drop1_tid(1'b1),
+    .branch_ckpt_drop1_order_id(rob_commit1_order_id),
+    // RMT checkpoints are a rename-time image.  Do not forward later commits
+    // into them: older in-flight writers were already included at capture.
+    .ckpt_commit0_valid(1'b0),
+    .ckpt_commit0_tid(1'b0),
+    .ckpt_commit0_rd(rob_commit0_rd),
+    .ckpt_commit0_prd_new(rob_commit0_prd_new),
+    .ckpt_commit1_valid(1'b0),
+    .ckpt_commit1_tid(1'b1),
+    .ckpt_commit1_rd(rob_commit1_rd),
+    .ckpt_commit1_prd_new(rob_commit1_prd_new),
+    .mapped_mask_t0(rmt_mapped_mask_t0),
+    .mapped_mask_t1(rmt_mapped_mask_t1)
 );
 
 freelist #(
     .PHYS_REG_W (PHYS_REG_W_CFG),
     .NUM_FREE   (NUM_FREE_CFG),
     .FL_DEPTH   (FL_DEPTH_CFG),
-    .FL_IDX_W   (FL_IDX_W_CFG)
+    .FL_IDX_W   (FL_IDX_W_CFG),
+    .BR_CKPT_DEPTH(BR_CKPT_DEPTH_CFG),
+    .BR_CKPT_IDX_W(BR_CKPT_IDX_W_CFG)
 ) u_freelist (
     .clk                (clk),
     .rstn               (rstn),
     .tid                (dec0_tid),
     // Alloc
     .alloc0_req         (shadow_alloc0_valid),
+    .alloc1_after_alloc0(d0_needs_alloc),
     .alloc0_prd         (fl_alloc0_prd),
     .alloc1_req         (shadow_alloc1_valid),
     .alloc1_prd         (fl_alloc1_prd),
     .can_alloc_1        (fl_can_alloc_1),
     .can_alloc_2        (fl_can_alloc_2),
     // Free at commit
-    .free0_valid        (rob_commit0_valid && rob_commit0_regs_write),
+    .free0_valid        (commit0_free_direct_valid),
     .free0_prd          (rob_commit0_prd_old),
     .free0_tid          (1'b0),   // commit0 is always thread 0
-    .free1_valid        (rob_commit1_valid && rob_commit1_regs_write),
+    .free1_valid        (commit1_free_direct_valid),
     .free1_prd          (rob_commit1_prd_old),
     .free1_tid          (1'b1),   // commit1 is always thread 1
     // Recovery push
-    .recover_push_valid (rob_recover_en && rob_recover_regs_write),
+    .recover_push_valid (rob_recover_en && rob_recover_regs_write &&
+                          !rmt_branch_ckpt_recover_blocks_rob_walk),
     .recover_push_prd   (rob_recover_prd_new),
     .recover_push_tid   (rob_recover_tid),
+    .branch_ckpt_capture0_valid(branch_ckpt_capture0_valid),
+    .branch_ckpt_capture0_tid(dec0_tid),
+    .branch_ckpt_capture0_order_id(disp0_order_id),
+    .branch_ckpt_capture0_alloc_count(branch_ckpt_capture0_alloc_count),
+    .branch_ckpt_capture1_valid(branch_ckpt_capture1_valid),
+    .branch_ckpt_capture1_tid(dec1_tid),
+    .branch_ckpt_capture1_order_id(disp1_order_id),
+    .branch_ckpt_capture1_alloc_count(branch_ckpt_capture1_alloc_count),
+    .branch_ckpt_restore(branch_ckpt_restore),
+    .branch_ckpt_restore_tid(pipe0_br_tid),
+    .branch_ckpt_restore_order_id(pipe0_br_order_id),
+    .branch_ckpt_restore_hit(fl_branch_ckpt_restore_hit),
+    .branch_ckpt_drop0_valid(rob_commit0_valid && rob_commit0_is_branch),
+    .branch_ckpt_drop0_tid(1'b0),
+    .branch_ckpt_drop0_order_id(rob_commit0_order_id),
+    .branch_ckpt_drop1_valid(rob_commit1_valid && rob_commit1_is_branch),
+    .branch_ckpt_drop1_tid(1'b1),
+    .branch_ckpt_drop1_order_id(rob_commit1_order_id),
+    .rebuild_valid      (freelist_rebuild_valid),
+    .rebuild_tid        (dec0_tid),
+    .rebuild_mapped_mask(freelist_rebuild_mask),
     // Bulk reset
     .reset_list         (1'b0),
     .reset_tid          (1'b0)
@@ -1424,12 +1838,12 @@ regs_mt #(.N_T(2)) u_regs_mt_p1(
 wire [31:0] prf_r0_data, prf_r1_data, prf_r2_data, prf_r3_data;
 
 // PRF write signals: write at WB using phys reg from tag_prd_map
-wire        prf_w0_en   = wb0_valid && wb0_regs_write && (tag_prd_map[wb0_tag] != {PHYS_REG_W_CFG{1'b0}});
+wire        prf_w0_en   = wb0_valid_safe && wb0_regs_write && (tag_prd_map[wb0_tag] != {PHYS_REG_W_CFG{1'b0}});
 wire [PHYS_REG_W_CFG-1:0]  prf_w0_addr = tag_prd_map[wb0_tag];
 wire [0:0]  prf_w0_tid  = tag_tid_map[wb0_tag];
 wire [31:0] prf_w0_data = wb0_result_data;
 
-wire        prf_w1_en   = wb1_valid && wb1_regs_write && (tag_prd_map[wb1_tag] != {PHYS_REG_W_CFG{1'b0}});
+wire        prf_w1_en   = wb1_valid_safe && wb1_regs_write && (tag_prd_map[wb1_tag] != {PHYS_REG_W_CFG{1'b0}});
 wire [PHYS_REG_W_CFG-1:0]  prf_w1_addr = tag_prd_map[wb1_tag];
 wire [0:0]  prf_w1_tid  = tag_tid_map[wb1_tag];
 wire [31:0] prf_w1_data = wb1_result_data;
@@ -1444,7 +1858,7 @@ wire [31:0] prf_w1_data = wb1_result_data;
 //   This applies to all builds so the functional timing model stays uniform.
 // ════════════════════════════════════════════════════════════════════════════
 reg         p0_pre_ro_valid;
-reg  [4:0]  p0_pre_ro_tag;
+reg  [RS_TAG_W_CFG-1:0]  p0_pre_ro_tag;
 reg  [31:0] p0_pre_ro_pc;
 reg  [31:0] p0_pre_ro_imm;
 reg  [2:0]  p0_pre_ro_func3;
@@ -1452,7 +1866,7 @@ reg         p0_pre_ro_func7;
 reg  [4:0]  p0_pre_ro_rd;
 reg  [4:0]  p0_pre_ro_rs1, p0_pre_ro_rs2;
 reg         p0_pre_ro_rs1_used, p0_pre_ro_rs2_used;
-reg  [4:0]  p0_pre_ro_src1_tag, p0_pre_ro_src2_tag;
+reg  [RS_TAG_W_CFG-1:0]  p0_pre_ro_src1_tag, p0_pre_ro_src2_tag;
 reg  [2:0]  p0_pre_ro_alu_op;
 reg  [1:0]  p0_pre_ro_alu_src1, p0_pre_ro_alu_src2;
 reg         p0_pre_ro_br;
@@ -1471,7 +1885,7 @@ reg         p0_pre_ro_is_rocc;
 reg  [6:0]  p0_pre_ro_rocc_funct7;
 
 reg         p1_pre_ro_valid;
-reg  [4:0]  p1_pre_ro_tag;
+reg  [RS_TAG_W_CFG-1:0]  p1_pre_ro_tag;
 reg  [31:0] p1_pre_ro_pc;
 reg  [31:0] p1_pre_ro_imm;
 reg  [2:0]  p1_pre_ro_func3;
@@ -1479,7 +1893,7 @@ reg         p1_pre_ro_func7;
 reg  [4:0]  p1_pre_ro_rd;
 reg  [4:0]  p1_pre_ro_rs1, p1_pre_ro_rs2;
 reg         p1_pre_ro_rs1_used, p1_pre_ro_rs2_used;
-reg  [4:0]  p1_pre_ro_src1_tag, p1_pre_ro_src2_tag;
+reg  [RS_TAG_W_CFG-1:0]  p1_pre_ro_src1_tag, p1_pre_ro_src2_tag;
 reg  [2:0]  p1_pre_ro_alu_op;
 reg  [1:0]  p1_pre_ro_alu_src1, p1_pre_ro_alu_src2;
 reg         p1_pre_ro_br;
@@ -1491,10 +1905,10 @@ reg  [`METADATA_ORDER_ID_W-1:0] p1_pre_ro_order_id;
 reg  [`METADATA_EPOCH_W-1:0]    p1_pre_ro_epoch;
 reg  [PHYS_REG_W_CFG-1:0]  p1_pre_ro_prs1, p1_pre_ro_prs2;
 
-wire iss0_flush_kill =
+assign iss0_flush_kill =
     combined_flush_any && (iss0_tid == flush_tid_mux) &&
     (!flush_is_order_based || (iss0_order_id > flush_order_id_mux));
-wire p1_winner_flush_kill =
+assign p1_winner_flush_kill =
     combined_flush_any && (p1_issue_arch_tid == flush_tid_mux) &&
     (!flush_is_order_based || (p1_issue_arch_order_id > flush_order_id_mux));
 wire p0_pre_ro_flush_kill =
@@ -1657,8 +2071,8 @@ phys_regfile #(
 
 // Order ID increment logic (after scoreboard is defined)
 // Dispatch is accepted when valid is asserted and stall is not asserted
-wire disp0_accepted = disp0_valid_gated && !sb_disp_stall;
-wire disp1_accepted = disp1_valid_gated && !sb_disp_stall && !sb_disp1_blocked;
+assign disp0_accepted = disp0_valid_gated && !sb_disp_stall;
+assign disp1_accepted = disp1_valid_gated && !sb_disp_stall && !sb_disp1_blocked;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -1804,14 +2218,14 @@ wire csr_ext_external_irq = ext_external_irq && precise_interrupt_ready;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        for (sys_meta_idx = 0; sys_meta_idx < 32; sys_meta_idx = sys_meta_idx + 1) begin
+        for (sys_meta_idx = 0; sys_meta_idx <= RS_TAG_DEPTH_CFG; sys_meta_idx = sys_meta_idx + 1) begin
             rs_is_csr[sys_meta_idx]   <= 1'b0;
             rs_is_mret[sys_meta_idx]  <= 1'b0;
             rs_csr_addr[sys_meta_idx] <= 12'd0;
             rs_pred_taken[sys_meta_idx]  <= 1'b0;
             rs_pred_target[sys_meta_idx] <= 32'd0;
         end
-        for (rocc_meta_idx = 0; rocc_meta_idx < 32; rocc_meta_idx = rocc_meta_idx + 1) begin
+        for (rocc_meta_idx = 0; rocc_meta_idx <= RS_TAG_DEPTH_CFG; rocc_meta_idx = rocc_meta_idx + 1) begin
             rs_is_rocc[rocc_meta_idx]     <= 1'b0;
             rs_rocc_funct7[rocc_meta_idx] <= 7'd0;
         end
@@ -1897,18 +2311,30 @@ wire        p0_ex_valid;
 wire [4:0]  p0_ex_rd;
 wire        p0_ex_rd_wen;
 wire [31:0] p0_ex_result;
-wire [4:0]  p0_ex_tag;
+wire [RS_TAG_W_CFG-1:0]  p0_ex_tag;
 wire [2:0]  p0_ex_fu;
 wire [0:0]  p0_ex_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p0_ex_order_id;
 
 // Pipe 1 ALU results (for bypass)
 wire        p1_alu_valid;
 wire [4:0]  p1_alu_rd;
 wire        p1_alu_rd_wen;
 wire [31:0] p1_alu_result;
-wire [4:0]  p1_alu_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_alu_tag;
 wire [2:0]  p1_alu_fu;
 wire [0:0]  p1_alu_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_alu_order_id;
+wire p0_ex_valid_safe =
+    p0_ex_valid && (p0_ex_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_live_map[p0_ex_tag] &&
+    (tag_tid_map[p0_ex_tag] == p0_ex_tid) &&
+    (tag_order_map[p0_ex_tag] == p0_ex_order_id);
+wire p1_alu_valid_safe =
+    p1_alu_valid && (p1_alu_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_live_map[p1_alu_tag] &&
+    (tag_tid_map[p1_alu_tag] == p1_alu_tid) &&
+    (tag_order_map[p1_alu_tag] == p1_alu_order_id);
 
 // MEM stage result (for bypass)
 wire        mem_wb_valid;
@@ -1932,12 +2358,12 @@ bypass_network u_bypass0(
     .tagbuf_rs1_data (p0_tagbuf_a_data ),
     .tagbuf_rs2_valid(p0_tagbuf_b_valid),
     .tagbuf_rs2_data (p0_tagbuf_b_data ),
-    .pipe0_valid     (p0_ex_valid    ),
+    .pipe0_valid     (p0_ex_valid_safe),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
     .pipe0_tid       (p0_ex_tid      ),
-    .pipe1_valid     (p1_alu_valid   ),
+    .pipe1_valid     (p1_alu_valid_safe),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
@@ -1969,12 +2395,12 @@ bypass_network u_bypass1(
     .tagbuf_rs1_data (p1_tagbuf_a_data ),
     .tagbuf_rs2_valid(p1_tagbuf_b_valid),
     .tagbuf_rs2_data (p1_tagbuf_b_data ),
-    .pipe0_valid     (p0_ex_valid    ),
+    .pipe0_valid     (p0_ex_valid_safe),
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
     .pipe0_tid       (p0_ex_tid      ),
-    .pipe1_valid     (p1_alu_valid   ),
+    .pipe1_valid     (p1_alu_valid_safe),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
@@ -2012,15 +2438,15 @@ bypass_network u_bypass1(
 // RoCC Flush-Safe Completion Handling
 // ════════════════════════════════════════════════════════════════════════════
 // Track the epoch and tid of each in-flight RoCC command by tag
-reg [`METADATA_EPOCH_W-1:0] rocc_cmd_epoch [0:31];
-reg                         rocc_cmd_in_flight [0:31];
-reg [0:0]                   rocc_cmd_tid_per_tag [0:31];
+reg [`METADATA_EPOCH_W-1:0] rocc_cmd_epoch [0:RS_TAG_DEPTH_CFG];
+reg                         rocc_cmd_in_flight [0:RS_TAG_DEPTH_CFG];
+reg [0:0]                   rocc_cmd_tid_per_tag [0:RS_TAG_DEPTH_CFG];
 integer                     rocc_epoch_idx;
 
 // Capture epoch when RoCC command is issued
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
+        for (rocc_epoch_idx = 0; rocc_epoch_idx <= RS_TAG_DEPTH_CFG; rocc_epoch_idx = rocc_epoch_idx + 1) begin
             rocc_cmd_epoch[rocc_epoch_idx] <= {`METADATA_EPOCH_W{1'b0}};
             rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
             rocc_cmd_tid_per_tag[rocc_epoch_idx] <= 1'b0;
@@ -2028,7 +2454,7 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         // Clear in-flight entries for flushed thread when flush occurs
         if (combined_flush_any) begin
-            for (rocc_epoch_idx = 0; rocc_epoch_idx < 32; rocc_epoch_idx = rocc_epoch_idx + 1) begin
+            for (rocc_epoch_idx = 0; rocc_epoch_idx <= RS_TAG_DEPTH_CFG; rocc_epoch_idx = rocc_epoch_idx + 1) begin
                 if (rocc_cmd_in_flight[rocc_epoch_idx] && rocc_cmd_tid_per_tag[rocc_epoch_idx] == (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid)) begin
                     rocc_cmd_in_flight[rocc_epoch_idx] <= 1'b0;
                 end
@@ -2061,7 +2487,7 @@ wire rocc_resp_not_flushed = rocc_resp_epoch_match && rocc_cmd_in_flight[rocc_re
 // When p0_pre_ro_is_rocc, don't send to exec_pipe0 (RoCC bypasses it)
 wire p0_pre_ro_to_pipe0_valid = p0_pre_ro_valid && !p0_pre_ro_is_rocc && !p0_pre_ro_flush_kill;
 
-exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
+exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .clk              (clk              ),
     .rstn             (rstn             ),
     .in_valid         (p0_pre_ro_to_pipe0_valid),
@@ -2100,6 +2526,7 @@ exec_pipe0 #(.TAG_W(5)) u_exec_pipe0(
     .out_regs_write   (p0_ex_rd_wen     ),
     .out_fu           (p0_ex_fu         ),
     .out_tid          (p0_ex_tid        ),
+    .out_order_id     (p0_ex_order_id   ),
     .csr_valid        (pipe0_csr_valid  ),
     .csr_wdata        (pipe0_csr_wdata  ),
     .csr_op           (pipe0_csr_op     ),
@@ -2125,7 +2552,7 @@ wire        p1_mem_req_wen;
 wire [31:0] p1_mem_req_addr;
 wire [31:0] p1_mem_req_wdata;
 wire [2:0]  p1_mem_req_func3;
-wire [4:0]  p1_mem_req_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mem_req_tag;
 wire [4:0]  p1_mem_req_rd;
 wire        p1_mem_req_regs_write;
 wire [2:0]  p1_mem_req_fu;
@@ -2135,20 +2562,22 @@ wire [`METADATA_ORDER_ID_W-1:0] p1_mem_req_order_id;
 wire [7:0]  p1_mem_req_epoch;
 
 wire        p1_mul_valid;
-wire [4:0]  p1_mul_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_mul_tag;
 wire [31:0] p1_mul_result;
 wire [4:0]  p1_mul_rd;
 wire        p1_mul_regs_write;
 wire [2:0]  p1_mul_fu;
 wire [0:0]  p1_mul_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_mul_order_id;
 
 wire        p1_div_valid;
-wire [4:0]  p1_div_tag;
+wire [RS_TAG_W_CFG-1:0]  p1_div_tag;
 wire [31:0] p1_div_result;
 wire [4:0]  p1_div_rd;
 wire        p1_div_regs_write;
 wire [2:0]  p1_div_fu;
 wire [0:0]  p1_div_tid;
+wire [`METADATA_ORDER_ID_W-1:0] p1_div_order_id;
 wire        p1_div_busy;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2157,7 +2586,7 @@ wire        p1_div_busy;
 //   closes PRF read + tagbuf bypass into exec_pipe1.
 // ════════════════════════════════════════════════════════════════════════════
 reg         ro1_valid;
-reg  [4:0]  ro1_tag;
+reg  [RS_TAG_W_CFG-1:0]  ro1_tag;
 reg  [31:0] ro1_pc;
 reg  [31:0] ro1_imm;
 reg  [2:0]  ro1_func3;
@@ -2176,7 +2605,7 @@ reg  [31:0] ro1_op_a, ro1_op_b;
 
 `ifdef VERILATOR_MAINLINE
 reg  [4:0]  ro1_dbg_rs1, ro1_dbg_rs2;
-reg  [4:0]  ro1_dbg_src1_tag, ro1_dbg_src2_tag;
+reg  [RS_TAG_W_CFG-1:0]  ro1_dbg_src1_tag, ro1_dbg_src2_tag;
 reg  [5:0]  ro1_dbg_prs1, ro1_dbg_prs2;
 reg  [31:0] ro1_dbg_prf_a, ro1_dbg_prf_b;
 reg         ro1_dbg_tagbuf_a_valid, ro1_dbg_tagbuf_b_valid;
@@ -2190,12 +2619,12 @@ reg  [31:0] dbg_bad_uart_store_op_a_r;
 reg  [31:0] dbg_bad_uart_store_op_b_r;
 reg  [31:0] dbg_bad_uart_store_imm_r;
 reg  [`METADATA_ORDER_ID_W-1:0] dbg_bad_uart_store_order_id_r;
-reg  [4:0]  dbg_bad_uart_store_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_bad_uart_store_tag_r;
 reg  [4:0]  dbg_bad_uart_store_rd_r;
 reg  [4:0]  dbg_bad_uart_store_rs1_r;
 reg  [4:0]  dbg_bad_uart_store_rs2_r;
-reg  [4:0]  dbg_bad_uart_store_src1_tag_r;
-reg  [4:0]  dbg_bad_uart_store_src2_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_bad_uart_store_src1_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_bad_uart_store_src2_tag_r;
 reg  [5:0]  dbg_bad_uart_store_prs1_r;
 reg  [5:0]  dbg_bad_uart_store_prs2_r;
 reg  [31:0] dbg_bad_uart_store_prf_a_r;
@@ -2208,19 +2637,54 @@ reg  [1:0]  dbg_bad_uart_store_fwd_a_r;
 reg  [1:0]  dbg_bad_uart_store_fwd_b_r;
 reg  [2:0]  dbg_bad_uart_store_func3_r;
 reg  [0:0]  dbg_bad_uart_store_tid_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_pc_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_data_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_bad_uart_store_src2_last_order_id_r;
+reg  [RS_TAG_W_CFG-1:0] dbg_bad_uart_store_src2_last_tag_r;
+reg  [4:0]  dbg_bad_uart_store_src2_last_rd_r;
+reg  [2:0]  dbg_bad_uart_store_src2_last_fu_r;
+reg  [5:0]  dbg_bad_uart_store_src2_last_src1_prs_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_src1_pc_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_src1_data_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_bad_uart_store_src2_last_src1_order_id_r;
+reg  [RS_TAG_W_CFG-1:0] dbg_bad_uart_store_src2_last_src1_tag_r;
+reg  [4:0]  dbg_bad_uart_store_src2_last_src1_rd_r;
+reg  [2:0]  dbg_bad_uart_store_src2_last_src1_fu_r;
+reg  [5:0]  dbg_bad_uart_store_src2_last_src1_src1_prs_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_src1_src1_pc_r;
+reg  [31:0] dbg_bad_uart_store_src2_last_src1_src1_data_r;
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_bad_uart_store_src2_last_src1_src1_order_id_r;
+reg  [RS_TAG_W_CFG-1:0] dbg_bad_uart_store_src2_last_src1_src1_tag_r;
+reg  [4:0]  dbg_bad_uart_store_src2_last_src1_src1_rd_r;
+reg  [2:0]  dbg_bad_uart_store_src2_last_src1_src1_fu_r;
+
+reg  [31:0] dbg_prf_last_pc [0:NUM_PHYS_REG_CFG-1];
+reg  [31:0] dbg_prf_last_data [0:NUM_PHYS_REG_CFG-1];
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_prf_last_order_id [0:NUM_PHYS_REG_CFG-1];
+reg  [RS_TAG_W_CFG-1:0] dbg_prf_last_tag [0:NUM_PHYS_REG_CFG-1];
+reg  [4:0]  dbg_prf_last_rd [0:NUM_PHYS_REG_CFG-1];
+reg  [2:0]  dbg_prf_last_fu [0:NUM_PHYS_REG_CFG-1];
+reg  [5:0]  dbg_prf_last_src1_prs [0:NUM_PHYS_REG_CFG-1];
+reg  [31:0] dbg_prf_last_src1_pc [0:NUM_PHYS_REG_CFG-1];
+reg  [31:0] dbg_prf_last_src1_data [0:NUM_PHYS_REG_CFG-1];
+reg  [`METADATA_ORDER_ID_W-1:0] dbg_prf_last_src1_order_id [0:NUM_PHYS_REG_CFG-1];
+reg  [RS_TAG_W_CFG-1:0] dbg_prf_last_src1_tag [0:NUM_PHYS_REG_CFG-1];
+reg  [4:0]  dbg_prf_last_src1_rd [0:NUM_PHYS_REG_CFG-1];
+reg  [2:0]  dbg_prf_last_src1_fu [0:NUM_PHYS_REG_CFG-1];
+integer dbg_prf_track_idx;
 
 reg         dbg_strcpy_mv_seen_r;
 reg  [31:0] dbg_strcpy_mv_pc_r;
 reg  [31:0] dbg_strcpy_mv_op_a_r;
 reg  [31:0] dbg_strcpy_mv_op_b_r;
 reg  [`METADATA_ORDER_ID_W-1:0] dbg_strcpy_mv_order_id_r;
-reg  [4:0]  dbg_strcpy_mv_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_strcpy_mv_tag_r;
 reg  [4:0]  dbg_strcpy_mv_rd_r;
 reg  [0:0]  dbg_strcpy_mv_tid_r;
 reg  [4:0]  dbg_strcpy_mv_rs1_r;
 reg  [4:0]  dbg_strcpy_mv_rs2_r;
-reg  [4:0]  dbg_strcpy_mv_src1_tag_r;
-reg  [4:0]  dbg_strcpy_mv_src2_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_strcpy_mv_src1_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_strcpy_mv_src2_tag_r;
 reg  [5:0]  dbg_strcpy_mv_prd_r;
 reg  [5:0]  dbg_strcpy_mv_prs1_r;
 reg  [5:0]  dbg_strcpy_mv_prs2_r;
@@ -2242,7 +2706,7 @@ reg  [31:0] dbg_strcpy_mv_prf_w1_data_r;
 reg         dbg_main_lw_a0_seen_r;
 reg  [31:0] dbg_main_lw_a0_addr_r;
 reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_lw_a0_order_id_r;
-reg  [4:0]  dbg_main_lw_a0_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_lw_a0_tag_r;
 reg  [5:0]  dbg_main_lw_a0_prd_r;
 reg  [5:0]  dbg_main_lw_a0_prs1_r;
 reg  [31:0] dbg_main_lw_a0_base_r;
@@ -2255,10 +2719,10 @@ reg         dbg_main_addi_a0_seen_r;
 reg  [31:0] dbg_main_addi_a0_op_a_r;
 reg  [31:0] dbg_main_addi_a0_result_r;
 reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_addi_a0_order_id_r;
-reg  [4:0]  dbg_main_addi_a0_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_addi_a0_tag_r;
 reg  [5:0]  dbg_main_addi_a0_prd_r;
 reg  [5:0]  dbg_main_addi_a0_prs1_r;
-reg  [4:0]  dbg_main_addi_a0_src1_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_addi_a0_src1_tag_r;
 reg  [31:0] dbg_main_addi_a0_prf_a_r;
 reg         dbg_main_addi_a0_tagbuf_a_valid_r;
 reg  [31:0] dbg_main_addi_a0_tagbuf_a_data_r;
@@ -2266,7 +2730,7 @@ reg  [31:0] dbg_main_addi_a0_tagbuf_a_data_r;
 reg  [7:0]  dbg_main_a0_prd_write_count_r;
 reg         dbg_main_a0_prd_last_write_port_r;
 reg  [31:0] dbg_main_a0_prd_last_write_data_r;
-reg  [4:0]  dbg_main_a0_prd_last_write_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_a0_prd_last_write_tag_r;
 reg  [4:0]  dbg_main_a0_prd_last_write_rd_r;
 reg  [2:0]  dbg_main_a0_prd_last_write_fu_r;
 reg  [31:0] dbg_main_a0_prd_last_write_pc_r;
@@ -2274,7 +2738,7 @@ reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_last_write_order_id_r;
 reg         dbg_main_a0_prd_first_bad_write_seen_r;
 reg         dbg_main_a0_prd_first_bad_write_port_r;
 reg  [31:0] dbg_main_a0_prd_first_bad_write_data_r;
-reg  [4:0]  dbg_main_a0_prd_first_bad_write_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_a0_prd_first_bad_write_tag_r;
 reg  [4:0]  dbg_main_a0_prd_first_bad_write_rd_r;
 reg  [2:0]  dbg_main_a0_prd_first_bad_write_fu_r;
 reg  [31:0] dbg_main_a0_prd_first_bad_write_pc_r;
@@ -2282,7 +2746,7 @@ reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_first_bad_write_order_id_r;
 reg         dbg_main_a0_prd_first_free_seen_r;
 reg         dbg_main_a0_prd_first_free_port_r;
 reg  [4:0]  dbg_main_a0_prd_first_free_rd_r;
-reg  [4:0]  dbg_main_a0_prd_first_free_tag_r;
+reg  [RS_TAG_W_CFG-1:0]  dbg_main_a0_prd_first_free_tag_r;
 reg  [`METADATA_ORDER_ID_W-1:0] dbg_main_a0_prd_first_free_order_id_r;
 reg         dbg_main_addi_a0_wb_seen_r;
 reg         dbg_main_addi_a0_wb_port_r;
@@ -2299,8 +2763,7 @@ reg  [31:0] dbg_main_addi_a0_wb_w1_data_r;
 wire [31:0] ro1_dbg_eff_addr = ro1_op_a + ro1_imm;
 wire        ro1_dbg_bad_uart_store =
     ro1_valid && ro1_mem_write &&
-    (ro1_pc >= 32'h8000_10AC) && (ro1_pc <= 32'h8000_10C8) &&
-    (ro1_dbg_eff_addr >= 32'h1300_0010) && (ro1_dbg_eff_addr <= 32'h1300_001F);
+    (ro1_dbg_eff_addr == 32'h1300_0010);
 `endif
 
 always @(posedge clk or negedge rstn) begin
@@ -2309,8 +2772,8 @@ always @(posedge clk or negedge rstn) begin
 `ifdef VERILATOR_MAINLINE
         ro1_dbg_rs1 <= 5'd0;
         ro1_dbg_rs2 <= 5'd0;
-        ro1_dbg_src1_tag <= 5'd0;
-        ro1_dbg_src2_tag <= 5'd0;
+        ro1_dbg_src1_tag <= {RS_TAG_W_CFG{1'b0}};
+        ro1_dbg_src2_tag <= {RS_TAG_W_CFG{1'b0}};
         ro1_dbg_prs1 <= 6'd0;
         ro1_dbg_prs2 <= 6'd0;
         ro1_dbg_prf_a <= 32'd0;
@@ -2376,12 +2839,12 @@ always @(posedge clk or negedge rstn) begin
         dbg_bad_uart_store_op_b_r <= 32'd0;
         dbg_bad_uart_store_imm_r <= 32'd0;
         dbg_bad_uart_store_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
-        dbg_bad_uart_store_tag_r <= 5'd0;
+        dbg_bad_uart_store_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_bad_uart_store_rd_r <= 5'd0;
         dbg_bad_uart_store_rs1_r <= 5'd0;
         dbg_bad_uart_store_rs2_r <= 5'd0;
-        dbg_bad_uart_store_src1_tag_r <= 5'd0;
-        dbg_bad_uart_store_src2_tag_r <= 5'd0;
+        dbg_bad_uart_store_src1_tag_r <= {RS_TAG_W_CFG{1'b0}};
+        dbg_bad_uart_store_src2_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_bad_uart_store_prs1_r <= 6'd0;
         dbg_bad_uart_store_prs2_r <= 6'd0;
         dbg_bad_uart_store_prf_a_r <= 32'd0;
@@ -2394,18 +2857,53 @@ always @(posedge clk or negedge rstn) begin
         dbg_bad_uart_store_fwd_b_r <= 2'd0;
         dbg_bad_uart_store_func3_r <= 3'd0;
         dbg_bad_uart_store_tid_r <= 1'b0;
+        dbg_bad_uart_store_src2_last_pc_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_data_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_bad_uart_store_src2_last_tag_r <= {RS_TAG_W_CFG{1'b0}};
+        dbg_bad_uart_store_src2_last_rd_r <= 5'd0;
+        dbg_bad_uart_store_src2_last_fu_r <= 3'd0;
+        dbg_bad_uart_store_src2_last_src1_prs_r <= 6'd0;
+        dbg_bad_uart_store_src2_last_src1_pc_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_src1_data_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_src1_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_bad_uart_store_src2_last_src1_tag_r <= {RS_TAG_W_CFG{1'b0}};
+        dbg_bad_uart_store_src2_last_src1_rd_r <= 5'd0;
+        dbg_bad_uart_store_src2_last_src1_fu_r <= 3'd0;
+        dbg_bad_uart_store_src2_last_src1_src1_prs_r <= 6'd0;
+        dbg_bad_uart_store_src2_last_src1_src1_pc_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_src1_src1_data_r <= 32'd0;
+        dbg_bad_uart_store_src2_last_src1_src1_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
+        dbg_bad_uart_store_src2_last_src1_src1_tag_r <= {RS_TAG_W_CFG{1'b0}};
+        dbg_bad_uart_store_src2_last_src1_src1_rd_r <= 5'd0;
+        dbg_bad_uart_store_src2_last_src1_src1_fu_r <= 3'd0;
+        for (dbg_prf_track_idx = 0; dbg_prf_track_idx < NUM_PHYS_REG_CFG; dbg_prf_track_idx = dbg_prf_track_idx + 1) begin
+            dbg_prf_last_pc[dbg_prf_track_idx] <= 32'd0;
+            dbg_prf_last_data[dbg_prf_track_idx] <= 32'd0;
+            dbg_prf_last_order_id[dbg_prf_track_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
+            dbg_prf_last_tag[dbg_prf_track_idx] <= {RS_TAG_W_CFG{1'b0}};
+            dbg_prf_last_rd[dbg_prf_track_idx] <= 5'd0;
+            dbg_prf_last_fu[dbg_prf_track_idx] <= 3'd0;
+            dbg_prf_last_src1_prs[dbg_prf_track_idx] <= 6'd0;
+            dbg_prf_last_src1_pc[dbg_prf_track_idx] <= 32'd0;
+            dbg_prf_last_src1_data[dbg_prf_track_idx] <= 32'd0;
+            dbg_prf_last_src1_order_id[dbg_prf_track_idx] <= {`METADATA_ORDER_ID_W{1'b0}};
+            dbg_prf_last_src1_tag[dbg_prf_track_idx] <= {RS_TAG_W_CFG{1'b0}};
+            dbg_prf_last_src1_rd[dbg_prf_track_idx] <= 5'd0;
+            dbg_prf_last_src1_fu[dbg_prf_track_idx] <= 3'd0;
+        end
         dbg_strcpy_mv_seen_r <= 1'b0;
         dbg_strcpy_mv_pc_r <= 32'd0;
         dbg_strcpy_mv_op_a_r <= 32'd0;
         dbg_strcpy_mv_op_b_r <= 32'd0;
         dbg_strcpy_mv_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
-        dbg_strcpy_mv_tag_r <= 5'd0;
+        dbg_strcpy_mv_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_strcpy_mv_rd_r <= 5'd0;
         dbg_strcpy_mv_tid_r <= 1'b0;
         dbg_strcpy_mv_rs1_r <= 5'd0;
         dbg_strcpy_mv_rs2_r <= 5'd0;
-        dbg_strcpy_mv_src1_tag_r <= 5'd0;
-        dbg_strcpy_mv_src2_tag_r <= 5'd0;
+        dbg_strcpy_mv_src1_tag_r <= {RS_TAG_W_CFG{1'b0}};
+        dbg_strcpy_mv_src2_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_strcpy_mv_prd_r <= 6'd0;
         dbg_strcpy_mv_prs1_r <= 6'd0;
         dbg_strcpy_mv_prs2_r <= 6'd0;
@@ -2426,7 +2924,7 @@ always @(posedge clk or negedge rstn) begin
         dbg_main_lw_a0_seen_r <= 1'b0;
         dbg_main_lw_a0_addr_r <= 32'd0;
         dbg_main_lw_a0_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
-        dbg_main_lw_a0_tag_r <= 5'd0;
+        dbg_main_lw_a0_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_lw_a0_prd_r <= 6'd0;
         dbg_main_lw_a0_prs1_r <= 6'd0;
         dbg_main_lw_a0_base_r <= 32'd0;
@@ -2438,17 +2936,17 @@ always @(posedge clk or negedge rstn) begin
         dbg_main_addi_a0_op_a_r <= 32'd0;
         dbg_main_addi_a0_result_r <= 32'd0;
         dbg_main_addi_a0_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
-        dbg_main_addi_a0_tag_r <= 5'd0;
+        dbg_main_addi_a0_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_addi_a0_prd_r <= 6'd0;
         dbg_main_addi_a0_prs1_r <= 6'd0;
-        dbg_main_addi_a0_src1_tag_r <= 5'd0;
+        dbg_main_addi_a0_src1_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_addi_a0_prf_a_r <= 32'd0;
         dbg_main_addi_a0_tagbuf_a_valid_r <= 1'b0;
         dbg_main_addi_a0_tagbuf_a_data_r <= 32'd0;
         dbg_main_a0_prd_write_count_r <= 8'd0;
         dbg_main_a0_prd_last_write_port_r <= 1'b0;
         dbg_main_a0_prd_last_write_data_r <= 32'd0;
-        dbg_main_a0_prd_last_write_tag_r <= 5'd0;
+        dbg_main_a0_prd_last_write_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_a0_prd_last_write_rd_r <= 5'd0;
         dbg_main_a0_prd_last_write_fu_r <= 3'd0;
         dbg_main_a0_prd_last_write_pc_r <= 32'd0;
@@ -2456,7 +2954,7 @@ always @(posedge clk or negedge rstn) begin
         dbg_main_a0_prd_first_bad_write_seen_r <= 1'b0;
         dbg_main_a0_prd_first_bad_write_port_r <= 1'b0;
         dbg_main_a0_prd_first_bad_write_data_r <= 32'd0;
-        dbg_main_a0_prd_first_bad_write_tag_r <= 5'd0;
+        dbg_main_a0_prd_first_bad_write_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_a0_prd_first_bad_write_rd_r <= 5'd0;
         dbg_main_a0_prd_first_bad_write_fu_r <= 3'd0;
         dbg_main_a0_prd_first_bad_write_pc_r <= 32'd0;
@@ -2464,7 +2962,7 @@ always @(posedge clk or negedge rstn) begin
         dbg_main_a0_prd_first_free_seen_r <= 1'b0;
         dbg_main_a0_prd_first_free_port_r <= 1'b0;
         dbg_main_a0_prd_first_free_rd_r <= 5'd0;
-        dbg_main_a0_prd_first_free_tag_r <= 5'd0;
+        dbg_main_a0_prd_first_free_tag_r <= {RS_TAG_W_CFG{1'b0}};
         dbg_main_a0_prd_first_free_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
         dbg_main_addi_a0_wb_seen_r <= 1'b0;
         dbg_main_addi_a0_wb_port_r <= 1'b0;
@@ -2477,32 +2975,85 @@ always @(posedge clk or negedge rstn) begin
         dbg_main_addi_a0_wb_w1_en_r <= 1'b0;
         dbg_main_addi_a0_wb_w1_addr_r <= 6'd0;
         dbg_main_addi_a0_wb_w1_data_r <= 32'd0;
-    end else if (!dbg_bad_uart_store_seen_r && ro1_dbg_bad_uart_store) begin
-        dbg_bad_uart_store_seen_r <= 1'b1;
-        dbg_bad_uart_store_pc_r <= ro1_pc;
-        dbg_bad_uart_store_addr_r <= ro1_dbg_eff_addr;
-        dbg_bad_uart_store_op_a_r <= ro1_op_a;
-        dbg_bad_uart_store_op_b_r <= ro1_op_b;
-        dbg_bad_uart_store_imm_r <= ro1_imm;
-        dbg_bad_uart_store_order_id_r <= ro1_order_id;
-        dbg_bad_uart_store_tag_r <= ro1_tag;
-        dbg_bad_uart_store_rd_r <= ro1_rd;
-        dbg_bad_uart_store_rs1_r <= ro1_dbg_rs1;
-        dbg_bad_uart_store_rs2_r <= ro1_dbg_rs2;
-        dbg_bad_uart_store_src1_tag_r <= ro1_dbg_src1_tag;
-        dbg_bad_uart_store_src2_tag_r <= ro1_dbg_src2_tag;
-        dbg_bad_uart_store_prs1_r <= ro1_dbg_prs1;
-        dbg_bad_uart_store_prs2_r <= ro1_dbg_prs2;
-        dbg_bad_uart_store_prf_a_r <= ro1_dbg_prf_a;
-        dbg_bad_uart_store_prf_b_r <= ro1_dbg_prf_b;
-        dbg_bad_uart_store_tagbuf_a_valid_r <= ro1_dbg_tagbuf_a_valid;
-        dbg_bad_uart_store_tagbuf_b_valid_r <= ro1_dbg_tagbuf_b_valid;
-        dbg_bad_uart_store_tagbuf_a_data_r <= ro1_dbg_tagbuf_a_data;
-        dbg_bad_uart_store_tagbuf_b_data_r <= ro1_dbg_tagbuf_b_data;
-        dbg_bad_uart_store_fwd_a_r <= ro1_dbg_fwd_a;
-        dbg_bad_uart_store_fwd_b_r <= ro1_dbg_fwd_b;
-        dbg_bad_uart_store_func3_r <= ro1_func3;
-        dbg_bad_uart_store_tid_r <= ro1_tid;
+    end else begin
+        if (prf_w0_en) begin
+            dbg_prf_last_pc[prf_w0_addr] <= tag_pc_map[wb0_tag];
+            dbg_prf_last_data[prf_w0_addr] <= prf_w0_data;
+            dbg_prf_last_order_id[prf_w0_addr] <= tag_order_map[wb0_tag];
+            dbg_prf_last_tag[prf_w0_addr] <= wb0_tag;
+            dbg_prf_last_rd[prf_w0_addr] <= wb0_rd;
+            dbg_prf_last_fu[prf_w0_addr] <= wb0_fu;
+            dbg_prf_last_src1_prs[prf_w0_addr] <= tag_prs1_map[wb0_tag];
+            dbg_prf_last_src1_pc[prf_w0_addr] <= dbg_prf_last_pc[tag_prs1_map[wb0_tag]];
+            dbg_prf_last_src1_data[prf_w0_addr] <= dbg_prf_last_data[tag_prs1_map[wb0_tag]];
+            dbg_prf_last_src1_order_id[prf_w0_addr] <= dbg_prf_last_order_id[tag_prs1_map[wb0_tag]];
+            dbg_prf_last_src1_tag[prf_w0_addr] <= dbg_prf_last_tag[tag_prs1_map[wb0_tag]];
+            dbg_prf_last_src1_rd[prf_w0_addr] <= dbg_prf_last_rd[tag_prs1_map[wb0_tag]];
+            dbg_prf_last_src1_fu[prf_w0_addr] <= dbg_prf_last_fu[tag_prs1_map[wb0_tag]];
+        end
+        if (prf_w1_en) begin
+            dbg_prf_last_pc[prf_w1_addr] <= tag_pc_map[wb1_tag];
+            dbg_prf_last_data[prf_w1_addr] <= prf_w1_data;
+            dbg_prf_last_order_id[prf_w1_addr] <= tag_order_map[wb1_tag];
+            dbg_prf_last_tag[prf_w1_addr] <= wb1_tag;
+            dbg_prf_last_rd[prf_w1_addr] <= wb1_rd;
+            dbg_prf_last_fu[prf_w1_addr] <= wb1_fu;
+            dbg_prf_last_src1_prs[prf_w1_addr] <= tag_prs1_map[wb1_tag];
+            dbg_prf_last_src1_pc[prf_w1_addr] <= dbg_prf_last_pc[tag_prs1_map[wb1_tag]];
+            dbg_prf_last_src1_data[prf_w1_addr] <= dbg_prf_last_data[tag_prs1_map[wb1_tag]];
+            dbg_prf_last_src1_order_id[prf_w1_addr] <= dbg_prf_last_order_id[tag_prs1_map[wb1_tag]];
+            dbg_prf_last_src1_tag[prf_w1_addr] <= dbg_prf_last_tag[tag_prs1_map[wb1_tag]];
+            dbg_prf_last_src1_rd[prf_w1_addr] <= dbg_prf_last_rd[tag_prs1_map[wb1_tag]];
+            dbg_prf_last_src1_fu[prf_w1_addr] <= dbg_prf_last_fu[tag_prs1_map[wb1_tag]];
+        end
+
+        if (ro1_dbg_bad_uart_store) begin
+            dbg_bad_uart_store_seen_r <= 1'b1;
+            dbg_bad_uart_store_pc_r <= ro1_pc;
+            dbg_bad_uart_store_addr_r <= ro1_dbg_eff_addr;
+            dbg_bad_uart_store_op_a_r <= ro1_op_a;
+            dbg_bad_uart_store_op_b_r <= ro1_op_b;
+            dbg_bad_uart_store_imm_r <= ro1_imm;
+            dbg_bad_uart_store_order_id_r <= ro1_order_id;
+            dbg_bad_uart_store_tag_r <= ro1_tag;
+            dbg_bad_uart_store_rd_r <= ro1_rd;
+            dbg_bad_uart_store_rs1_r <= ro1_dbg_rs1;
+            dbg_bad_uart_store_rs2_r <= ro1_dbg_rs2;
+            dbg_bad_uart_store_src1_tag_r <= ro1_dbg_src1_tag;
+            dbg_bad_uart_store_src2_tag_r <= ro1_dbg_src2_tag;
+            dbg_bad_uart_store_prs1_r <= ro1_dbg_prs1;
+            dbg_bad_uart_store_prs2_r <= ro1_dbg_prs2;
+            dbg_bad_uart_store_prf_a_r <= ro1_dbg_prf_a;
+            dbg_bad_uart_store_prf_b_r <= ro1_dbg_prf_b;
+            dbg_bad_uart_store_tagbuf_a_valid_r <= ro1_dbg_tagbuf_a_valid;
+            dbg_bad_uart_store_tagbuf_b_valid_r <= ro1_dbg_tagbuf_b_valid;
+            dbg_bad_uart_store_tagbuf_a_data_r <= ro1_dbg_tagbuf_a_data;
+            dbg_bad_uart_store_tagbuf_b_data_r <= ro1_dbg_tagbuf_b_data;
+            dbg_bad_uart_store_fwd_a_r <= ro1_dbg_fwd_a;
+            dbg_bad_uart_store_fwd_b_r <= ro1_dbg_fwd_b;
+            dbg_bad_uart_store_func3_r <= ro1_func3;
+            dbg_bad_uart_store_tid_r <= ro1_tid;
+            dbg_bad_uart_store_src2_last_pc_r <= dbg_prf_last_pc[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_data_r <= dbg_prf_last_data[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_order_id_r <= dbg_prf_last_order_id[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_tag_r <= dbg_prf_last_tag[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_rd_r <= dbg_prf_last_rd[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_fu_r <= dbg_prf_last_fu[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_prs_r <= dbg_prf_last_src1_prs[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_pc_r <= dbg_prf_last_src1_pc[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_data_r <= dbg_prf_last_src1_data[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_order_id_r <= dbg_prf_last_src1_order_id[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_tag_r <= dbg_prf_last_src1_tag[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_rd_r <= dbg_prf_last_src1_rd[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_fu_r <= dbg_prf_last_src1_fu[ro1_dbg_prs2];
+            dbg_bad_uart_store_src2_last_src1_src1_prs_r <= dbg_prf_last_src1_prs[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_pc_r <= dbg_prf_last_src1_pc[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_data_r <= dbg_prf_last_src1_data[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_order_id_r <= dbg_prf_last_src1_order_id[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_tag_r <= dbg_prf_last_src1_tag[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_rd_r <= dbg_prf_last_src1_rd[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+            dbg_bad_uart_store_src2_last_src1_src1_fu_r <= dbg_prf_last_src1_fu[dbg_prf_last_src1_prs[ro1_dbg_prs2]];
+        end
     end
 
     if (rstn && !dbg_strcpy_mv_seen_r && p0_pre_ro_to_pipe0_valid && (p0_pre_ro_pc == 32'h8000_10AC)) begin
@@ -2669,7 +3220,7 @@ end
 // kill correct-path instructions whose epoch was updated between dispatch and
 // the ro1 stage, leaving fu_busy stuck forever.
 
-exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
+exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .clk           (clk              ),
     .rstn          (rstn             ),
     .in_valid      (ro1_valid        ),
@@ -2704,6 +3255,7 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .alu_out_regs_write (p1_alu_rd_wen    ),
     .alu_out_fu         (p1_alu_fu        ),
     .alu_out_tid        (p1_alu_tid       ),
+    .alu_out_order_id   (p1_alu_order_id  ),
     .mem_req_valid      (p1_mem_req_valid     ),
     .mem_req_accept     (lsu_req_accept       ),
     .mem_req_wen        (p1_mem_req_wen       ),
@@ -2725,6 +3277,7 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .mul_out_regs_write (p1_mul_regs_write    ),
     .mul_out_fu         (p1_mul_fu            ),
     .mul_out_tid        (p1_mul_tid           ),
+    .mul_out_order_id   (p1_mul_order_id      ),
     .div_out_valid      (p1_div_valid         ),
     .div_out_tag        (p1_div_tag           ),
     .div_out_result     (p1_div_result        ),
@@ -2732,29 +3285,13 @@ exec_pipe1 #(.TAG_W(5)) u_exec_pipe1(
     .div_out_regs_write (p1_div_regs_write    ),
     .div_out_fu         (p1_div_fu            ),
     .div_out_tid        (p1_div_tid           ),
+    .div_out_order_id   (p1_div_order_id      ),
     .div_busy           (p1_div_busy          )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
 // LSU Shell with Store Buffer Integration
 // ════════════════════════════════════════════════════════════════════════════
-
-// LSU Shell wires
-wire        lsu_req_accept;
-wire        lsu_resp_valid;
-wire [31:0] lsu_resp_rdata;
-wire [4:0]  lsu_resp_tag;
-wire [4:0]  lsu_resp_rd;
-wire        lsu_resp_regs_write;
-wire [2:0]  lsu_resp_fu;
-wire [0:0]  lsu_resp_tid;
-wire        lsu_load_hazard;
-wire        lsu_early_wakeup_valid;
-wire [4:0]  lsu_early_wakeup_tag;
-wire        lsu_debug_spec_mmio_load_blocked;
-wire        lsu_debug_spec_mmio_load_violation;
-wire        lsu_debug_mmio_load_at_rob_head;
-wire        lsu_debug_older_store_blocked_mmio_load;
 
 wire [31:0] lsu_mem_addr;
 wire [3:0]  lsu_mem_read;
@@ -2783,7 +3320,7 @@ wire [7:0]  legacy_debug_uart_tx_byte;
 
 // LSU Shell - integrates Store Buffer with forwarding
 lsu_shell #(
-    .TAG_W        (5),
+    .TAG_W        (RS_TAG_W_CFG),
     .ORDER_ID_W   (`METADATA_ORDER_ID_W),
     .EPOCH_W      (8)
 ) u_lsu_shell (
@@ -2825,7 +3362,7 @@ lsu_shell #(
     // Response to writeback
     .resp_valid         (lsu_resp_valid       ),
     .resp_tid           (lsu_resp_tid         ),
-    .resp_order_id      (                     ),
+    .resp_order_id      (lsu_resp_order_id    ),
     .resp_epoch         (                     ),
     .resp_tag           (lsu_resp_tag         ),
     .resp_rd            (lsu_resp_rd          ),
@@ -2868,6 +3405,8 @@ lsu_shell #(
     .debug_spec_mmio_load_violation(lsu_debug_spec_mmio_load_violation),
     .debug_mmio_load_at_rob_head(lsu_debug_mmio_load_at_rob_head),
     .debug_older_store_blocked_mmio_load(lsu_debug_older_store_blocked_mmio_load),
+    .debug_lsu_cooldown_set(),
+    .debug_lsu_cooldown_skipped_l1hit(),
 
     // Task 6: Mem_subsys M1 interface
     .use_mem_subsys     (use_mem_subsys       ),
@@ -2878,7 +3417,8 @@ lsu_shell #(
     .m1_req_wdata       (m1_req_wdata         ),
     .m1_req_wen         (m1_req_wen           ),
     .m1_resp_valid      (m1_resp_valid        ),
-    .m1_resp_data       (m1_resp_data         )
+    .m1_resp_data       (m1_resp_data         ),
+    .m1_resp_l1d_hit    (m1_resp_l1d_hit      )
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -2935,14 +3475,23 @@ endgenerate
 wire [31:0] mem_wb_data_sel;
 assign mem_wb_data_sel = lsu_resp_rdata;
 
-// Bypass signals - use LSU shell response
-assign mem_wb_valid  = lsu_resp_valid;
+wire lsu_resp_live_match =
+    lsu_resp_valid && (lsu_resp_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_live_map[lsu_resp_tag] &&
+    (tag_tid_map[lsu_resp_tag] == lsu_resp_tid) &&
+    (tag_order_map[lsu_resp_tag] == lsu_resp_order_id);
+
+// Bypass signals - use LSU shell response only while its tag still belongs to
+// the same live instruction.
+assign mem_wb_valid  = lsu_resp_live_match;
 assign mem_wb_rd     = lsu_resp_rd;
 assign mem_wb_rd_wen = lsu_resp_regs_write && (lsu_resp_fu == `FU_LOAD);
 assign mem_wb_data   = mem_wb_data_sel;
+assign lsu_early_wakeup_valid_safe =
+    lsu_early_wakeup_valid && lsu_resp_live_match &&
+    (lsu_early_wakeup_tag == lsu_resp_tag);
 
 // mem_wb_tid for bypass network
-wire [0:0] mem_wb_tid_r;
 assign mem_wb_tid_r = lsu_resp_tid;
 
 // ─── WB Port 0: from Pipe 0 (INT + Branch) OR RoCC Response ──────────────────
@@ -2958,72 +3507,81 @@ assign wb0_rd         = wb0_from_rocc ? rocc_resp_rd      : p0_ex_rd;
 assign wb0_regs_write = wb0_from_rocc ? (rocc_resp_rd != 5'd0) : p0_ex_rd_wen;
 assign wb0_fu         = wb0_from_rocc ? `FU_INT0          : p0_ex_fu;
 assign wb0_tid        = wb0_from_rocc ? rocc_resp_tid     : p0_ex_tid;
+assign wb0_order_id   = wb0_from_rocc ? tag_order_map[rocc_resp_tag] : p0_ex_order_id;
 
 // ─── WB Port 1: from DIV, MUL, MEM, or ALU (priority order) ──────────────
 // DIV takes highest priority, then MUL, then MEM, then ALU
 wire        wb1_div_curr_valid = p1_div_valid;
-wire [4:0]  wb1_div_curr_tag = p1_div_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_div_curr_tag = p1_div_tag;
 wire [4:0]  wb1_div_curr_rd = p1_div_rd;
 wire        wb1_div_curr_regs_write = p1_div_regs_write;
 wire [2:0]  wb1_div_curr_fu = p1_div_fu;
 wire [0:0]  wb1_div_curr_tid = p1_div_tid;
 wire [31:0] wb1_div_curr_data = p1_div_result;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_div_curr_order_id = p1_div_order_id;
 
 wire        wb1_mul_curr_valid = p1_mul_valid;
-wire [4:0]  wb1_mul_curr_tag = p1_mul_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_mul_curr_tag = p1_mul_tag;
 wire [4:0]  wb1_mul_curr_rd = p1_mul_rd;
 wire        wb1_mul_curr_regs_write = p1_mul_regs_write;
 wire [2:0]  wb1_mul_curr_fu = p1_mul_fu;
 wire [0:0]  wb1_mul_curr_tid = p1_mul_tid;
 wire [31:0] wb1_mul_curr_data = p1_mul_result;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_mul_curr_order_id = p1_mul_order_id;
 
-wire        wb1_mem_curr_valid = lsu_resp_valid;
-wire [4:0]  wb1_mem_curr_tag = lsu_resp_tag;
+wire        wb1_mem_curr_valid = lsu_resp_live_match;
+wire [RS_TAG_W_CFG-1:0]  wb1_mem_curr_tag = lsu_resp_tag;
 wire [4:0]  wb1_mem_curr_rd = lsu_resp_rd;
 wire        wb1_mem_curr_regs_write = lsu_resp_regs_write;
 wire [2:0]  wb1_mem_curr_fu = lsu_resp_fu;
 wire [0:0]  wb1_mem_curr_tid = lsu_resp_tid;
 wire [31:0] wb1_mem_curr_data = mem_wb_data_sel;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_mem_curr_order_id = lsu_resp_order_id;
 
 wire        wb1_alu_curr_valid = p1_alu_valid;
-wire [4:0]  wb1_alu_curr_tag = p1_alu_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_alu_curr_tag = p1_alu_tag;
 wire [4:0]  wb1_alu_curr_rd = p1_alu_rd;
 wire        wb1_alu_curr_regs_write = p1_alu_rd_wen;
 wire [2:0]  wb1_alu_curr_fu = p1_alu_fu;
 wire [0:0]  wb1_alu_curr_tid = p1_alu_tid;
 wire [31:0] wb1_alu_curr_data = p1_alu_result;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_alu_curr_order_id = p1_alu_order_id;
 
 reg         wb1_div_pending_valid;
-reg  [4:0]  wb1_div_pending_tag;
+reg  [RS_TAG_W_CFG-1:0]  wb1_div_pending_tag;
 reg  [4:0]  wb1_div_pending_rd;
 reg         wb1_div_pending_regs_write;
 reg  [2:0]  wb1_div_pending_fu;
 reg  [0:0]  wb1_div_pending_tid;
 reg  [31:0] wb1_div_pending_data;
+reg  [`METADATA_ORDER_ID_W-1:0] wb1_div_pending_order_id;
 
 reg         wb1_mul_pending_valid;
-reg  [4:0]  wb1_mul_pending_tag;
+reg  [RS_TAG_W_CFG-1:0]  wb1_mul_pending_tag;
 reg  [4:0]  wb1_mul_pending_rd;
 reg         wb1_mul_pending_regs_write;
 reg  [2:0]  wb1_mul_pending_fu;
 reg  [0:0]  wb1_mul_pending_tid;
 reg  [31:0] wb1_mul_pending_data;
+reg  [`METADATA_ORDER_ID_W-1:0] wb1_mul_pending_order_id;
 
 reg         wb1_mem_pending_valid;
-reg  [4:0]  wb1_mem_pending_tag;
+reg  [RS_TAG_W_CFG-1:0]  wb1_mem_pending_tag;
 reg  [4:0]  wb1_mem_pending_rd;
 reg         wb1_mem_pending_regs_write;
 reg  [2:0]  wb1_mem_pending_fu;
 reg  [0:0]  wb1_mem_pending_tid;
 reg  [31:0] wb1_mem_pending_data;
+reg  [`METADATA_ORDER_ID_W-1:0] wb1_mem_pending_order_id;
 
 reg         wb1_alu_pending_valid;
-reg  [4:0]  wb1_alu_pending_tag;
+reg  [RS_TAG_W_CFG-1:0]  wb1_alu_pending_tag;
 reg  [4:0]  wb1_alu_pending_rd;
 reg         wb1_alu_pending_regs_write;
 reg  [2:0]  wb1_alu_pending_fu;
 reg  [0:0]  wb1_alu_pending_tid;
 reg  [31:0] wb1_alu_pending_data;
+reg  [`METADATA_ORDER_ID_W-1:0] wb1_alu_pending_order_id;
 
 wire wb1_div_avail = wb1_div_pending_valid || wb1_div_curr_valid;
 wire wb1_mul_avail = wb1_mul_pending_valid || wb1_mul_curr_valid;
@@ -3035,39 +3593,43 @@ wire wb1_from_mul = !wb1_from_div && wb1_mul_avail;
 wire wb1_from_mem = !wb1_from_div && !wb1_from_mul && wb1_mem_avail;
 wire wb1_from_alu = !wb1_from_div && !wb1_from_mul && !wb1_from_mem && wb1_alu_avail;
 
-wire [4:0]  wb1_div_sel_tag = wb1_div_pending_valid ? wb1_div_pending_tag : wb1_div_curr_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_div_sel_tag = wb1_div_pending_valid ? wb1_div_pending_tag : wb1_div_curr_tag;
 wire [4:0]  wb1_div_sel_rd = wb1_div_pending_valid ? wb1_div_pending_rd : wb1_div_curr_rd;
 wire        wb1_div_sel_regs_write = wb1_div_pending_valid ? wb1_div_pending_regs_write : wb1_div_curr_regs_write;
 wire [2:0]  wb1_div_sel_fu = wb1_div_pending_valid ? wb1_div_pending_fu : wb1_div_curr_fu;
 wire [0:0]  wb1_div_sel_tid = wb1_div_pending_valid ? wb1_div_pending_tid : wb1_div_curr_tid;
 wire [31:0] wb1_div_sel_data = wb1_div_pending_valid ? wb1_div_pending_data : wb1_div_curr_data;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_div_sel_order_id = wb1_div_pending_valid ? wb1_div_pending_order_id : wb1_div_curr_order_id;
 
-wire [4:0]  wb1_mul_sel_tag = wb1_mul_pending_valid ? wb1_mul_pending_tag : wb1_mul_curr_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_mul_sel_tag = wb1_mul_pending_valid ? wb1_mul_pending_tag : wb1_mul_curr_tag;
 wire [4:0]  wb1_mul_sel_rd = wb1_mul_pending_valid ? wb1_mul_pending_rd : wb1_mul_curr_rd;
 wire        wb1_mul_sel_regs_write = wb1_mul_pending_valid ? wb1_mul_pending_regs_write : wb1_mul_curr_regs_write;
 wire [2:0]  wb1_mul_sel_fu = wb1_mul_pending_valid ? wb1_mul_pending_fu : wb1_mul_curr_fu;
 wire [0:0]  wb1_mul_sel_tid = wb1_mul_pending_valid ? wb1_mul_pending_tid : wb1_mul_curr_tid;
 wire [31:0] wb1_mul_sel_data = wb1_mul_pending_valid ? wb1_mul_pending_data : wb1_mul_curr_data;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_mul_sel_order_id = wb1_mul_pending_valid ? wb1_mul_pending_order_id : wb1_mul_curr_order_id;
 
-wire [4:0]  wb1_mem_sel_tag = wb1_mem_pending_valid ? wb1_mem_pending_tag : wb1_mem_curr_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_mem_sel_tag = wb1_mem_pending_valid ? wb1_mem_pending_tag : wb1_mem_curr_tag;
 wire [4:0]  wb1_mem_sel_rd = wb1_mem_pending_valid ? wb1_mem_pending_rd : wb1_mem_curr_rd;
 wire        wb1_mem_sel_regs_write = wb1_mem_pending_valid ? wb1_mem_pending_regs_write : wb1_mem_curr_regs_write;
 wire [2:0]  wb1_mem_sel_fu = wb1_mem_pending_valid ? wb1_mem_pending_fu : wb1_mem_curr_fu;
 wire [0:0]  wb1_mem_sel_tid = wb1_mem_pending_valid ? wb1_mem_pending_tid : wb1_mem_curr_tid;
 wire [31:0] wb1_mem_sel_data = wb1_mem_pending_valid ? wb1_mem_pending_data : wb1_mem_curr_data;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_mem_sel_order_id = wb1_mem_pending_valid ? wb1_mem_pending_order_id : wb1_mem_curr_order_id;
 
-wire [4:0]  wb1_alu_sel_tag = wb1_alu_pending_valid ? wb1_alu_pending_tag : wb1_alu_curr_tag;
+wire [RS_TAG_W_CFG-1:0]  wb1_alu_sel_tag = wb1_alu_pending_valid ? wb1_alu_pending_tag : wb1_alu_curr_tag;
 wire [4:0]  wb1_alu_sel_rd = wb1_alu_pending_valid ? wb1_alu_pending_rd : wb1_alu_curr_rd;
 wire        wb1_alu_sel_regs_write = wb1_alu_pending_valid ? wb1_alu_pending_regs_write : wb1_alu_curr_regs_write;
 wire [2:0]  wb1_alu_sel_fu = wb1_alu_pending_valid ? wb1_alu_pending_fu : wb1_alu_curr_fu;
 wire [0:0]  wb1_alu_sel_tid = wb1_alu_pending_valid ? wb1_alu_pending_tid : wb1_alu_curr_tid;
 wire [31:0] wb1_alu_sel_data = wb1_alu_pending_valid ? wb1_alu_pending_data : wb1_alu_curr_data;
+wire [`METADATA_ORDER_ID_W-1:0] wb1_alu_sel_order_id = wb1_alu_pending_valid ? wb1_alu_pending_order_id : wb1_alu_curr_order_id;
 
 assign wb1_valid      = wb1_from_div || wb1_from_mul || wb1_from_mem || wb1_from_alu;
 assign wb1_tag        = wb1_from_div ? wb1_div_sel_tag  :
                         wb1_from_mul ? wb1_mul_sel_tag  :
                         wb1_from_mem ? wb1_mem_sel_tag  :
-                        wb1_from_alu ? wb1_alu_sel_tag  : 5'd0;
+                        wb1_from_alu ? wb1_alu_sel_tag  : {RS_TAG_W_CFG{1'b0}};
 assign wb1_rd         = wb1_from_div ? wb1_div_sel_rd  :
                         wb1_from_mul ? wb1_mul_sel_rd  :
                         wb1_from_mem ? wb1_mem_sel_rd  :
@@ -3084,13 +3646,30 @@ assign wb1_tid        = wb1_from_div ? wb1_div_sel_tid  :
                         wb1_from_mul ? wb1_mul_sel_tid  :
                         wb1_from_mem ? wb1_mem_sel_tid  :
                         wb1_from_alu ? wb1_alu_sel_tid  : 1'b0;
+assign wb1_order_id   = wb1_from_div ? wb1_div_sel_order_id :
+                        wb1_from_mul ? wb1_mul_sel_order_id :
+                        wb1_from_mem ? wb1_mem_sel_order_id :
+                        wb1_from_alu ? wb1_alu_sel_order_id : {`METADATA_ORDER_ID_W{1'b0}};
+
+wire wb0_tag_live_match =
+    wb0_valid && (wb0_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_live_map[wb0_tag] &&
+    (tag_tid_map[wb0_tag] == wb0_tid) &&
+    (tag_order_map[wb0_tag] == wb0_order_id);
+wire wb1_tag_live_match =
+    wb1_valid && (wb1_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_live_map[wb1_tag] &&
+    (tag_tid_map[wb1_tag] == wb1_tid) &&
+    (tag_order_map[wb1_tag] == wb1_order_id);
+assign wb0_valid_safe = wb0_valid && wb0_tag_live_match;
+assign wb1_valid_safe = wb1_valid && wb1_tag_live_match;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Result Buffer: Store WB results indexed by tag for commit-time RF write
 // ════════════════════════════════════════════════════════════════════════════
 // 32-entry buffer (one per tag), stores result data for instructions in flight
-reg [31:0] result_buffer [0:31];
-reg        result_valid  [0:31];
+reg [31:0] result_buffer [0:RS_TAG_DEPTH_CFG];
+reg        result_valid  [0:RS_TAG_DEPTH_CFG];
 reg [7:0]  debug_last_iss0_pc_lo_r;
 reg [7:0]  debug_last_iss1_pc_lo_r;
 reg [7:0]  debug_branch_issue_count_r;
@@ -3105,11 +3684,11 @@ reg [7:0]  debug_m1_resp_count_r;
 reg [7:0]  debug_uart_tx_start_count_r;
 
 // WB data sources for result buffer
-wire [31:0] wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
-wire [31:0] wb1_result_data = wb1_from_div ? wb1_div_sel_data :
-                              wb1_from_mul ? wb1_mul_sel_data :
-                              wb1_from_mem ? wb1_mem_sel_data :
-                              wb1_from_alu ? wb1_alu_sel_data : 32'd0;
+assign wb0_result_data = wb0_from_rocc ? rocc_resp_data : p0_ex_result;
+assign wb1_result_data = wb1_from_div ? wb1_div_sel_data :
+                         wb1_from_mul ? wb1_mul_sel_data :
+                         wb1_from_mem ? wb1_mem_sel_data :
+                         wb1_from_alu ? wb1_alu_sel_data : 32'd0;
 
 wire wb1_div_emit_curr = wb1_from_div && !wb1_div_pending_valid;
 wire wb1_mul_emit_curr = wb1_from_mul && !wb1_mul_pending_valid;
@@ -3125,38 +3704,42 @@ wire wb1_alu_capture_curr = wb1_alu_curr_valid && !wb1_alu_emit_curr;
 integer i;
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        for (i = 0; i < 32; i = i + 1) begin
+        for (i = 0; i <= RS_TAG_DEPTH_CFG; i = i + 1) begin
             result_buffer[i] <= 32'd0;
             result_valid[i]  <= 1'b0;
         end
         wb1_div_pending_valid <= 1'b0;
-        wb1_div_pending_tag <= 5'd0;
+        wb1_div_pending_tag <= {RS_TAG_W_CFG{1'b0}};
         wb1_div_pending_rd <= 5'd0;
         wb1_div_pending_regs_write <= 1'b0;
         wb1_div_pending_fu <= 3'd0;
         wb1_div_pending_tid <= 1'b0;
         wb1_div_pending_data <= 32'd0;
+        wb1_div_pending_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
         wb1_mul_pending_valid <= 1'b0;
-        wb1_mul_pending_tag <= 5'd0;
+        wb1_mul_pending_tag <= {RS_TAG_W_CFG{1'b0}};
         wb1_mul_pending_rd <= 5'd0;
         wb1_mul_pending_regs_write <= 1'b0;
         wb1_mul_pending_fu <= 3'd0;
         wb1_mul_pending_tid <= 1'b0;
         wb1_mul_pending_data <= 32'd0;
+        wb1_mul_pending_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
         wb1_mem_pending_valid <= 1'b0;
-        wb1_mem_pending_tag <= 5'd0;
+        wb1_mem_pending_tag <= {RS_TAG_W_CFG{1'b0}};
         wb1_mem_pending_rd <= 5'd0;
         wb1_mem_pending_regs_write <= 1'b0;
         wb1_mem_pending_fu <= 3'd0;
         wb1_mem_pending_tid <= 1'b0;
         wb1_mem_pending_data <= 32'd0;
+        wb1_mem_pending_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
         wb1_alu_pending_valid <= 1'b0;
-        wb1_alu_pending_tag <= 5'd0;
+        wb1_alu_pending_tag <= {RS_TAG_W_CFG{1'b0}};
         wb1_alu_pending_rd <= 5'd0;
         wb1_alu_pending_regs_write <= 1'b0;
         wb1_alu_pending_fu <= 3'd0;
         wb1_alu_pending_tid <= 1'b0;
         wb1_alu_pending_data <= 32'd0;
+        wb1_alu_pending_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
         debug_last_iss0_pc_lo_r <= 8'd0;
         debug_last_iss1_pc_lo_r <= 8'd0;
         debug_branch_issue_count_r <= 8'd0;
@@ -3198,10 +3781,19 @@ always @(posedge clk or negedge rstn) begin
 
         // Tags are recycled with RS entry reuse, so clear any stale buffered
         // result as soon as a fresh instruction claims the tag.
-        if (disp0_accepted && (sb_disp0_tag != 5'd0))
+        if (disp0_accepted && (sb_disp0_tag != {RS_TAG_W_CFG{1'b0}}))
             result_valid[sb_disp0_tag] <= 1'b0;
-        if (disp1_accepted && (sb_disp1_tag != 5'd0))
+        if (disp1_accepted && (sb_disp1_tag != {RS_TAG_W_CFG{1'b0}}))
             result_valid[sb_disp1_tag] <= 1'b0;
+        if (combined_flush_any) begin
+            for (i = 1; i <= RS_TAG_DEPTH_CFG; i = i + 1) begin
+                if (tag_live_map[i] &&
+                    (tag_tid_map[i] == flush_tid_mux) &&
+                    (!flush_is_order_based || (tag_order_map[i] > flush_order_id_mux))) begin
+                    result_valid[i] <= 1'b0;
+                end
+            end
+        end
 
         if (wb1_from_div && wb1_div_pending_valid)
             wb1_div_pending_valid <= 1'b0;
@@ -3220,6 +3812,7 @@ always @(posedge clk or negedge rstn) begin
             wb1_div_pending_fu <= wb1_div_curr_fu;
             wb1_div_pending_tid <= wb1_div_curr_tid;
             wb1_div_pending_data <= wb1_div_curr_data;
+            wb1_div_pending_order_id <= wb1_div_curr_order_id;
         end
         if (wb1_mul_capture_curr && (!wb1_mul_pending_valid || wb1_from_mul)) begin
             wb1_mul_pending_valid <= 1'b1;
@@ -3229,6 +3822,7 @@ always @(posedge clk or negedge rstn) begin
             wb1_mul_pending_fu <= wb1_mul_curr_fu;
             wb1_mul_pending_tid <= wb1_mul_curr_tid;
             wb1_mul_pending_data <= wb1_mul_curr_data;
+            wb1_mul_pending_order_id <= wb1_mul_curr_order_id;
         end
         if (wb1_mem_capture_curr && (!wb1_mem_pending_valid || wb1_from_mem)) begin
             wb1_mem_pending_valid <= 1'b1;
@@ -3238,6 +3832,7 @@ always @(posedge clk or negedge rstn) begin
             wb1_mem_pending_fu <= wb1_mem_curr_fu;
             wb1_mem_pending_tid <= wb1_mem_curr_tid;
             wb1_mem_pending_data <= wb1_mem_curr_data;
+            wb1_mem_pending_order_id <= wb1_mem_curr_order_id;
         end
         if (wb1_alu_capture_curr && (!wb1_alu_pending_valid || wb1_from_alu)) begin
             wb1_alu_pending_valid <= 1'b1;
@@ -3247,16 +3842,17 @@ always @(posedge clk or negedge rstn) begin
             wb1_alu_pending_fu <= wb1_alu_curr_fu;
             wb1_alu_pending_tid <= wb1_alu_curr_tid;
             wb1_alu_pending_data <= wb1_alu_curr_data;
+            wb1_alu_pending_order_id <= wb1_alu_curr_order_id;
         end
 
         // Write WB0 result (highest priority if same tag)
-        if (wb0_valid && wb0_regs_write) begin
+        if (wb0_valid_safe && wb0_regs_write) begin
             result_buffer[wb0_tag] <= wb0_result_data;
             result_valid[wb0_tag]  <= 1'b1;
         end
 
         // Write WB1 result
-        if (wb1_valid && wb1_regs_write) begin
+        if (wb1_valid_safe && wb1_regs_write) begin
             result_buffer[wb1_tag] <= wb1_result_data;
             result_valid[wb1_tag]  <= 1'b1;
 `ifdef VERBOSE_SIM_LOGS
@@ -3265,20 +3861,20 @@ always @(posedge clk or negedge rstn) begin
 `endif
         end
 
-        if (rob_commit0_valid && rob_commit0_has_result && (rob_commit0_tag != 5'd0))
+        if (rob_commit0_valid && rob_commit0_has_result && (rob_commit0_tag != {RS_TAG_W_CFG{1'b0}}))
             result_valid[rob_commit0_tag] <= 1'b0;
-        if (rob_commit1_valid && rob_commit1_has_result && (rob_commit1_tag != 5'd0))
+        if (rob_commit1_valid && rob_commit1_has_result && (rob_commit1_tag != {RS_TAG_W_CFG{1'b0}}))
             result_valid[rob_commit1_tag] <= 1'b0;
     end
 end
 
-assign p0_tagbuf_a_valid = (p0_pre_ro_src1_tag != 5'd0) && result_valid[p0_pre_ro_src1_tag];
+assign p0_tagbuf_a_valid = (p0_pre_ro_src1_tag != {RS_TAG_W_CFG{1'b0}}) && result_valid[p0_pre_ro_src1_tag];
 assign p0_tagbuf_a_data  = result_buffer[p0_pre_ro_src1_tag];
-assign p0_tagbuf_b_valid = (p0_pre_ro_src2_tag != 5'd0) && result_valid[p0_pre_ro_src2_tag];
+assign p0_tagbuf_b_valid = (p0_pre_ro_src2_tag != {RS_TAG_W_CFG{1'b0}}) && result_valid[p0_pre_ro_src2_tag];
 assign p0_tagbuf_b_data  = result_buffer[p0_pre_ro_src2_tag];
-assign p1_tagbuf_a_valid = (p1_pre_ro_src1_tag != 5'd0) && result_valid[p1_pre_ro_src1_tag];
+assign p1_tagbuf_a_valid = (p1_pre_ro_src1_tag != {RS_TAG_W_CFG{1'b0}}) && result_valid[p1_pre_ro_src1_tag];
 assign p1_tagbuf_a_data  = result_buffer[p1_pre_ro_src1_tag];
-assign p1_tagbuf_b_valid = (p1_pre_ro_src2_tag != 5'd0) && result_valid[p1_pre_ro_src2_tag];
+assign p1_tagbuf_b_valid = (p1_pre_ro_src2_tag != {RS_TAG_W_CFG{1'b0}}) && result_valid[p1_pre_ro_src2_tag];
 assign p1_tagbuf_b_data  = result_buffer[p1_pre_ro_src2_tag];
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -3348,7 +3944,7 @@ if (ROCC_ACCEL_ENABLE) begin : gen_rocc_accel
         .SA_SIZE   (8),
         .VEC_WIDTH (128),
         .SCRATCH_KB(4),
-        .TAG_W     (5)
+        .TAG_W     (RS_TAG_W_CFG)
     ) u_rocc_ai_accelerator (
         .clk              (clk),
         .rstn             (rstn),
@@ -3390,7 +3986,7 @@ end else begin : gen_rocc_stub
     assign rocc_resp_valid    = 1'b0;
     assign rocc_resp_rd       = 5'd0;
     assign rocc_resp_data     = 32'd0;
-    assign rocc_resp_tag      = 5'd0;
+    assign rocc_resp_tag      = {RS_TAG_W_CFG{1'b0}};
     assign rocc_resp_tid      = 1'b0;
     assign rocc_mem_req_valid = 1'b0;
     assign rocc_mem_req_addr  = 32'd0;
@@ -3405,16 +4001,6 @@ endgenerate
 // Task 4: Memory Subsystem Integration
 // ════════════════════════════════════════════════════════════════════════════
 
-// M1 (D-side) interface signals
-wire        m1_req_valid;
-wire        m1_req_ready;
-wire [31:0] m1_req_addr;
-wire        m1_req_write;
-wire [31:0] m1_req_wdata;
-wire [3:0]  m1_req_wen;
-wire        m1_resp_valid;
-wire [31:0] m1_resp_data;
-
 // M2 (RoCC DMA) interface signals
 wire        m2_req_valid;
 wire        m2_req_ready;
@@ -3427,16 +4013,11 @@ wire [31:0] m2_resp_data;
 
 // Internal status/interrupts from the full mem_subsys path
 wire [7:0]  mem_subsys_tube_status;
-wire        mem_subsys_ext_timer_irq;     // CLINT timer interrupt (MTIP)
-wire        mem_subsys_ext_external_irq;  // PLIC external interrupt (MEIP)
 wire        mem_subsys_uart_tx;           // UART TX from mem_subsys MMIO
-wire        mem_subsys_debug_uart_tx_byte_valid;
 wire [7:0]  mem_subsys_debug_uart_tx_byte;
 wire [7:0]  mem_subsys_debug_uart_status_load_count;
 wire [7:0]  mem_subsys_debug_uart_tx_store_count;
 wire [127:0] mem_subsys_debug_ddr3_m0_bus;
-wire        ext_timer_irq;
-wire        ext_external_irq;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
 
 // RoCC DMA to M2 port connections
@@ -3475,6 +4056,7 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .m1_req_wen        (m1_req_wen),
         .m1_resp_valid     (m1_resp_valid),
         .m1_resp_data      (m1_resp_data),
+        .m1_resp_l1d_hit   (m1_resp_l1d_hit),
 
         // M2: RoCC DMA interface
         .m2_req_valid      (m2_req_valid),
@@ -3532,6 +4114,7 @@ end else begin : gen_mem_subsys_tieoff
     assign m1_req_ready              = 1'b0;
     assign m1_resp_valid             = 1'b0;
     assign m1_resp_data              = 32'd0;
+    assign m1_resp_l1d_hit           = 1'b0;
     assign m2_req_ready              = 1'b0;
     assign m2_resp_valid             = 1'b0;
     assign m2_resp_data              = 32'd0;

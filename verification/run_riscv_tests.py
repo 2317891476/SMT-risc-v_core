@@ -297,7 +297,7 @@ def run_simulation():
     """Run the simulation"""
     extra_defines = ""
     if _FPGA_CONFIG:
-        extra_defines = "-DSIM_SCOREBOARD_RS_DEPTH=16 -DSIM_SCOREBOARD_RS_IDX_W=4 "
+        extra_defines = "-DSIM_SCOREBOARD_RS_DEPTH=48 -DSIM_SCOREBOARD_RS_IDX_W=6 "
     compile_cmd = (
         "iverilog -g2012 -s tb -o out_iverilog/bin/tb_riscv_test.out "
         f"{extra_defines}"
@@ -457,7 +457,7 @@ def main():
                         default="riscv-tests", help="Test suite to run")
     parser.add_argument("--download", action="store_true", help="Force download even if exists")
     parser.add_argument("--categories", nargs="+", help="Categories to run")
-    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_DEPTH=16, RS_IDX_W=4)")
+    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_TAG_DEPTH=48, RS_TAG_W=6)")
     args = parser.parse_args()
 
     global _FPGA_CONFIG

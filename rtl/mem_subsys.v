@@ -35,6 +35,7 @@ module mem_subsys (
     input  wire [3:0]  m1_req_wen,        // Byte-wise write enable
     output wire        m1_resp_valid,
     output wire [31:0] m1_resp_data,
+    output wire        m1_resp_l1d_hit,
 
     // ═══════════════════════════════════════════════════════════════════════════
     // Master 2: RoCC DMA interface (AI accelerator memory access)
@@ -171,6 +172,7 @@ wire        m0_ddr3_resp_last;
 wire        m1_ddr3_req_ready;
 wire        m1_ddr3_resp_valid;
 wire [31:0] m1_ddr3_resp_data;
+wire        m1_ddr3_resp_l1d_hit;
 
 // L1 DCache wrapper: sits between M1 DDR3 check and DDR3 arbiter
 wire        dc_m1_req_valid;
@@ -194,6 +196,7 @@ l1_dcache_m1 u_dcache_m1 (
     .up_m1_req_wen    (m1_req_wen),
     .up_m1_resp_valid (m1_ddr3_resp_valid),
     .up_m1_resp_data  (m1_ddr3_resp_data),
+    .up_m1_resp_l1d_hit(m1_ddr3_resp_l1d_hit),
     .dn_m1_req_valid  (dc_m1_req_valid),
     .dn_m1_req_ready  (dc_m1_req_ready),
     .dn_m1_req_addr   (dc_m1_req_addr),
@@ -217,6 +220,7 @@ wire        m0_ddr3_resp_last = 1'b0;
 wire        m1_ddr3_req_ready = 1'b0;
 wire        m1_ddr3_resp_valid = 1'b0;
 wire [31:0] m1_ddr3_resp_data = 32'd0;
+wire        m1_ddr3_resp_l1d_hit = 1'b0;
 wire        ddr3_calib_done_w = 1'b0;
 wire        ddr3_bridge_idle_w = 1'b1;
 // synthesis translate_off
@@ -918,6 +922,11 @@ assign m1_resp_data  = uart_rx_mmio_resp_valid_r ? uart_rx_mmio_resp_data_r
                     : mmio_resp_valid_r ? mmio_resp_data_r
                     : m1_ddr3_resp_valid ? m1_ddr3_resp_data
                     : m1_resp_data_int;
+assign m1_resp_l1d_hit = uart_rx_mmio_resp_valid_r ? 1'b0
+                    : debug_beacon_resp_valid_r ? 1'b0
+                    : mmio_resp_valid_r ? 1'b0
+                    : m1_ddr3_resp_valid ? m1_ddr3_resp_l1d_hit
+                    : 1'b0;
 `else
 assign m1_resp_valid = debug_beacon_resp_valid_r ? 1'b1
                     : mmio_resp_valid_r ? 1'b1
@@ -927,14 +936,20 @@ assign m1_resp_data  = debug_beacon_resp_valid_r ? debug_beacon_resp_data_r
                     : mmio_resp_valid_r ? mmio_resp_data_r
                     : m1_ddr3_resp_valid ? m1_ddr3_resp_data
                     : m1_resp_data_int;
+assign m1_resp_l1d_hit = debug_beacon_resp_valid_r ? 1'b0
+                    : mmio_resp_valid_r ? 1'b0
+                    : m1_ddr3_resp_valid ? m1_ddr3_resp_l1d_hit
+                    : 1'b0;
 `endif
 `else
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
 assign m1_resp_valid = uart_rx_mmio_resp_valid_r ? 1'b1 : debug_beacon_resp_valid_r ? 1'b1 : mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
 assign m1_resp_data  = uart_rx_mmio_resp_valid_r ? uart_rx_mmio_resp_data_r : debug_beacon_resp_valid_r ? debug_beacon_resp_data_r : mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
+assign m1_resp_l1d_hit = 1'b0;
 `else
 assign m1_resp_valid = debug_beacon_resp_valid_r ? 1'b1 : mmio_resp_valid_r ? 1'b1 : m1_resp_valid_int;
 assign m1_resp_data  = debug_beacon_resp_valid_r ? debug_beacon_resp_data_r : mmio_resp_valid_r ? mmio_resp_data_r : m1_resp_data_int;
+assign m1_resp_l1d_hit = 1'b0;
 `endif
 `endif
 

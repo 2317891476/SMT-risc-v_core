@@ -341,7 +341,7 @@ def main() -> int:
     parser.add_argument("--send-text", default="")
     parser.add_argument("--send-hex", default="")
     parser.add_argument("--expect-text", default="")
-    parser.add_argument("--rs-depth", type=int, default=16)
+    parser.add_argument("--rs-depth", type=int, default=48)
     parser.add_argument("--fetch-buffer-depth", type=int, default=16)
     parser.add_argument("--core-clk-mhz", type=float, default=10.0)
     args = parser.parse_args()

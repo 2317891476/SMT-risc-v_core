@@ -29,6 +29,12 @@ wire [ADDR_WIDTH -1 : 0] inst_addr_2;
 assign inst_addr_2 = inst_addr[ADDR_WIDTH +2-1 : 2];
 
 `ifdef FPGA_MODE
+`ifdef ENABLE_MEM_SUBSYS
+// DDR3/XIP FPGA synthesis uses mem_subsys for instruction fetch.  Preserve the
+// instance name for hierarchy compatibility, but do not synthesize the bench
+// preload ROM into board bitstreams.
+assign inst_o = 32'd0;
+`else
 // Keep the FPGA instruction image in synchronous block RAM so implementation
 // cannot aggressively constant-fold the whole CPU against a fixed ROM image.
 // The board build cares more about preserving real hardware behavior than
@@ -57,6 +63,7 @@ always @(posedge clk or negedge rstn) begin
 end
 
 assign inst_o = inst_o_r;
+`endif
 `elsif VERILATOR_MAINLINE
 // Verilator mainline runs also need deterministic ROM contents from inst.hex,
 // but they should not pull in the FPGA clocking/board wrappers. Mirror the

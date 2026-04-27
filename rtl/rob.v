@@ -109,11 +109,15 @@ module rob #(
     output wire                        commit1_is_store,
     output wire                        commit0_is_mret,
     output wire                        commit1_is_mret,
+    output wire                        commit0_is_branch,
+    output wire                        commit1_is_branch,
 
     // ─── Rename Commit Outputs (for freelist release) ────────────
     output wire [PHYS_REG_W-1:0]       commit0_prd_old,
+    output wire [PHYS_REG_W-1:0]       commit0_prd_new,
     output wire                        commit0_regs_write_out,
     output wire [PHYS_REG_W-1:0]       commit1_prd_old,
+    output wire [PHYS_REG_W-1:0]       commit1_prd_new,
     output wire                        commit1_regs_write_out,
 
     // ─── Recovery Walk Interface (for rename map restore) ────────
@@ -125,6 +129,13 @@ module rob #(
     output wire                        recover_regs_write,
     output wire [0:0]                  recover_tid,
     output wire                        debug_commit_suppressed,
+
+    input  wire [PHYS_REG_W-1:0]       free_query0_prd,
+    input  wire [0:0]                  free_query0_tid,
+    output reg                         free_query0_prd_old_live,
+    input  wire [PHYS_REG_W-1:0]       free_query1_prd,
+    input  wire [0:0]                  free_query1_tid,
+    output reg                         free_query1_prd_old_live,
 
     // ROB head query for non-speculative side-effect gating
     output wire                        head_valid_t0,
@@ -158,6 +169,31 @@ reg                     rob_is_branch  [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg                     rob_regs_write [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 reg  [31:0]             rob_pc         [0:NUM_THREAD-1][0:ROB_DEPTH-1];
 
+integer free_q0_idx, free_q1_idx;
+always @(*) begin
+    free_query0_prd_old_live = 1'b0;
+    if (free_query0_prd != {PHYS_REG_W{1'b0}}) begin
+        for (free_q0_idx = 0; free_q0_idx < ROB_DEPTH; free_q0_idx = free_q0_idx + 1) begin
+            if (rob_valid[free_query0_tid][free_q0_idx] &&
+                rob_regs_write[free_query0_tid][free_q0_idx] &&
+                (rob_prd_old[free_query0_tid][free_q0_idx] == free_query0_prd))
+                free_query0_prd_old_live = 1'b1;
+        end
+    end
+end
+
+always @(*) begin
+    free_query1_prd_old_live = 1'b0;
+    if (free_query1_prd != {PHYS_REG_W{1'b0}}) begin
+        for (free_q1_idx = 0; free_q1_idx < ROB_DEPTH; free_q1_idx = free_q1_idx + 1) begin
+            if (rob_valid[free_query1_tid][free_q1_idx] &&
+                rob_regs_write[free_query1_tid][free_q1_idx] &&
+                (rob_prd_old[free_query1_tid][free_q1_idx] == free_query1_prd))
+                free_query1_prd_old_live = 1'b1;
+        end
+    end
+end
+
 // ─── Head/Tail Pointers ──────────────────────────────────────────
 reg  [ROB_IDX_W-1:0]    rob_head    [0:NUM_THREAD-1];
 reg  [ROB_IDX_W-1:0]    rob_tail    [0:NUM_THREAD-1];
@@ -173,7 +209,9 @@ reg  [`METADATA_ORDER_ID_W-1:0] commit0_order_id_r, commit1_order_id_r;
 reg  [31:0]             commit0_pc_r, commit1_pc_r;
 reg                     commit0_is_store_r, commit1_is_store_r;
 reg                     commit0_is_mret_r,  commit1_is_mret_r;
+reg                     commit0_is_branch_r, commit1_is_branch_r;
 reg  [PHYS_REG_W-1:0]  commit0_prd_old_r, commit1_prd_old_r;
+reg  [PHYS_REG_W-1:0]  commit0_prd_new_r, commit1_prd_new_r;
 reg                     commit0_regs_write_r, commit1_regs_write_r;
 
 // ─── Recovery Walk State Machine ─────────────────────────────────
@@ -275,9 +313,13 @@ assign commit0_is_store   = commit0_is_store_r;
 assign commit1_is_store   = commit1_is_store_r;
 assign commit0_is_mret    = commit0_is_mret_r;
 assign commit1_is_mret    = commit1_is_mret_r;
+assign commit0_is_branch  = commit0_is_branch_r;
+assign commit1_is_branch  = commit1_is_branch_r;
 assign commit0_prd_old    = commit0_prd_old_r;
+assign commit0_prd_new    = commit0_prd_new_r;
 assign commit0_regs_write_out = commit0_regs_write_r;
 assign commit1_prd_old    = commit1_prd_old_r;
+assign commit1_prd_new    = commit1_prd_new_r;
 assign commit1_regs_write_out = commit1_regs_write_r;
 
 // Recovery outputs
@@ -329,8 +371,12 @@ always @(posedge clk or negedge rstn) begin
         commit1_is_store_r <= 1'b0;
         commit0_is_mret_r  <= 1'b0;
         commit1_is_mret_r  <= 1'b0;
+        commit0_is_branch_r <= 1'b0;
+        commit1_is_branch_r <= 1'b0;
         commit0_prd_old_r  <= {PHYS_REG_W{1'b0}};
         commit1_prd_old_r  <= {PHYS_REG_W{1'b0}};
+        commit0_prd_new_r  <= {PHYS_REG_W{1'b0}};
+        commit1_prd_new_r  <= {PHYS_REG_W{1'b0}};
         commit0_regs_write_r <= 1'b0;
         commit1_regs_write_r <= 1'b0;
 
@@ -373,6 +419,8 @@ always @(posedge clk or negedge rstn) begin
         commit1_valid_r <= 1'b0;
         commit0_is_mret_r <= 1'b0;
         commit1_is_mret_r <= 1'b0;
+        commit0_is_branch_r <= 1'b0;
+        commit1_is_branch_r <= 1'b0;
         recover_en_r    <= 1'b0;
         debug_commit_suppressed_r <= 1'b0;
         if ((commit_flush_blocks_t0 && head_complete_now_t0) ||
@@ -523,7 +571,9 @@ always @(posedge clk or negedge rstn) begin
                     commit0_pc_r         <= rob_pc[0][rob_head[0]];
                     commit0_is_store_r   <= rob_is_store[0][rob_head[0]];
                     commit0_is_mret_r    <= rob_is_mret[0][rob_head[0]];
+                    commit0_is_branch_r  <= rob_is_branch[0][rob_head[0]];
                     commit0_prd_old_r    <= rob_prd_old[0][rob_head[0]];
+                    commit0_prd_new_r    <= rob_prd_new[0][rob_head[0]];
                     commit0_regs_write_r <= rob_regs_write[0][rob_head[0]];
                     rob_valid[0][rob_head[0]]      <= 1'b0;
                     rob_has_result[0][rob_head[0]] <= 1'b0;
@@ -616,7 +666,9 @@ always @(posedge clk or negedge rstn) begin
                     commit1_pc_r         <= rob_pc[1][rob_head[1]];
                     commit1_is_store_r   <= rob_is_store[1][rob_head[1]];
                     commit1_is_mret_r    <= rob_is_mret[1][rob_head[1]];
+                    commit1_is_branch_r  <= rob_is_branch[1][rob_head[1]];
                     commit1_prd_old_r    <= rob_prd_old[1][rob_head[1]];
+                    commit1_prd_new_r    <= rob_prd_new[1][rob_head[1]];
                     commit1_regs_write_r <= rob_regs_write[1][rob_head[1]];
                     rob_valid[1][rob_head[1]]      <= 1'b0;
                     rob_has_result[1][rob_head[1]] <= 1'b0;

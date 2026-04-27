@@ -20,6 +20,7 @@ module l1_dcache_m1 (
     input  wire [3:0]  up_m1_req_wen,
     output wire        up_m1_resp_valid,
     output wire [31:0] up_m1_resp_data,
+    output wire        up_m1_resp_l1d_hit,
 
     // Downstream M1 (to DDR3 arbiter)
     output wire        dn_m1_req_valid,
@@ -44,6 +45,7 @@ assign dn_m1_req_wdata = up_m1_req_wdata;
 assign dn_m1_req_wen   = up_m1_req_wen;
 assign up_m1_resp_valid = dn_m1_resp_valid;
 assign up_m1_resp_data  = dn_m1_resp_data;
+assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
 
 `elsif DCACHE_REGISTERED_PT
@@ -87,6 +89,7 @@ assign dn_m1_req_wen   = rpt_dn_wen;
 
 assign up_m1_resp_valid = rpt_resp_valid;
 assign up_m1_resp_data  = rpt_resp_data;
+assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
 
 wire [2:0] rpt_req_word = rpt_addr[4:2];
@@ -289,6 +292,7 @@ assign up_m1_resp_valid = ro_hit_resp_valid || ro_install_resp_valid || ro_pt_re
 assign up_m1_resp_data  = ro_hit_resp_valid     ? ro_hit_resp_data :
                           ro_install_resp_valid  ? ro_install_resp_data :
                           dn_m1_resp_data;
+assign up_m1_resp_l1d_hit = ro_hit_resp_valid;
 
 assign dcache_miss_event = ro_can_accept && ro_is_load && !ro_hit;
 
@@ -530,6 +534,7 @@ assign up_m1_req_ready = can_accept && up_m1_req_valid;
 
 assign up_m1_resp_valid = hit_resp_valid_r || install_resp_valid_r;
 assign up_m1_resp_data  = hit_resp_valid_r ? hit_resp_data_r : install_resp_data_r;
+assign up_m1_resp_l1d_hit = hit_resp_valid_r;
 
 // ─────────────────────────────────────────────────────────────
 // Downstream interface mux

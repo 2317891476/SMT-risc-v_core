@@ -56,6 +56,7 @@ module exec_pipe0 #(
     output wire               out_regs_write,
     output wire [2:0]         out_fu,
     output wire [0:0]         out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] out_order_id,
 
     // ─── CSR outputs ────────────────────────────────────────────
     output wire               csr_valid,     // CSR instruction executed
@@ -121,6 +122,7 @@ reg [4:0]         out_rd_r;
 reg               out_regs_write_r;
 reg [2:0]         out_fu_r;
 reg [0:0]         out_tid_r;
+reg [`METADATA_ORDER_ID_W-1:0] out_order_id_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [0:0]         br_tid_r;
@@ -190,6 +192,7 @@ always @(posedge clk or negedge rstn) begin
         out_regs_write_r    <= 1'b0;
         out_fu_r            <= 3'd0;
         out_tid_r           <= 1'b0;
+        out_order_id_r      <= {`METADATA_ORDER_ID_W{1'b0}};
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
         br_tid_r            <= 1'b0;
@@ -244,6 +247,7 @@ always @(posedge clk or negedge rstn) begin
         out_regs_write_r <= in_regs_write;
         out_fu_r         <= in_fu;
         out_tid_r        <= in_tid;
+        out_order_id_r   <= in_order_id;
 
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= redirect_needed && !stored_flush_kill;
@@ -267,6 +271,7 @@ assign out_rd         = out_rd_r;
 assign out_regs_write = out_regs_write_r;
 assign out_fu         = out_fu_r;
 assign out_tid        = out_tid_r;
+assign out_order_id   = out_order_id_r;
 
 assign csr_valid  = in_valid && in_is_csr && !incoming_flush_kill;
 assign csr_wdata  = csr_write_data;

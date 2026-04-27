@@ -6,6 +6,8 @@
 //   Cycles 1-32: one quotient bit per cycle (restoring division)
 //   Cycle 33: sign correction and output
 // =============================================================================
+`include "define.v"
+
 module div_unit #(
     parameter TAG_W = 5
 )(
@@ -21,6 +23,7 @@ module div_unit #(
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
     input  wire [0:0]         in_tid,
+    input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,
 
     output wire               out_valid,
     output wire [TAG_W-1:0]   out_tag,
@@ -29,6 +32,7 @@ module div_unit #(
     output wire               out_regs_write,
     output wire [2:0]         out_fu,
     output wire [0:0]         out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] out_order_id,
 
     output wire               busy
 );
@@ -47,6 +51,7 @@ reg [4:0]       sv_rd;
 reg             sv_regs_write;
 reg [2:0]       sv_fu;
 reg [0:0]       sv_tid;
+reg [`METADATA_ORDER_ID_W-1:0] sv_order_id;
 
 reg             done_r;
 reg [31:0]      result_r;
@@ -79,6 +84,7 @@ always @(posedge clk or negedge rstn) begin
         sv_regs_write <= 1'b0;
         sv_fu       <= 3'd0;
         sv_tid      <= 1'b0;
+        sv_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         done_r <= 1'b0;
 
@@ -100,6 +106,7 @@ always @(posedge clk or negedge rstn) begin
                 sv_regs_write<= in_regs_write;
                 sv_fu        <= in_fu;
                 sv_tid       <= in_tid;
+                sv_order_id  <= in_order_id;
                 want_rem     <= in_func3[1];
 
                 if (div_by_zero) begin
@@ -158,5 +165,6 @@ assign out_rd     = sv_rd;
 assign out_regs_write = sv_regs_write;
 assign out_fu     = sv_fu;
 assign out_tid    = sv_tid;
+assign out_order_id = sv_order_id;
 
 endmodule

@@ -144,6 +144,7 @@ assign trap_return = mret_valid;
 reg        csr_write_pending;
 reg [11:0] csr_write_addr;
 reg [31:0] csr_write_value;
+reg [31:0] csr_wval;  // computed write value
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -221,8 +222,6 @@ always @(*) begin
 end
 
 // ─── CSR Write Logic ────────────────────────────────────────────────────────
-reg [31:0] csr_wval;  // computed write value
-
 always @(*) begin
     csr_wval = 32'd0;
     case (csr_op)

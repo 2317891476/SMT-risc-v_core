@@ -52,6 +52,11 @@ module verilator_mainline_top (
     output wire        debug_fl_disp_stall,
     output wire        debug_sys_disp_stall,
     output wire        debug_sb_disp1_blocked,
+    output wire        debug_stall_iq_int_full,
+    output wire        debug_stall_iq_mem_full,
+    output wire        debug_stall_iq_mul_full,
+    output wire        debug_stall_iq_div_full,
+    output wire        debug_stall_rs_tag_empty,
     output wire        debug_rob_commit0_valid,
     output wire        debug_rob_commit1_valid,
     output wire [15:0] debug_rob_commit0_order_id,
@@ -66,8 +71,8 @@ module verilator_mainline_top (
     output wire [31:0] debug_rob_head_pc_t1,
     output wire [15:0] debug_rob_head_order_id_t0,
     output wire [15:0] debug_rob_head_order_id_t1,
-    output wire [4:0]  debug_rob_head_tag_t0,
-    output wire [4:0]  debug_rob_head_tag_t1,
+    output wire [5:0]  debug_rob_head_tag_t0,
+    output wire [5:0]  debug_rob_head_tag_t1,
     output wire        debug_rob_head_is_store_t0,
     output wire        debug_rob_head_is_store_t1,
     output wire        debug_rob_head_flushed_t0,
@@ -84,7 +89,7 @@ module verilator_mainline_top (
     output wire        debug_mem_iss_valid,
     output wire [31:0] debug_mem_iss_pc,
     output wire [15:0] debug_mem_iss_order_id,
-    output wire [4:0]  debug_mem_iss_tag,
+    output wire [5:0]  debug_mem_iss_tag,
     output wire        debug_mem_iss_tid,
     output wire        debug_mem_iss_mem_read,
     output wire        debug_mem_iss_mem_write,
@@ -96,7 +101,7 @@ module verilator_mainline_top (
     output wire        debug_mem_issue_inhibit,
     output wire        debug_p1_mem_cand_valid,
     output wire [15:0] debug_p1_mem_cand_order_id,
-    output wire [4:0]  debug_p1_mem_cand_tag,
+    output wire [5:0]  debug_p1_mem_cand_tag,
     output wire        debug_p1_mem_cand_mem_read,
     output wire        debug_p1_mem_cand_mem_write,
     output wire        debug_mem_cand_raw_valid,
@@ -115,18 +120,18 @@ module verilator_mainline_top (
     output wire        debug_flush_order_valid,
     output wire [15:0] debug_flush_order_id,
     output wire        debug_wb0_valid,
-    output wire [4:0]  debug_wb0_tag,
+    output wire [5:0]  debug_wb0_tag,
     output wire        debug_wb0_regs_write,
     output wire [31:0] debug_wb0_data,
     output wire        debug_wb1_valid,
-    output wire [4:0]  debug_wb1_tag,
+    output wire [5:0]  debug_wb1_tag,
     output wire        debug_wb1_regs_write,
     output wire [2:0]  debug_wb1_fu,
     output wire [31:0] debug_wb1_data,
     output wire        debug_lsu_req_valid,
     output wire        debug_lsu_req_accept,
     output wire [15:0] debug_lsu_req_order_id,
-    output wire [4:0]  debug_lsu_req_tag,
+    output wire [5:0]  debug_lsu_req_tag,
     output wire        debug_lsu_req_tid,
     output wire [31:0] debug_lsu_req_addr,
     output wire [31:0] debug_lsu_req_wdata,
@@ -136,18 +141,24 @@ module verilator_mainline_top (
     output wire [1:0]  debug_lsu_state,
     output wire        debug_lsu_pending_valid,
     output wire [15:0] debug_lsu_pending_order_id,
-    output wire [4:0]  debug_lsu_pending_tag,
+    output wire [5:0]  debug_lsu_pending_tag,
     output wire [31:0] debug_lsu_pending_addr,
     output wire        debug_lsu_pending_wen,
     output wire        debug_lsu_pending_tid,
     output wire        debug_lsu_m1_txn_is_drain,
     output wire        debug_lsu_m1_cooldown,
+    output wire        debug_lsu_cooldown_set,
+    output wire        debug_lsu_cooldown_skipped_l1hit,
     output wire        debug_lsu_drain_holdoff,
     output wire        debug_lsu_sb_drain_urgent,
     output wire        debug_lsu_sb_has_pending_stores,
     output wire        debug_lsu_sb_mem_write_valid,
     output wire        debug_lsu_sb_forward_valid,
     output wire        debug_lsu_sb_load_hazard,
+    output wire        debug_lsu_load_accept,
+    output wire        debug_lsu_load_resp,
+    output wire        debug_lsu_back_to_back_load_accept,
+    output wire        debug_lsu_forwarded_load_accept,
     output wire        debug_store_buffer_empty,
     output wire [2:0]  debug_store_buffer_count_t0,
     output wire [2:0]  debug_store_buffer_count_t1,
@@ -169,6 +180,7 @@ module verilator_mainline_top (
     output wire [3:0]  debug_m1_req_wen,
     output wire        debug_m1_resp_valid,
     output wire [31:0] debug_m1_resp_data,
+    output wire        debug_m1_resp_l1d_hit,
     output wire        debug_ddr3_req_valid,
     output wire        debug_ddr3_req_ready,
     output wire [31:0] debug_ddr3_req_addr,
@@ -197,12 +209,12 @@ module verilator_mainline_top (
     output wire [31:0] debug_bad_uart_store_op_b,
     output wire [31:0] debug_bad_uart_store_imm,
     output wire [15:0] debug_bad_uart_store_order_id,
-    output wire [4:0]  debug_bad_uart_store_tag,
+    output wire [5:0]  debug_bad_uart_store_tag,
     output wire [4:0]  debug_bad_uart_store_rd,
     output wire [4:0]  debug_bad_uart_store_rs1,
     output wire [4:0]  debug_bad_uart_store_rs2,
-    output wire [4:0]  debug_bad_uart_store_src1_tag,
-    output wire [4:0]  debug_bad_uart_store_src2_tag,
+    output wire [5:0]  debug_bad_uart_store_src1_tag,
+    output wire [5:0]  debug_bad_uart_store_src2_tag,
     output wire [5:0]  debug_bad_uart_store_prs1,
     output wire [5:0]  debug_bad_uart_store_prs2,
     output wire [31:0] debug_bad_uart_store_prf_a,
@@ -215,18 +227,38 @@ module verilator_mainline_top (
     output wire [1:0]  debug_bad_uart_store_fwd_b,
     output wire [2:0]  debug_bad_uart_store_func3,
     output wire        debug_bad_uart_store_tid,
+    output wire [31:0] debug_bad_uart_store_src2_last_pc,
+    output wire [31:0] debug_bad_uart_store_src2_last_data,
+    output wire [23:0] debug_bad_uart_store_src2_last_order_id,
+    output wire [5:0]  debug_bad_uart_store_src2_last_tag,
+    output wire [4:0]  debug_bad_uart_store_src2_last_rd,
+    output wire [2:0]  debug_bad_uart_store_src2_last_fu,
+    output wire [5:0]  debug_bad_uart_store_src2_last_src1_prs,
+    output wire [31:0] debug_bad_uart_store_src2_last_src1_pc,
+    output wire [31:0] debug_bad_uart_store_src2_last_src1_data,
+    output wire [23:0] debug_bad_uart_store_src2_last_src1_order_id,
+    output wire [5:0]  debug_bad_uart_store_src2_last_src1_tag,
+    output wire [4:0]  debug_bad_uart_store_src2_last_src1_rd,
+    output wire [2:0]  debug_bad_uart_store_src2_last_src1_fu,
+    output wire [5:0]  debug_bad_uart_store_src2_last_src1_src1_prs,
+    output wire [31:0] debug_bad_uart_store_src2_last_src1_src1_pc,
+    output wire [31:0] debug_bad_uart_store_src2_last_src1_src1_data,
+    output wire [23:0] debug_bad_uart_store_src2_last_src1_src1_order_id,
+    output wire [5:0]  debug_bad_uart_store_src2_last_src1_src1_tag,
+    output wire [4:0]  debug_bad_uart_store_src2_last_src1_src1_rd,
+    output wire [2:0]  debug_bad_uart_store_src2_last_src1_src1_fu,
     output wire        debug_strcpy_mv_seen,
     output wire [31:0] debug_strcpy_mv_pc,
     output wire [31:0] debug_strcpy_mv_op_a,
     output wire [31:0] debug_strcpy_mv_op_b,
     output wire [15:0] debug_strcpy_mv_order_id,
-    output wire [4:0]  debug_strcpy_mv_tag,
+    output wire [5:0]  debug_strcpy_mv_tag,
     output wire [4:0]  debug_strcpy_mv_rd,
     output wire        debug_strcpy_mv_tid,
     output wire [4:0]  debug_strcpy_mv_rs1,
     output wire [4:0]  debug_strcpy_mv_rs2,
-    output wire [4:0]  debug_strcpy_mv_src1_tag,
-    output wire [4:0]  debug_strcpy_mv_src2_tag,
+    output wire [5:0]  debug_strcpy_mv_src1_tag,
+    output wire [5:0]  debug_strcpy_mv_src2_tag,
     output wire [5:0]  debug_strcpy_mv_prd,
     output wire [5:0]  debug_strcpy_mv_prs1,
     output wire [5:0]  debug_strcpy_mv_prs2,
@@ -247,7 +279,7 @@ module verilator_mainline_top (
     output wire        debug_main_lw_a0_seen,
     output wire [31:0] debug_main_lw_a0_addr,
     output wire [15:0] debug_main_lw_a0_order_id,
-    output wire [4:0]  debug_main_lw_a0_tag,
+    output wire [5:0]  debug_main_lw_a0_tag,
     output wire [5:0]  debug_main_lw_a0_prd,
     output wire [5:0]  debug_main_lw_a0_prs1,
     output wire [31:0] debug_main_lw_a0_base,
@@ -259,17 +291,17 @@ module verilator_mainline_top (
     output wire [31:0] debug_main_addi_a0_op_a,
     output wire [31:0] debug_main_addi_a0_result,
     output wire [15:0] debug_main_addi_a0_order_id,
-    output wire [4:0]  debug_main_addi_a0_tag,
+    output wire [5:0]  debug_main_addi_a0_tag,
     output wire [5:0]  debug_main_addi_a0_prd,
     output wire [5:0]  debug_main_addi_a0_prs1,
-    output wire [4:0]  debug_main_addi_a0_src1_tag,
+    output wire [5:0]  debug_main_addi_a0_src1_tag,
     output wire [31:0] debug_main_addi_a0_prf_a,
     output wire        debug_main_addi_a0_tagbuf_a_valid,
     output wire [31:0] debug_main_addi_a0_tagbuf_a_data,
     output wire [7:0]  debug_main_a0_prd_write_count,
     output wire        debug_main_a0_prd_last_write_port,
     output wire [31:0] debug_main_a0_prd_last_write_data,
-    output wire [4:0]  debug_main_a0_prd_last_write_tag,
+    output wire [5:0]  debug_main_a0_prd_last_write_tag,
     output wire [4:0]  debug_main_a0_prd_last_write_rd,
     output wire [2:0]  debug_main_a0_prd_last_write_fu,
     output wire [31:0] debug_main_a0_prd_last_write_pc,
@@ -277,7 +309,7 @@ module verilator_mainline_top (
     output wire        debug_main_a0_prd_first_bad_write_seen,
     output wire        debug_main_a0_prd_first_bad_write_port,
     output wire [31:0] debug_main_a0_prd_first_bad_write_data,
-    output wire [4:0]  debug_main_a0_prd_first_bad_write_tag,
+    output wire [5:0]  debug_main_a0_prd_first_bad_write_tag,
     output wire [4:0]  debug_main_a0_prd_first_bad_write_rd,
     output wire [2:0]  debug_main_a0_prd_first_bad_write_fu,
     output wire [31:0] debug_main_a0_prd_first_bad_write_pc,
@@ -285,7 +317,7 @@ module verilator_mainline_top (
     output wire        debug_main_a0_prd_first_free_seen,
     output wire        debug_main_a0_prd_first_free_port,
     output wire [4:0]  debug_main_a0_prd_first_free_rd,
-    output wire [4:0]  debug_main_a0_prd_first_free_tag,
+    output wire [5:0]  debug_main_a0_prd_first_free_tag,
     output wire [15:0] debug_main_a0_prd_first_free_order_id,
     output wire        debug_main_addi_a0_wb_seen,
     output wire        debug_main_addi_a0_wb_port,
@@ -493,6 +525,11 @@ module verilator_mainline_top (
     assign debug_fl_disp_stall = u_dut.fl_disp_stall;
     assign debug_sys_disp_stall = u_dut.sys_disp_stall;
     assign debug_sb_disp1_blocked = u_dut.sb_disp1_blocked;
+    assign debug_stall_iq_int_full = u_dut.sb_debug_stall_iq_int_full;
+    assign debug_stall_iq_mem_full = u_dut.sb_debug_stall_iq_mem_full;
+    assign debug_stall_iq_mul_full = u_dut.sb_debug_stall_iq_mul_full;
+    assign debug_stall_iq_div_full = u_dut.sb_debug_stall_iq_div_full;
+    assign debug_stall_rs_tag_empty = u_dut.sb_debug_stall_rs_tag_empty;
     assign debug_rob_commit0_valid = u_dut.rob_commit0_valid;
     assign debug_rob_commit1_valid = u_dut.rob_commit1_valid;
     assign debug_rob_commit0_order_id = u_dut.rob_commit0_order_id;
@@ -583,12 +620,27 @@ module verilator_mainline_top (
     assign debug_lsu_pending_tid = u_dut.u_lsu_shell.pending_tid;
     assign debug_lsu_m1_txn_is_drain = u_dut.u_lsu_shell.m1_txn_is_drain;
     assign debug_lsu_m1_cooldown = u_dut.u_lsu_shell.m1_cooldown_r;
+    assign debug_lsu_cooldown_set = u_dut.u_lsu_shell.debug_lsu_cooldown_set;
+    assign debug_lsu_cooldown_skipped_l1hit = u_dut.u_lsu_shell.debug_lsu_cooldown_skipped_l1hit;
     assign debug_lsu_drain_holdoff = u_dut.u_lsu_shell.m1_drain_holdoff;
     assign debug_lsu_sb_drain_urgent = u_dut.u_lsu_shell.sb_drain_urgent;
     assign debug_lsu_sb_has_pending_stores = u_dut.u_lsu_shell.sb_has_pending_stores;
     assign debug_lsu_sb_mem_write_valid = u_dut.u_lsu_shell.sb_mem_write_valid_int;
     assign debug_lsu_sb_forward_valid = u_dut.u_lsu_shell.sb_forward_valid;
     assign debug_lsu_sb_load_hazard = u_dut.u_lsu_shell.sb_load_hazard;
+    assign debug_lsu_load_accept =
+        u_dut.p1_mem_req_valid && u_dut.lsu_req_accept && !u_dut.p1_mem_req_wen;
+    assign debug_lsu_load_resp =
+        u_dut.u_lsu_shell.resp_valid && (u_dut.u_lsu_shell.resp_fu == 3'd6);
+    assign debug_lsu_back_to_back_load_accept =
+        u_dut.u_lsu_shell.mem_subsys_load_resp_fire &&
+        u_dut.u_lsu_shell.req_valid &&
+        u_dut.u_lsu_shell.req_accept &&
+        !u_dut.u_lsu_shell.req_wen &&
+        !u_dut.u_lsu_shell.sb_forward_valid;
+    assign debug_lsu_forwarded_load_accept =
+        u_dut.p1_mem_req_valid && u_dut.lsu_req_accept &&
+        !u_dut.p1_mem_req_wen && u_dut.u_lsu_shell.sb_forward_valid;
     assign debug_store_buffer_empty = u_dut.lsu_debug_store_buffer_empty;
     assign debug_store_buffer_count_t0 = u_dut.lsu_debug_store_buffer_count_t0;
     assign debug_store_buffer_count_t1 = u_dut.lsu_debug_store_buffer_count_t1;
@@ -610,6 +662,7 @@ module verilator_mainline_top (
     assign debug_m1_req_wen = u_dut.m1_req_wen;
     assign debug_m1_resp_valid = u_dut.m1_resp_valid;
     assign debug_m1_resp_data = u_dut.m1_resp_data;
+    assign debug_m1_resp_l1d_hit = u_dut.m1_resp_l1d_hit;
     assign debug_ddr3_req_valid = ddr3_req_valid;
     assign debug_ddr3_req_ready = ddr3_req_ready;
     assign debug_ddr3_req_addr = ddr3_req_addr;
@@ -660,6 +713,26 @@ module verilator_mainline_top (
     assign debug_bad_uart_store_fwd_b = u_dut.dbg_bad_uart_store_fwd_b_r;
     assign debug_bad_uart_store_func3 = u_dut.dbg_bad_uart_store_func3_r;
     assign debug_bad_uart_store_tid = u_dut.dbg_bad_uart_store_tid_r;
+    assign debug_bad_uart_store_src2_last_pc = u_dut.dbg_bad_uart_store_src2_last_pc_r;
+    assign debug_bad_uart_store_src2_last_data = u_dut.dbg_bad_uart_store_src2_last_data_r;
+    assign debug_bad_uart_store_src2_last_order_id = u_dut.dbg_bad_uart_store_src2_last_order_id_r;
+    assign debug_bad_uart_store_src2_last_tag = u_dut.dbg_bad_uart_store_src2_last_tag_r;
+    assign debug_bad_uart_store_src2_last_rd = u_dut.dbg_bad_uart_store_src2_last_rd_r;
+    assign debug_bad_uart_store_src2_last_fu = u_dut.dbg_bad_uart_store_src2_last_fu_r;
+    assign debug_bad_uart_store_src2_last_src1_prs = u_dut.dbg_bad_uart_store_src2_last_src1_prs_r;
+    assign debug_bad_uart_store_src2_last_src1_pc = u_dut.dbg_bad_uart_store_src2_last_src1_pc_r;
+    assign debug_bad_uart_store_src2_last_src1_data = u_dut.dbg_bad_uart_store_src2_last_src1_data_r;
+    assign debug_bad_uart_store_src2_last_src1_order_id = u_dut.dbg_bad_uart_store_src2_last_src1_order_id_r;
+    assign debug_bad_uart_store_src2_last_src1_tag = u_dut.dbg_bad_uart_store_src2_last_src1_tag_r;
+    assign debug_bad_uart_store_src2_last_src1_rd = u_dut.dbg_bad_uart_store_src2_last_src1_rd_r;
+    assign debug_bad_uart_store_src2_last_src1_fu = u_dut.dbg_bad_uart_store_src2_last_src1_fu_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_prs = u_dut.dbg_bad_uart_store_src2_last_src1_src1_prs_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_pc = u_dut.dbg_bad_uart_store_src2_last_src1_src1_pc_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_data = u_dut.dbg_bad_uart_store_src2_last_src1_src1_data_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_order_id = u_dut.dbg_bad_uart_store_src2_last_src1_src1_order_id_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_tag = u_dut.dbg_bad_uart_store_src2_last_src1_src1_tag_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_rd = u_dut.dbg_bad_uart_store_src2_last_src1_src1_rd_r;
+    assign debug_bad_uart_store_src2_last_src1_src1_fu = u_dut.dbg_bad_uart_store_src2_last_src1_src1_fu_r;
     assign debug_strcpy_mv_seen = u_dut.dbg_strcpy_mv_seen_r;
     assign debug_strcpy_mv_pc = u_dut.dbg_strcpy_mv_pc_r;
     assign debug_strcpy_mv_op_a = u_dut.dbg_strcpy_mv_op_a_r;

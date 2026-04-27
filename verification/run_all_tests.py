@@ -199,8 +199,8 @@ class TestRunner:
         if self.fpga_config:
             compile_cmd += [
                 "-DENABLE_MEM_SUBSYS=1",
-                "-DSIM_SCOREBOARD_RS_DEPTH=16",
-                "-DSIM_SCOREBOARD_RS_IDX_W=4",
+                "-DSIM_SCOREBOARD_RS_DEPTH=48",
+                "-DSIM_SCOREBOARD_RS_IDX_W=6",
             ]
         compile_cmd += [
             "-s",
@@ -482,7 +482,7 @@ def main():
     parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
     parser.add_argument("--tests", nargs="+", help="Specific basic tests to run")
     parser.add_argument("--enable-rocc", action="store_true", help="Enable RoCC accelerator RTL and include RoCC tests")
-    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_DEPTH=16, RS_IDX_W=4) for simulation")
+    parser.add_argument("--fpga-config", action="store_true", help="Use FPGA-matching config (RS_TAG_DEPTH=48, RS_TAG_W=6) for simulation")
     args = parser.parse_args()
     
     runner = TestRunner(verbose=args.verbose, enable_rocc=args.enable_rocc,

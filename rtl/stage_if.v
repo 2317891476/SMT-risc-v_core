@@ -10,7 +10,11 @@
 //
 //   This module wraps: pc_mt (multi-thread PC), inst_memory (with ICache), bpu_bimodal
 // =============================================================================
-module stage_if (
+module stage_if #(
+    parameter USE_EXTERNAL_REFILL_STATIC = 0,
+    parameter BPU_PHT_ENTRIES = 1024,
+    parameter ICACHE_SIZE = 8192
+)(
     input  wire        clk,
     input  wire        rstn,
 
@@ -198,7 +202,9 @@ wire [7:0]  ic_cpu_resp_count_dbg;
 wire [7:0]  ic_state_flags_dbg;
 
 inst_memory #(
-    .IROM_SPACE (4096)
+    .IROM_SPACE (4096),
+    .ICACHE_SIZE(ICACHE_SIZE),
+    .OMIT_BACKING_STORE(USE_EXTERNAL_REFILL_STATIC)
 ) u_inst_memory (
     .clk            (clk               ),
     .rstn           (rstn              ),
@@ -238,7 +244,7 @@ wire bpu_pred_taken;
 wire [31:0] bpu_pred_target;
 
 bpu_bimodal #(
-    .PHT_ENTRIES (1024)
+    .PHT_ENTRIES (BPU_PHT_ENTRIES)
 ) u_bpu (
     .clk           (clk               ),
     .rstn          (rstn              ),

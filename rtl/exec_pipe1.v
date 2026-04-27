@@ -54,6 +54,7 @@ module exec_pipe1 #(
     output wire               alu_out_regs_write,
     output wire [2:0]         alu_out_fu,
     output wire [0:0]         alu_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] alu_out_order_id,
 
     // ─── Memory interface (to D-TLB / DCache) ──────────────────
     output wire               mem_req_valid,
@@ -79,6 +80,7 @@ module exec_pipe1 #(
     output wire               mul_out_regs_write,
     output wire [2:0]         mul_out_fu,
     output wire [0:0]         mul_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] mul_out_order_id,
 
     // ─── Divider result (33-cycle path) ─────────────────────────
     output wire               div_out_valid,
@@ -88,6 +90,7 @@ module exec_pipe1 #(
     output wire               div_out_regs_write,
     output wire [2:0]         div_out_fu,
     output wire [0:0]         div_out_tid,
+    output wire [`METADATA_ORDER_ID_W-1:0] div_out_order_id,
     output wire               div_busy
 );
 
@@ -140,13 +143,15 @@ mul_unit #(.TAG_W(TAG_W)) u_mul (
     .in_regs_write (in_regs_write ),
     .in_fu         (in_fu         ),
     .in_tid        (in_tid        ),
+    .in_order_id   (in_order_id   ),
     .out_valid     (mul_out_valid     ),
     .out_tag       (mul_out_tag       ),
     .out_result    (mul_out_result    ),
     .out_rd        (mul_out_rd        ),
     .out_regs_write(mul_out_regs_write),
     .out_fu        (mul_out_fu        ),
-    .out_tid       (mul_out_tid       )
+    .out_tid       (mul_out_tid       ),
+    .out_order_id  (mul_out_order_id  )
 );
 
 // ─── DIV Unit ───────────────────────────────────────────────────────────────
@@ -162,6 +167,7 @@ div_unit #(.TAG_W(TAG_W)) u_div (
     .in_regs_write (in_regs_write ),
     .in_fu         (in_fu         ),
     .in_tid        (in_tid        ),
+    .in_order_id   (in_order_id   ),
     .out_valid     (div_out_valid     ),
     .out_tag       (div_out_tag       ),
     .out_result    (div_out_result    ),
@@ -169,6 +175,7 @@ div_unit #(.TAG_W(TAG_W)) u_div (
     .out_regs_write(div_out_regs_write),
     .out_fu        (div_out_fu        ),
     .out_tid       (div_out_tid       ),
+    .out_order_id  (div_out_order_id  ),
     .busy          (div_busy          )
 );
 
@@ -300,6 +307,7 @@ assign alu_out_rd         = alu_out_rd_r;
 assign alu_out_regs_write = alu_out_regs_write_r;
 assign alu_out_fu         = alu_out_fu_r;
 assign alu_out_tid        = alu_out_tid_r;
+assign alu_out_order_id   = alu_out_order_id_r;
 
 // ─── Memory request output ─────────────────────────────────────────────────
 // Hold memory requests until the LSU accepts them. A one-cycle pulse here can be
