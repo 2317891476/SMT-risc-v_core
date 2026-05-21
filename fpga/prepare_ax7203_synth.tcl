@@ -16,13 +16,14 @@ set ddr3_bridge_audit [ax7203_env_or_default AX7203_DDR3_BRIDGE_AUDIT 0]
 set step2_beacon_debug [ax7203_env_or_default AX7203_STEP2_BEACON_DEBUG 0]
 set loader_beacon_debug [ax7203_env_or_default AX7203_DDR3_LOADER_BEACON_DEBUG 0]
 set transport_uart_rxdata_reg_test [ax7203_env_or_default AX7203_TRANSPORT_UART_RXDATA_REG_TEST 0]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 48] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
 set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
 set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
-set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
+set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
+set synth_jobs [ax7203_vivado_jobs AX7203_SYNTH_JOBS]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set project_file "$project_dir/$project_name.xpr"
 
@@ -48,6 +49,7 @@ puts "RS idx width: $rs_idx_w"
 puts "Fetch buffer depth: $fetch_buffer_depth"
 puts "Core clock: ${core_clk_mhz} MHz"
 puts "UART clock divider: $uart_clk_div"
+puts "DCache mode: $dcache_mode"
 puts "Top module: $top_module"
 puts "Synthesis jobs: $synth_jobs"
 
@@ -73,6 +75,7 @@ set ddr3_bridge_audit_def [expr {$ddr3_bridge_audit ? "DDR3_BRIDGE_AUDIT=1" : ""
 set step2_beacon_debug_def [expr {$step2_beacon_debug ? "AX7203_STEP2_BEACON_DEBUG=1" : ""}]
 set loader_beacon_debug_def [expr {$loader_beacon_debug ? "AX7203_DDR3_LOADER_BEACON_DEBUG=1" : ""}]
 set transport_uart_rxdata_reg_test_def [expr {$transport_uart_rxdata_reg_test ? "TRANSPORT_UART_RXDATA_REG_TEST=1" : ""}]
+set dcache_def [ax7203_dcache_define $dcache_mode]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -89,6 +92,7 @@ set_property verilog_define [list \
     {*}$step2_beacon_debug_def \
     {*}$loader_beacon_debug_def \
     {*}$transport_uart_rxdata_reg_test_def \
+    {*}$dcache_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
@@ -100,7 +104,7 @@ set runs_dir "$project_dir/${project_name}.runs"
 file mkdir "$project_dir/reports"
 file mkdir "$project_dir/checkpoints"
 
-catch {set_param general.maxThreads $synth_jobs}
+ax7203_apply_vivado_threads $synth_jobs
 catch {close_design}
 
 ax7203_clear_run_markers $runs_dir
@@ -122,6 +126,7 @@ if {![file exists $synth_run_script]} {
     exit 1
 }
 
+ax7203_patch_generated_vivado_tcl $synth_run_script $synth_jobs
 puts "SynthRunScript: $synth_run_script"
 puts "SynthRunDir: [file dirname $synth_run_script]"
 close_project

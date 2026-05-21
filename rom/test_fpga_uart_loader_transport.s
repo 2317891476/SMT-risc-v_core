@@ -3,6 +3,7 @@
 .equ TRANSPORT_STACK_TOP, 0x00000FF0
 .equ BMK1_MAGIC_LE, 0x314B4D42
 .equ LOADER_ACK_BYTE, 0x06
+.equ RX_WAIT_TIMEOUT_POLLS, 500000
 
 .section .text
 .globl _start
@@ -14,6 +15,7 @@ _start:
     li x29, UART_RXDATA_ADDR
     li x28, UART_CTRL_ADDR
     li x27, TUBE_ADDR
+    li x25, 0                  # RX wait diagnostics enabled only during payload
 
     li x5, 0x1F
     sw x5, 0(x28)
@@ -26,6 +28,7 @@ _start:
     jal ra, send_string
 
 session_wait:
+    li x25, 0
     li x5, 0x32
     sb x5, 0(x27)
 
@@ -40,11 +43,23 @@ session_wait:
     jal ra, recv_u32
     mv x23, x10               # expected checksum
 
+    la x10, msg_hdr_size
+    jal ra, send_string
+    mv x10, x22
+    jal ra, print_hex32
+    la x10, msg_hdr_sum
+    jal ra, send_string
+    mv x10, x23
+    jal ra, print_hex32
+    la x10, msg_newline
+    jal ra, send_string
+
     la x10, msg_load_start
     jal ra, send_string
     li x5, 0x33
     sb x5, 0(x27)
 
+    li x25, 1
     mv x24, x0                # byte count
     mv x18, x0                # checksum
     mv x19, x0                # expected byte value
@@ -64,6 +79,7 @@ load_loop:
     j load_loop
 
 load_done:
+    li x25, 0
     andi x6, x22, 3
     beq x6, x0, load_done_no_tail
     li x10, LOADER_ACK_BYTE
@@ -122,17 +138,46 @@ bad_byte_fail:
     j fail_spin
 
 recv_byte:
+    mv x26, ra
+    li x12, RX_WAIT_TIMEOUT_POLLS
 recv_byte_wait:
+    fence iorw, iorw
     lw x6, 0(x30)
+    addi x0, x0, 0
+    addi x0, x0, 0
     andi x7, x6, UART_STATUS_RX_OVERRUN_MASK
     bne x7, x0, rx_overrun_fail
+    addi x0, x0, 0
     andi x7, x6, UART_STATUS_RX_FRAME_ERR_MASK
     bne x7, x0, rx_frame_fail
+    addi x0, x0, 0
     andi x7, x6, UART_STATUS_RX_VALID_MASK
-    beq x7, x0, recv_byte_wait
+    addi x0, x0, 0
+    beq x7, x0, recv_byte_no_data
+    fence iorw, iorw
     lw x10, 0(x29)
+    addi x0, x0, 0
+    addi x0, x0, 0
     andi x10, x10, 0xFF
-    jalr x0, 0(ra)
+    fence iorw, iorw
+    jalr x0, 0(x26)
+
+recv_byte_no_data:
+    beq x25, x0, recv_byte_wait
+    addi x12, x12, -1
+    bne x12, x0, recv_byte_wait
+    la x10, msg_rx_wait_idx
+    jal ra, send_string
+    mv x10, x24
+    jal ra, print_hex32
+    la x10, msg_rx_wait_status
+    jal ra, send_string
+    mv x10, x6
+    jal ra, print_hex32
+    la x10, msg_newline
+    jal ra, send_string
+    li x12, RX_WAIT_TIMEOUT_POLLS
+    j recv_byte_wait
 
 recv_u32:
     mv x17, ra
@@ -151,10 +196,15 @@ recv_u32:
 
 send_char:
 send_char_wait:
+    fence iorw, iorw
     lw x6, 0(x30)
+    addi x0, x0, 0
+    addi x0, x0, 0
     andi x6, x6, UART_STATUS_TX_BUSY_MASK
     bne x6, x0, send_char_wait
+    fence iorw, iorw
     sb x10, 0(x31)
+    fence iorw, iorw
     jalr x0, 0(ra)
 
 send_string:
@@ -163,10 +213,15 @@ send_string_loop:
     lbu x10, 0(x11)
     beq x10, x0, send_string_done
 send_string_wait:
+    fence iorw, iorw
     lw x6, 0(x30)
+    addi x0, x0, 0
+    addi x0, x0, 0
     andi x6, x6, UART_STATUS_TX_BUSY_MASK
     bne x6, x0, send_string_wait
+    fence iorw, iorw
     sb x10, 0(x31)
+    fence iorw, iorw
     addi x11, x11, 1
     j send_string_loop
 send_string_done:
@@ -240,6 +295,10 @@ msg_bad_byte_act:
     .asciz " ACT="
 msg_bad_byte_status:
     .asciz " ST="
+msg_hdr_size:
+    .asciz "HDR SIZE="
+msg_hdr_sum:
+    .asciz " SUM="
 msg_sep:
     .asciz " R="
 msg_newline:
@@ -248,6 +307,10 @@ msg_rx_overrun:
     .asciz "RX OVERRUN ST="
 msg_rx_frame:
     .asciz "RX FRAME ERR ST="
+msg_rx_wait_idx:
+    .asciz "RX WAIT IDX="
+msg_rx_wait_status:
+    .asciz " ST="
 
 .balign 4
 .org 0x800

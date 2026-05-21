@@ -12,7 +12,7 @@ module ctrl(
     output wire         regs_write
 );
 
-assign alu_op = (inst_op == `ItypeL || inst_op == `Stype || inst_op == `UtypeL || inst_op == `UtypeU)? 3'b000 :
+assign alu_op = (inst_op == `ItypeL || inst_op == `Stype || inst_op == `UtypeL || inst_op == `UtypeU || inst_op == `MISC_MEM)? 3'b000 :
                 (inst_op == `Btype)? 3'b001:
                 (inst_op == `Rtype)? 3'b010:
                 (inst_op == `ItypeA) ? 3'b011:

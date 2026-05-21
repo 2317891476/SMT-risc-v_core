@@ -15,6 +15,11 @@
 set script_dir [file dirname [file normalize [info script]]]
 set proj_root  [file normalize "$script_dir/../.."]
 set prj_file   [file normalize "$script_dir/mig_ax7203.prj"]
+set flow_common [file normalize "$script_dir/../flow_common.tcl"]
+if {[file exists $flow_common]} {
+    source $flow_common
+    ax7203_apply_vivado_threads [ax7203_vivado_jobs AX7203_MAX_THREADS]
+}
 
 puts "INFO: Creating MIG 7-Series IP for AX7203 DDR3"
 puts "INFO: PRJ file: $prj_file"

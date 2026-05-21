@@ -95,6 +95,15 @@ def derive_uart_clk_div(core_clk_mhz: float, baud: int = 115200) -> int:
     return max(1, round((core_clk_mhz * 1_000_000.0) / float(baud)))
 
 
+def default_vivado_jobs() -> str:
+    try:
+        cap = int(os.environ.get("AX7203_VIVADO_THREAD_CAP", "8"))
+    except ValueError:
+        cap = 8
+    cap = max(1, cap)
+    return str(max(1, min(os.cpu_count() or cap, cap)))
+
+
 def parse_build_id(path: Path) -> str:
     if not path.exists():
         return "N/A"
@@ -158,7 +167,7 @@ def build_env(rs_depth: int, fetch_buffer_depth: int, core_clk_mhz: float) -> di
             "AX7203_ENABLE_MEM_SUBSYS": "1",
             "AX7203_ENABLE_ROCC": "0",
             "AX7203_ENABLE_DDR3": "1",
-            "AX7203_SMT_MODE": "1",
+            "AX7203_SMT_MODE": "0",
             "AX7203_RS_DEPTH": str(rs_depth),
             "AX7203_RS_IDX_W": str(derive_idx_width(rs_depth)),
             "AX7203_FETCH_BUFFER_DEPTH": str(fetch_buffer_depth),
@@ -166,11 +175,12 @@ def build_env(rs_depth: int, fetch_buffer_depth: int, core_clk_mhz: float) -> di
             "AX7203_UART_CLK_DIV": str(derive_uart_clk_div(core_clk_mhz)),
             "AX7203_ROM_ASM": str(MAINLINE_ROM),
             "AX7203_TOP_MODULE": MAINLINE_TOP_MODULE,
-            "AX7203_MAX_THREADS": "4",
-            "AX7203_SYNTH_JOBS": "4",
-            "AX7203_IMPL_JOBS": "4",
         }
     )
+    jobs = default_vivado_jobs()
+    env.setdefault("AX7203_MAX_THREADS", jobs)
+    env.setdefault("AX7203_SYNTH_JOBS", jobs)
+    env.setdefault("AX7203_IMPL_JOBS", jobs)
     return env
 
 
@@ -200,7 +210,7 @@ def run_top_sim(logs_dir: Path, *, rs_depth: int, fetch_buffer_depth: int, core_
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DTB_SHORT_TIMEOUT_NS=8000000",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
         f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
@@ -382,8 +392,7 @@ def main() -> int:
             raise RuntimeError(f"UART capture is missing CAL=1; see {UART_CAPTURE_FILE}")
         if not uart_analysis["saw_ddr3_pass"]:
             raise RuntimeError(f"UART capture is missing DDR3 PASS; see {UART_CAPTURE_FILE}")
-        if not uart_analysis["ratio_ok"]:
-            raise RuntimeError(f"UART capture does not match expected dual-thread ratio; see {UART_CAPTURE_FILE}")
+        # dual-thread ratio check removed (single-thread mode)
     except Exception as exc:  # noqa: BLE001
         if failed_stage == "none":
             failed_stage = current_stage
@@ -392,7 +401,7 @@ def main() -> int:
     timing = parse_timing_summary(TIMING_SUMMARY_AGGR)
     counts = uart_analysis.get("counts", {})
     summary_lines = [
-        "Flow: AX7203 25MHz SMT Mainline Validation",
+        "Flow: AX7203 25MHz Single-Thread Mainline Validation",
         f"Result: {'PASS' if failed_stage == 'none' else 'FAIL'}",
         f"FailedStage: {failed_stage}",
         f"FailureDetail: {failure_detail or 'none'}",

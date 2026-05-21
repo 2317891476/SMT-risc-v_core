@@ -241,7 +241,9 @@ syn_rst u_syn_rst(
 `ifdef FPGA_MODE
 localparam FETCH_BUFFER_DEPTH_CFG = `FPGA_FETCH_BUFFER_DEPTH;
 localparam RS_TAG_DEPTH_CFG = `FPGA_SCOREBOARD_RS_DEPTH;
-localparam RS_TAG_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
+localparam RS_IDX_W_CFG = `FPGA_SCOREBOARD_RS_IDX_W;
+localparam RS_TAG_W_CFG = RS_IDX_W_CFG +
+    (((1 << RS_IDX_W_CFG) <= RS_TAG_DEPTH_CFG) ? 1 : 0);
 localparam INT_IQ_DEPTH_CFG = `FPGA_INT_IQ_DEPTH;
 localparam INT_IQ_IDX_W_CFG = `FPGA_INT_IQ_IDX_W;
 localparam MEM_IQ_DEPTH_CFG = `FPGA_MEM_IQ_DEPTH;
@@ -256,7 +258,9 @@ localparam ICACHE_SIZE_CFG = `FPGA_ICACHE_SIZE;
 `ifdef SIM_SCOREBOARD_RS_DEPTH
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
 localparam RS_TAG_DEPTH_CFG = `SIM_SCOREBOARD_RS_DEPTH;
-localparam RS_TAG_W_CFG = `SIM_SCOREBOARD_RS_IDX_W;
+localparam RS_IDX_W_CFG = `SIM_SCOREBOARD_RS_IDX_W;
+localparam RS_TAG_W_CFG = RS_IDX_W_CFG +
+    (((1 << RS_IDX_W_CFG) <= RS_TAG_DEPTH_CFG) ? 1 : 0);
 localparam INT_IQ_DEPTH_CFG = 32;
 localparam INT_IQ_IDX_W_CFG = 5;
 localparam MEM_IQ_DEPTH_CFG = 16;
@@ -270,6 +274,7 @@ localparam ICACHE_SIZE_CFG = 8192;
 `else
 localparam FETCH_BUFFER_DEPTH_CFG = 16;
 localparam RS_TAG_DEPTH_CFG = 48;
+localparam RS_IDX_W_CFG = 6;
 localparam RS_TAG_W_CFG = 6;
 localparam INT_IQ_DEPTH_CFG = 32;
 localparam INT_IQ_IDX_W_CFG = 5;
@@ -284,7 +289,13 @@ localparam ICACHE_SIZE_CFG = 8192;
 `endif
 `endif
 localparam SCOREBOARD_RS_DEPTH_CFG = RS_TAG_DEPTH_CFG;
-localparam SCOREBOARD_RS_IDX_W_CFG = RS_TAG_W_CFG;
+localparam SCOREBOARD_RS_IDX_W_CFG = RS_IDX_W_CFG;
+
+// Memory subsystem mode: default to full mem_subsys, but keep a configurable
+// legacy path for FPGA bring-up builds.
+localparam USE_MEM_SUBSYS = `ENABLE_MEM_SUBSYS;
+wire use_mem_subsys = USE_MEM_SUBSYS;
+
 `ifdef SYNTHESIS
 localparam IROM_BACKING_STORE_OMIT_CFG = USE_MEM_SUBSYS;
 `else
@@ -304,7 +315,7 @@ wire       flush_any;
 // Branch from Pipe0
 wire       pipe0_br_ctrl;
 wire [31:0] pipe0_br_addr;
-wire [0:0] pipe0_br_tid;
+wire [0:0] pipe0_br_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] pipe0_br_order_id;
 wire       pipe0_br_complete;  // branch execution complete (taken or not)
 wire       pipe0_br_update_valid;
@@ -347,7 +358,7 @@ wire        rocc_resp_ready;
 wire [4:0]  rocc_resp_rd;
 wire [31:0] rocc_resp_data;
 wire [RS_TAG_W_CFG-1:0]  rocc_resp_tag;
-wire [0:0]  rocc_resp_tid;
+wire [0:0]  rocc_resp_tid = 1'b0;
 
 wire        rocc_mem_req_valid;
 wire        rocc_mem_req_ready;
@@ -397,25 +408,16 @@ always @(posedge clk or negedge rstn) begin
     end
 end
 
-`ifdef FPGA_MODE
-assign scoreboard_br_complete = pipe0_br_complete || pipe0_br_complete_hold_r;
-`else
 assign scoreboard_br_complete = pipe0_br_complete;
-`endif
 assign scoreboard_br_complete_tid = pipe0_br_complete ? pipe0_br_tid :
                                                        pipe0_br_complete_hold_tid_r;
 assign scoreboard_br_complete_order_id = pipe0_br_complete ? pipe0_br_order_id :
                                                             pipe0_br_complete_hold_order_r;
 assign smt_stall   = {stall, stall};
 
-// ─── Thread Scheduler ──────────────────────────────────────────────────────
-thread_scheduler u_thread_scheduler(
-    .clk          (clk         ),
-    .rstn         (rstn        ),
-    .thread_stall (smt_stall   ),
-    .smt_mode     (smt_mode    ),
-    .fetch_tid    (fetch_tid   )
-);
+// ─── Thread Scheduler removed (single-thread) ────────────────────────────
+// fetch_tid is always 0 in single-thread mode
+assign fetch_tid = 1'b0;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Per-Thread Metadata Counters (order_id and epoch)
@@ -433,6 +435,11 @@ reg        mret_pending_t0, mret_pending_t1;
 reg [`METADATA_ORDER_ID_W-1:0] mret_pending_order_t0, mret_pending_order_t1;
 reg        csr_pending_t0, csr_pending_t1;
 reg [`METADATA_ORDER_ID_W-1:0] csr_pending_order_t0, csr_pending_order_t1;
+reg        fence_i_pending_t0, fence_i_pending_t1;
+reg        fence_i_commit_seen_t0, fence_i_commit_seen_t1;
+reg        fence_i_dcache_flush_active_t0, fence_i_dcache_flush_active_t1;
+reg [`METADATA_ORDER_ID_W-1:0] fence_i_pending_order_t0, fence_i_pending_order_t1;
+wire       lsu_debug_store_buffer_empty;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -454,11 +461,6 @@ end
 
 // Order ID update logic moved below after scoreboard is defined
 // Order ID and epoch assignments will be defined after decoder signals
-
-// Memory subsystem mode: default to full mem_subsys, but keep a configurable
-// legacy path for FPGA bring-up builds.
-localparam USE_MEM_SUBSYS = `ENABLE_MEM_SUBSYS;
-wire use_mem_subsys = USE_MEM_SUBSYS;
 
 // Forward-declared interconnects that are consumed before their producer
 // instances appear later in the file.
@@ -491,11 +493,14 @@ wire        rob_recover_en;
 wire [4:0]  rob_recover_rd;
 wire [PHYS_REG_W_CFG-1:0]  rob_recover_prd_old, rob_recover_prd_new;
 wire        rob_recover_regs_write;
-wire [0:0]  rob_recover_tid;
+wire [0:0]  rob_recover_tid = 1'b0;
 wire        rob_debug_commit_suppressed;
-wire        rob_head_valid_t0, rob_head_valid_t1;
-wire [`METADATA_ORDER_ID_W-1:0] rob_head_order_id_t0, rob_head_order_id_t1;
-wire        rob_head_flushed_t0, rob_head_flushed_t1;
+wire        rob_head_valid_t0;
+wire        rob_head_valid_t1 = 1'b0;
+wire [`METADATA_ORDER_ID_W-1:0] rob_head_order_id_t0;
+wire [`METADATA_ORDER_ID_W-1:0] rob_head_order_id_t1 = {`METADATA_ORDER_ID_W{1'b0}};
+wire        rob_head_flushed_t0;
+wire        rob_head_flushed_t1 = 1'b0;
 wire [ROB_IDX_W_CFG-1:0]  rob_disp0_rob_idx, rob_disp1_rob_idx;
 wire [RS_TAG_W_CFG-1:0]  sb_disp0_tag, sb_disp1_tag;
 wire        disp0_accepted, disp1_accepted;
@@ -507,7 +512,6 @@ wire [PHYS_REG_W_CFG-1:0] fl_alloc0_prd, fl_alloc1_prd;
 wire       fl_can_alloc_1, fl_can_alloc_2;
 wire       fl_alloc0_rmt_mapped, fl_alloc1_rmt_mapped;
 wire       fl_alloc0_ckpt_live, fl_alloc1_ckpt_live;
-wire [NUM_PHYS_REG_CFG-1:0] rmt_mapped_mask_t0, rmt_mapped_mask_t1;
 wire       shadow_alloc0_valid, shadow_alloc1_valid;
 wire       commit0_free_direct_valid, commit1_free_direct_valid;
 wire       rmt_branch_ckpt_restore_hit;
@@ -515,6 +519,7 @@ wire       fl_branch_ckpt_restore_hit;
 wire       rmt_branch_ckpt_any_live;
 wire       branch_ckpt_restore_hit;
 wire       freelist_rebuild_valid;
+wire [NUM_PHYS_REG_CFG-1:0] rmt_mapped_mask_t0;
 wire [31:0] wb0_result_data, wb1_result_data;
 reg        phys_branch_quarantine [0:NUM_PHYS_REG_CFG-1];
 `ifndef FPGA_MODE
@@ -541,7 +546,7 @@ reg         retire_seen_r;
 wire        if_valid;
 wire [31:0] if_inst;
 wire [31:0] if_pc;
-wire [0:0]  if_tid;
+wire [0:0]  if_tid = 1'b0;
 wire        if_pred_taken;
 wire [31:0] if_pred_target;
 wire [31:0] debug_fetch_pc_pending;
@@ -562,7 +567,7 @@ wire [RS_TAG_W_CFG-1:0]  lsu_resp_tag;
 wire [4:0]  lsu_resp_rd;
 wire        lsu_resp_regs_write;
 wire [2:0]  lsu_resp_fu;
-wire [0:0]  lsu_resp_tid;
+wire [0:0]  lsu_resp_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] lsu_resp_order_id;
 wire        lsu_load_hazard;
 wire        lsu_early_wakeup_valid;
@@ -584,6 +589,8 @@ wire        m1_resp_l1d_hit;
 wire        mem_subsys_ext_timer_irq;
 wire        mem_subsys_ext_external_irq;
 wire        mem_subsys_debug_uart_tx_byte_valid;
+wire        mem_subsys_dcache_flush_busy;
+wire        mem_subsys_dcache_flush_done;
 wire        ext_timer_irq;
 wire        ext_external_irq;
 
@@ -608,6 +615,7 @@ wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'
                                                           trap_redirect_tid == 1'b0} :
                                   smt_flush;
 wire        combined_flush_any  = trap_redirect_valid || flush_any;
+wire        fence_i_invalidate;
 
 stage_if #(
     .USE_EXTERNAL_REFILL_STATIC(IROM_BACKING_STORE_OMIT_CFG),
@@ -617,27 +625,20 @@ stage_if #(
     .clk              (clk              ),
     .rstn             (rstn             ),
     .pc_stall         (stall            ),
-    .if_flush         (combined_flush   ),  // Use combined flush (trap > branch)
-    .br_addr_t0       (trap_redirect_valid ? trap_redirect_pc :
-                        (pipe0_br_ctrl && (pipe0_br_tid==1'b0) ? pipe0_br_addr : 32'd0)),
-    .br_addr_t1       (trap_redirect_valid ? trap_redirect_pc :
-                        (pipe0_br_ctrl && (pipe0_br_tid==1'b1) ? pipe0_br_addr : 32'd0)),
-    .br_ctrl          (trap_redirect_valid ? {trap_redirect_tid == 1'b1, trap_redirect_tid == 1'b0} :
-                        {pipe0_br_ctrl && (pipe0_br_tid==1'b1),
-                         pipe0_br_ctrl && (pipe0_br_tid==1'b0)}),
+    .if_flush         (combined_flush_any),
+    .icache_invalidate(fence_i_invalidate),
+    .br_addr          (trap_redirect_valid ? trap_redirect_pc : pipe0_br_addr),
+    .br_ctrl          (trap_redirect_valid || pipe0_br_ctrl),
     .bpu_update_valid (pipe0_br_update_valid),
     .bpu_update_pc    (pipe0_br_update_pc),
-    .bpu_update_tid   (pipe0_br_tid),
     .bpu_update_taken (pipe0_br_update_taken),
     .bpu_update_target(pipe0_br_update_target),
     .bpu_update_is_call(pipe0_br_update_is_call),
     .bpu_update_is_return(pipe0_br_update_is_return),
-    .fetch_tid        (fetch_tid        ),
     .fb_ready         (fb_push_ready    ),
     .if_valid         (if_valid         ),
     .if_inst          (if_inst          ),
     .if_pc            (if_pc            ),
-    .if_tid           (if_tid           ),
     .if_pred_taken    (if_pred_taken    ),
     .if_pred_target   (if_pred_target   ),
 
@@ -670,7 +671,7 @@ stage_if #(
 wire        fb_pop0_valid, fb_pop1_valid;
 wire [31:0] fb_pop0_inst,  fb_pop1_inst;
 wire [31:0] fb_pop0_pc,    fb_pop1_pc;
-wire [0:0]  fb_pop0_tid,   fb_pop1_tid;
+wire [0:0]  fb_pop0_tid = 1'b0, fb_pop1_tid = 1'b0;
 wire        fb_pop0_pred_taken, fb_pop1_pred_taken;
 wire [31:0] fb_pop0_pred_target, fb_pop1_pred_target;
 wire        fb_consume_0,  fb_consume_1;
@@ -678,24 +679,21 @@ wire        fb_consume_0,  fb_consume_1;
 fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
     .clk        (clk            ),
     .rstn       (rstn           ),
-    .flush      (combined_flush ),
+    .flush      (combined_flush_any),
     .push_valid (if_valid       ),
     .push_inst  (if_inst        ),
     .push_pc    (if_pc          ),
-    .push_tid   (if_tid         ),
     .push_pred_taken (if_pred_taken),
     .push_pred_target(if_pred_target),
     .push_ready (fb_push_ready  ),
     .pop0_valid (fb_pop0_valid  ),
     .pop0_inst  (fb_pop0_inst   ),
     .pop0_pc    (fb_pop0_pc     ),
-    .pop0_tid   (fb_pop0_tid    ),
     .pop0_pred_taken (fb_pop0_pred_taken),
     .pop0_pred_target(fb_pop0_pred_target),
     .pop1_valid (fb_pop1_valid  ),
     .pop1_inst  (fb_pop1_inst   ),
     .pop1_pc    (fb_pop1_pc     ),
-    .pop1_tid   (fb_pop1_tid    ),
     .pop1_pred_taken (fb_pop1_pred_taken),
     .pop1_pred_target(fb_pop1_pred_target),
     .consume_0  (fb_consume_0   ),
@@ -725,23 +723,22 @@ wire [4:0]  dec0_rs2,   dec1_rs2;
 wire        dec0_rs1_used, dec1_rs1_used;
 wire        dec0_rs2_used, dec1_rs2_used;
 wire [2:0]  dec0_fu,    dec1_fu;
-wire [0:0]  dec0_tid,   dec1_tid;
+wire [0:0]  dec0_tid = 1'b0, dec1_tid = 1'b0;
 wire        dec0_is_csr, dec1_is_csr;
 wire        dec0_is_mret, dec1_is_mret;
 wire [11:0] dec0_csr_addr, dec1_csr_addr;
 wire        dec0_is_rocc, dec1_is_rocc;
 wire [6:0]  dec0_rocc_funct7, dec1_rocc_funct7;
+wire        dec0_is_fence_i, dec1_is_fence_i;
 
 decoder_dual u_decoder_dual(
     .stall           (stall           ),
     .inst0_valid     (fb_pop0_valid    ),
     .inst0_word      (fb_pop0_inst     ),
     .inst0_pc        (fb_pop0_pc       ),
-    .inst0_tid       (fb_pop0_tid      ),
     .inst1_valid     (fb_pop1_valid    ),
     .inst1_word      (fb_pop1_inst     ),
     .inst1_pc        (fb_pop1_pc       ),
-    .inst1_tid       (fb_pop1_tid      ),
     .dec0_valid      (dec0_valid       ),
     .dec0_pc         (dec0_pc          ),
     .dec0_imm        (dec0_imm         ),
@@ -762,7 +759,6 @@ decoder_dual u_decoder_dual(
     .dec0_rs1_used   (dec0_rs1_used    ),
     .dec0_rs2_used   (dec0_rs2_used    ),
     .dec0_fu         (dec0_fu          ),
-    .dec0_tid        (dec0_tid         ),
     .dec0_is_csr     (dec0_is_csr      ),
     .dec0_is_mret    (dec0_is_mret     ),
     .dec0_csr_addr   (dec0_csr_addr    ),
@@ -786,7 +782,6 @@ decoder_dual u_decoder_dual(
     .dec1_rs1_used   (dec1_rs1_used    ),
     .dec1_rs2_used   (dec1_rs2_used    ),
     .dec1_fu         (dec1_fu          ),
-    .dec1_tid        (dec1_tid         ),
     .dec1_is_csr     (dec1_is_csr     ),
     .dec1_is_mret    (dec1_is_mret    ),
     .dec1_csr_addr   (dec1_csr_addr   ),
@@ -798,6 +793,11 @@ decoder_dual u_decoder_dual(
     .consume_1       (fb_consume_1    ),
     .disp1_blocked   (sb_disp1_blocked)
 );
+
+assign dec0_is_fence_i = dec0_valid && (fb_pop0_inst[6:0] == `MISC_MEM) &&
+                         (fb_pop0_inst[14:12] == 3'b001);
+assign dec1_is_fence_i = dec1_valid && (fb_pop1_inst[6:0] == `MISC_MEM) &&
+                         (fb_pop1_inst[14:12] == 3'b001);
 
 // Squash dispatches if flush active
 wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
@@ -845,14 +845,14 @@ assign fl_disp_stall = (((d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
 // Never dispatch in the same cycle as a redirect/flush. The IQ flush logic
 // runs before dispatch allocation, so allowing same-cycle dispatch can leak
 // wrong-path entries into the IQs after branch/trap redirects.
-wire dec0_system_pending = dec0_tid ? (mret_pending_t1 || csr_pending_t1) :
-                                      (mret_pending_t0 || csr_pending_t0);
-wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1) :
-                                      (mret_pending_t0 || csr_pending_t0);
+wire dec0_system_pending = dec0_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0);
+wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0);
 wire dec0_blocked_by_pending_system = dec0_system_pending;
 wire dec1_blocked_by_pending_system =
     dec1_system_pending ||
-    (disp0_valid_pre_rob && (dec0_is_mret || dec0_is_csr) && (dec0_tid == dec1_tid));
+    (disp0_valid_pre_rob && (dec0_is_mret || dec0_is_csr || dec0_is_fence_i) && (dec0_tid == dec1_tid));
 assign sys_disp_stall = disp0_valid_pre_rob && dec0_blocked_by_pending_system;
 wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
                          !combined_flush_any && !dec0_blocked_by_pending_system;
@@ -866,8 +866,10 @@ wire [`METADATA_ORDER_ID_W-1:0] disp0_order_id = (dec0_tid == 1'b0) ? order_id_t
 wire [`METADATA_ORDER_ID_W-1:0] disp1_order_id = (dec1_tid == 1'b0) ? 
     ((dec0_tid == 1'b0 && disp0_accepted) ? order_id_t0 + 1'b1 : order_id_t0) :
     ((dec0_tid == 1'b1 && disp0_accepted) ? order_id_t1 + 1'b1 : order_id_t1);
-wire [7:0] disp0_epoch = (dec0_tid == 1'b0) ? epoch_t0 : epoch_t1;
-wire [7:0] disp1_epoch = (dec1_tid == 1'b0) ? epoch_t0 : epoch_t1;
+wire [7:0] disp0_epoch;
+wire [7:0] disp1_epoch;
+assign disp0_epoch = epoch_t0;
+assign disp1_epoch = epoch_t0;
 
 // ════════════════════════════════════════════════════════════════════════════
 // Tag → Physical Register Sideband Maps
@@ -1044,7 +1046,7 @@ wire        iss0_mem_write;
 wire [1:0]  iss0_alu_src1, iss0_alu_src2;
 wire        iss0_br_addr_mode, iss0_regs_write;
 wire [2:0]  iss0_fu;
-wire [0:0]  iss0_tid;
+wire [0:0]  iss0_tid = 1'b0;
 
 wire [1:0]  p1_winner;
 wire        p1_mem_cand_valid;
@@ -1061,7 +1063,8 @@ wire        p1_mem_cand_mem_write;
 wire [1:0]  p1_mem_cand_alu_src1, p1_mem_cand_alu_src2;
 wire        p1_mem_cand_br_addr_mode, p1_mem_cand_regs_write;
 wire [2:0]  p1_mem_cand_fu;
-wire [0:0]  p1_mem_cand_tid;
+wire [0:0]  p1_mem_cand_tid = 1'b0;
+wire        p1_mem_cand_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mem_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_mem_cand_epoch;
 wire        p1_mul_cand_valid;
@@ -1078,7 +1081,8 @@ wire        p1_mul_cand_mem_write;
 wire [1:0]  p1_mul_cand_alu_src1, p1_mul_cand_alu_src2;
 wire        p1_mul_cand_br_addr_mode, p1_mul_cand_regs_write;
 wire [2:0]  p1_mul_cand_fu;
-wire [0:0]  p1_mul_cand_tid;
+wire [0:0]  p1_mul_cand_tid = 1'b0;
+wire        p1_mul_cand_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mul_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_mul_cand_epoch;
 wire        p1_div_cand_valid;
@@ -1095,7 +1099,8 @@ wire        p1_div_cand_mem_write;
 wire [1:0]  p1_div_cand_alu_src1, p1_div_cand_alu_src2;
 wire        p1_div_cand_br_addr_mode, p1_div_cand_regs_write;
 wire [2:0]  p1_div_cand_fu;
-wire [0:0]  p1_div_cand_tid;
+wire [0:0]  p1_div_cand_tid = 1'b0;
+wire        p1_div_cand_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] p1_div_cand_order_id;
 wire [`METADATA_EPOCH_W-1:0]    p1_div_cand_epoch;
 wire        sb_branch_pending_any;
@@ -1141,7 +1146,7 @@ wire [RS_TAG_W_CFG-1:0]  wb0_tag,   wb1_tag;
 wire [4:0]  wb0_rd,    wb1_rd;
 wire        wb0_regs_write, wb1_regs_write;
 wire [2:0]  wb0_fu,    wb1_fu;
-wire [0:0]  wb0_tid,   wb1_tid;
+wire [0:0]  wb0_tid, wb1_tid;
 wire [`METADATA_ORDER_ID_W-1:0] wb0_order_id, wb1_order_id;
 wire        wb0_valid_safe, wb1_valid_safe;
 wire        lsu_early_wakeup_valid_safe;
@@ -1162,13 +1167,14 @@ dispatch_unit #(
     .clk         (clk              ),
     .rstn        (rstn             ),
     .flush       (combined_flush_any ),
-    .flush_tid   (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
+    .flush_tid   (1'b0             ),
     .flush_order_valid(flush_is_order_based),
     .flush_order_id(flush_order_id_mux),
     .flush_new_epoch((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
 
     // Dispatch 0
     .disp0_valid       (disp0_valid_gated ),
+    .disp0_tid         (dec0_tid          ),
     .disp0_pc          (dec0_pc           ),
     .disp0_imm         (dec0_imm          ),
     .disp0_func3       (dec0_func3        ),
@@ -1188,13 +1194,13 @@ dispatch_unit #(
     .disp0_rs1_used    (dec0_rs1_used     ),
     .disp0_rs2_used    (dec0_rs2_used     ),
     .disp0_fu          (dec0_fu           ),
-    .disp0_tid         (dec0_tid          ),
     .disp0_is_mret     (dec0_is_mret      ),
     .disp0_is_csr      (dec0_is_csr       ),
     .disp0_is_rocc     (dec0_is_rocc      ),
 
     // Dispatch 1
     .disp1_valid       (disp1_valid_gated ),
+    .disp1_tid         (dec1_tid          ),
     .disp1_pc          (dec1_pc           ),
     .disp1_imm         (dec1_imm          ),
     .disp1_func3       (dec1_func3        ),
@@ -1214,7 +1220,6 @@ dispatch_unit #(
     .disp1_rs1_used    (dec1_rs1_used     ),
     .disp1_rs2_used    (dec1_rs2_used     ),
     .disp1_fu          (dec1_fu           ),
-    .disp1_tid         (dec1_tid          ),
     .disp1_is_mret     (dec1_is_mret      ),
     .disp1_is_csr      (dec1_is_csr       ),
     .disp1_is_rocc     (dec1_is_rocc      ),
@@ -1256,7 +1261,6 @@ dispatch_unit #(
     .iss0_br_addr_mode (iss0_br_addr_mode ),
     .iss0_regs_write   (iss0_regs_write   ),
     .iss0_fu           (iss0_fu           ),
-    .iss0_tid          (iss0_tid          ),
     .iss0_order_id     (iss0_order_id     ),
     .iss0_epoch        (iss0_epoch        ),
 
@@ -1286,8 +1290,7 @@ dispatch_unit #(
     .p1_mem_cand_br_addr_mode(p1_mem_cand_br_addr_mode),
     .p1_mem_cand_regs_write(p1_mem_cand_regs_write),
     .p1_mem_cand_fu    (p1_mem_cand_fu    ),
-    .p1_mem_cand_tid   (p1_mem_cand_tid   ),
-    .p1_mem_cand_is_mret(),
+    .p1_mem_cand_is_mret(p1_mem_cand_is_mret),
     .p1_mem_cand_order_id(p1_mem_cand_order_id),
     .p1_mem_cand_epoch (p1_mem_cand_epoch ),
     .p1_mul_cand_valid (p1_mul_cand_valid ),
@@ -1313,8 +1316,7 @@ dispatch_unit #(
     .p1_mul_cand_br_addr_mode(p1_mul_cand_br_addr_mode),
     .p1_mul_cand_regs_write(p1_mul_cand_regs_write),
     .p1_mul_cand_fu    (p1_mul_cand_fu    ),
-    .p1_mul_cand_tid   (p1_mul_cand_tid   ),
-    .p1_mul_cand_is_mret(),
+    .p1_mul_cand_is_mret(p1_mul_cand_is_mret),
     .p1_mul_cand_order_id(p1_mul_cand_order_id),
     .p1_mul_cand_epoch (p1_mul_cand_epoch ),
     .p1_div_cand_valid (p1_div_cand_valid ),
@@ -1340,8 +1342,7 @@ dispatch_unit #(
     .p1_div_cand_br_addr_mode(p1_div_cand_br_addr_mode),
     .p1_div_cand_regs_write(p1_div_cand_regs_write),
     .p1_div_cand_fu    (p1_div_cand_fu    ),
-    .p1_div_cand_tid   (p1_div_cand_tid   ),
-    .p1_div_cand_is_mret(),
+    .p1_div_cand_is_mret(p1_div_cand_is_mret),
     .p1_div_cand_order_id(p1_div_cand_order_id),
     .p1_div_cand_epoch (p1_div_cand_epoch ),
     .branch_pending_any(sb_branch_pending_any),
@@ -1403,7 +1404,7 @@ dispatch_unit #(
 
     // Branch completion
     .br_complete     (scoreboard_br_complete),
-    .br_complete_tid (scoreboard_br_complete_tid),
+    .br_complete_tid (pipe0_br_tid),
     .br_complete_order_id(scoreboard_br_complete_order_id),
     .branch_track_clear_t0(!rob_head_valid_t0 && !rob_recover_walk_active),
     .branch_track_clear_t1(!rob_head_valid_t1 && !rob_recover_walk_active),
@@ -1455,23 +1456,20 @@ rob #(
     .ROB_DEPTH      (ROB_DEPTH_CFG),
     .ROB_IDX_W      (ROB_IDX_W_CFG),
     .RS_TAG_W       (RS_TAG_W_CFG),
-    .PHYS_REG_W     (PHYS_REG_W_CFG),
-    .NUM_THREAD     (2)
+    .PHYS_REG_W     (PHYS_REG_W_CFG)
 ) u_rob (
     .clk                (clk),
     .rstn               (rstn),
 
     // Flush interface
     .flush              (combined_flush_any),
-    .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
-    .flush_new_epoch    ((trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid) ? flush_new_epoch_t1 : flush_new_epoch_t0),
+    .flush_new_epoch    (flush_new_epoch_t0),
     .flush_order_valid  (flush_is_order_based),
     .flush_order_id     (flush_order_id_mux),
 
     // Dispatch Port 0
     .disp0_valid        (disp0_accepted),
     .disp0_tag          (sb_disp0_tag),
-    .disp0_tid          (dec0_tid),
     .disp0_order_id     (disp0_order_id),
     .disp0_epoch        (disp0_epoch),
     .disp0_rd           (dec0_rd),
@@ -1488,7 +1486,6 @@ rob #(
     // Dispatch Port 1
     .disp1_valid        (disp1_accepted),
     .disp1_tag          (sb_disp1_tag),
-    .disp1_tid          (dec1_tid),
     .disp1_order_id     (disp1_order_id),
     .disp1_epoch        (disp1_epoch),
     .disp1_rd           (dec1_rd),
@@ -1505,14 +1502,12 @@ rob #(
     // Writeback Port 0
     .wb0_valid          (wb0_valid_safe),
     .wb0_tag            (wb0_tag),
-    .wb0_tid            (wb0_tid),
     .wb0_data           (wb0_result_data),
     .wb0_regs_write     (wb0_regs_write),
 
     // Writeback Port 1
     .wb1_valid          (wb1_valid_safe),
     .wb1_tag            (wb1_tag),
-    .wb1_tid            (wb1_tid),
     .wb1_data           (wb1_result_data),
     .wb1_regs_write     (wb1_regs_write),
 
@@ -1558,20 +1553,14 @@ rob #(
     .recover_prd_old     (rob_recover_prd_old),
     .recover_prd_new     (rob_recover_prd_new),
     .recover_regs_write  (rob_recover_regs_write),
-    .recover_tid         (rob_recover_tid),
     .debug_commit_suppressed(rob_debug_commit_suppressed),
     .free_query0_prd     ({PHYS_REG_W_CFG{1'b0}}),
-    .free_query0_tid     (1'b0),
     .free_query0_prd_old_live(),
     .free_query1_prd     ({PHYS_REG_W_CFG{1'b0}}),
-    .free_query1_tid     (1'b1),
     .free_query1_prd_old_live(),
     .head_valid_t0       (rob_head_valid_t0),
     .head_order_id_t0    (rob_head_order_id_t0),
-    .head_flushed_t0     (rob_head_flushed_t0),
-    .head_valid_t1       (rob_head_valid_t1),
-    .head_order_id_t1    (rob_head_order_id_t1),
-    .head_flushed_t1     (rob_head_flushed_t1)
+    .head_flushed_t0     (rob_head_flushed_t0)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1605,8 +1594,7 @@ assign freelist_rebuild_valid =
     !rob_head_valid_t0 && !rob_head_valid_t1 &&
     !rob_recover_walk_active &&
     !rmt_branch_ckpt_any_live;
-wire [NUM_PHYS_REG_CFG-1:0] freelist_rebuild_mask =
-    dec0_tid ? rmt_mapped_mask_t1 : rmt_mapped_mask_t0;
+wire [NUM_PHYS_REG_CFG-1:0] freelist_rebuild_mask = rmt_mapped_mask_t0;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -1627,7 +1615,6 @@ rename_map_table #(
 ) u_rename_map_table (
     .clk            (clk),
     .rstn           (rstn),
-    .tid            (dec0_tid),
     // Inst 0 lookup
     .lookup0_rs1    (dec0_rs1),
     .lookup0_rs2    (dec0_rs2),
@@ -1665,51 +1652,37 @@ rename_map_table #(
     .recover_en     (rob_recover_en && !rmt_branch_ckpt_recover_blocks_rob_walk),
     .recover_rd     (rob_recover_rd),
     .recover_prd    (rob_recover_prd_old),
-    .recover_tid    (rob_recover_tid),
     // Bulk reset
     .reset_to_arch  (1'b0),
-    .reset_tid      (1'b0),
     .query0_prd     (fl_alloc0_prd),
-    .query0_tid     (dec0_tid),
     .query0_mapped  (fl_alloc0_rmt_mapped),
     .query1_prd     (fl_alloc1_prd),
-    .query1_tid     (dec0_tid),
     .query1_mapped  (fl_alloc1_rmt_mapped),
     .ckpt_query0_prd(fl_alloc0_prd),
-    .ckpt_query0_tid(dec0_tid),
     .ckpt_query0_live(fl_alloc0_ckpt_live),
     .ckpt_query1_prd(fl_alloc1_prd),
-    .ckpt_query1_tid(dec0_tid),
     .ckpt_query1_live(fl_alloc1_ckpt_live),
     .branch_ckpt_capture0_valid(branch_ckpt_capture0_valid),
-    .branch_ckpt_capture0_tid(dec0_tid),
     .branch_ckpt_capture0_order_id(disp0_order_id),
     .branch_ckpt_capture1_valid(branch_ckpt_capture1_valid),
-    .branch_ckpt_capture1_tid(dec1_tid),
     .branch_ckpt_capture1_order_id(disp1_order_id),
     .branch_ckpt_restore(branch_ckpt_restore),
-    .branch_ckpt_restore_tid(pipe0_br_tid),
     .branch_ckpt_restore_order_id(pipe0_br_order_id),
     .branch_ckpt_restore_hit(rmt_branch_ckpt_restore_hit),
     .branch_ckpt_any_live(rmt_branch_ckpt_any_live),
     .branch_ckpt_drop0_valid(rob_commit0_valid && rob_commit0_is_branch),
-    .branch_ckpt_drop0_tid(1'b0),
     .branch_ckpt_drop0_order_id(rob_commit0_order_id),
     .branch_ckpt_drop1_valid(rob_commit1_valid && rob_commit1_is_branch),
-    .branch_ckpt_drop1_tid(1'b1),
     .branch_ckpt_drop1_order_id(rob_commit1_order_id),
     // RMT checkpoints are a rename-time image.  Do not forward later commits
     // into them: older in-flight writers were already included at capture.
     .ckpt_commit0_valid(1'b0),
-    .ckpt_commit0_tid(1'b0),
     .ckpt_commit0_rd(rob_commit0_rd),
     .ckpt_commit0_prd_new(rob_commit0_prd_new),
     .ckpt_commit1_valid(1'b0),
-    .ckpt_commit1_tid(1'b1),
     .ckpt_commit1_rd(rob_commit1_rd),
     .ckpt_commit1_prd_new(rob_commit1_prd_new),
-    .mapped_mask_t0(rmt_mapped_mask_t0),
-    .mapped_mask_t1(rmt_mapped_mask_t1)
+    .mapped_mask_t0(rmt_mapped_mask_t0)
 );
 
 freelist #(
@@ -1722,7 +1695,6 @@ freelist #(
 ) u_freelist (
     .clk                (clk),
     .rstn               (rstn),
-    .tid                (dec0_tid),
     // Alloc
     .alloc0_req         (shadow_alloc0_valid),
     .alloc1_after_alloc0(d0_needs_alloc),
@@ -1734,39 +1706,29 @@ freelist #(
     // Free at commit
     .free0_valid        (commit0_free_direct_valid),
     .free0_prd          (rob_commit0_prd_old),
-    .free0_tid          (1'b0),   // commit0 is always thread 0
     .free1_valid        (commit1_free_direct_valid),
     .free1_prd          (rob_commit1_prd_old),
-    .free1_tid          (1'b1),   // commit1 is always thread 1
     // Recovery push
     .recover_push_valid (rob_recover_en && rob_recover_regs_write &&
                           !rmt_branch_ckpt_recover_blocks_rob_walk),
     .recover_push_prd   (rob_recover_prd_new),
-    .recover_push_tid   (rob_recover_tid),
     .branch_ckpt_capture0_valid(branch_ckpt_capture0_valid),
-    .branch_ckpt_capture0_tid(dec0_tid),
     .branch_ckpt_capture0_order_id(disp0_order_id),
     .branch_ckpt_capture0_alloc_count(branch_ckpt_capture0_alloc_count),
     .branch_ckpt_capture1_valid(branch_ckpt_capture1_valid),
-    .branch_ckpt_capture1_tid(dec1_tid),
     .branch_ckpt_capture1_order_id(disp1_order_id),
     .branch_ckpt_capture1_alloc_count(branch_ckpt_capture1_alloc_count),
     .branch_ckpt_restore(branch_ckpt_restore),
-    .branch_ckpt_restore_tid(pipe0_br_tid),
     .branch_ckpt_restore_order_id(pipe0_br_order_id),
     .branch_ckpt_restore_hit(fl_branch_ckpt_restore_hit),
     .branch_ckpt_drop0_valid(rob_commit0_valid && rob_commit0_is_branch),
-    .branch_ckpt_drop0_tid(1'b0),
     .branch_ckpt_drop0_order_id(rob_commit0_order_id),
     .branch_ckpt_drop1_valid(rob_commit1_valid && rob_commit1_is_branch),
-    .branch_ckpt_drop1_tid(1'b1),
     .branch_ckpt_drop1_order_id(rob_commit1_order_id),
     .rebuild_valid      (freelist_rebuild_valid),
-    .rebuild_tid        (dec0_tid),
     .rebuild_mapped_mask(freelist_rebuild_mask),
     // Bulk reset
-    .reset_list         (1'b0),
-    .reset_tid          (1'b0)
+    .reset_list         (1'b0)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -1795,17 +1757,14 @@ wire [0:0]  w_regs_tid_1;
 // (simplified approach for correctness; true dual-port can be added)
 
 // Dual write ports for dual-issue support
-regs_mt #(.N_T(2)) u_regs_mt(
+regs_mt u_regs_mt(
     .clk            (clk             ),
     .rstn           (rstn            ),
-    .r_thread_id    (iss0_tid        ),
     .r_regs_addr1   (iss0_rs1        ),
     .r_regs_addr2   (iss0_rs2        ),
-    .w_thread_id_0  (w_regs_tid_0    ),
     .w_regs_addr_0  (w_regs_addr_0   ),
     .w_regs_data_0  (w_regs_data_0   ),
     .w_regs_en_0    (w_regs_en_0     ),
-    .w_thread_id_1  (w_regs_tid_1    ),
     .w_regs_addr_1  (w_regs_addr_1   ),
     .w_regs_data_1  (w_regs_data_1   ),
     .w_regs_en_1    (w_regs_en_1     ),
@@ -1816,17 +1775,14 @@ regs_mt #(.N_T(2)) u_regs_mt(
 // Port 1 read: second instance for pipe1 operands
 wire [31:0] ro1_data1, ro1_data2;
 
-regs_mt #(.N_T(2)) u_regs_mt_p1(
+regs_mt u_regs_mt_p1(
     .clk            (clk             ),
     .rstn           (rstn            ),
-    .r_thread_id    (p1_issue_arch_tid),
     .r_regs_addr1   (p1_issue_arch_rs1),
     .r_regs_addr2   (p1_issue_arch_rs2),
-    .w_thread_id_0  (w_regs_tid_0    ),
     .w_regs_addr_0  (w_regs_addr_0   ),
     .w_regs_data_0  (w_regs_data_0   ),
     .w_regs_en_0    (w_regs_en_0     ),
-    .w_thread_id_1  (w_regs_tid_1    ),
     .w_regs_addr_1  (w_regs_addr_1   ),
     .w_regs_data_1  (w_regs_data_1   ),
     .w_regs_en_1    (w_regs_en_1     ),
@@ -1905,23 +1861,94 @@ reg  [`METADATA_ORDER_ID_W-1:0] p1_pre_ro_order_id;
 reg  [`METADATA_EPOCH_W-1:0]    p1_pre_ro_epoch;
 reg  [PHYS_REG_W_CFG-1:0]  p1_pre_ro_prs1, p1_pre_ro_prs2;
 
+wire mret_order_flush_active = trap_return && !trap_enter;
+wire branch_order_flush_active = !trap_redirect_valid && pipe0_br_ctrl;
+wire ordered_flush_active = mret_order_flush_active || branch_order_flush_active;
+wire [`METADATA_ORDER_ID_W-1:0] ordered_flush_order_id =
+    mret_order_flush_active ? pipe0_mret_order_id : pipe0_br_order_id;
+
 assign iss0_flush_kill =
-    combined_flush_any && (iss0_tid == flush_tid_mux) &&
-    (!flush_is_order_based || (iss0_order_id > flush_order_id_mux));
+    trap_enter ||
+    (ordered_flush_active && (iss0_tid == flush_tid_mux) &&
+     (iss0_order_id > ordered_flush_order_id));
 assign p1_winner_flush_kill =
-    combined_flush_any && (p1_issue_arch_tid == flush_tid_mux) &&
-    (!flush_is_order_based || (p1_issue_arch_order_id > flush_order_id_mux));
+    trap_enter ||
+    (ordered_flush_active && (p1_issue_arch_tid == flush_tid_mux) &&
+     (p1_issue_arch_order_id > ordered_flush_order_id));
 wire p0_pre_ro_flush_kill =
-    combined_flush_any && (p0_pre_ro_tid == flush_tid_mux) &&
-    (!flush_is_order_based || (p0_pre_ro_order_id > flush_order_id_mux));
+    trap_enter ||
+    (ordered_flush_active && (p0_pre_ro_tid == flush_tid_mux) &&
+     (p0_pre_ro_order_id > ordered_flush_order_id));
 wire p1_pre_ro_flush_kill =
-    combined_flush_any && (p1_pre_ro_tid == flush_tid_mux) &&
-    (!flush_is_order_based || (p1_pre_ro_order_id > flush_order_id_mux));
+    trap_enter ||
+    (ordered_flush_active && (p1_pre_ro_tid == flush_tid_mux) &&
+     (p1_pre_ro_order_id > ordered_flush_order_id));
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         p0_pre_ro_valid <= 1'b0;
         p1_pre_ro_valid <= 1'b0;
+        p0_pre_ro_tag <= {RS_TAG_W_CFG{1'b0}};
+        p0_pre_ro_pc <= 32'd0;
+        p0_pre_ro_imm <= 32'd0;
+        p0_pre_ro_func3 <= 3'd0;
+        p0_pre_ro_func7 <= 1'b0;
+        p0_pre_ro_rd <= 5'd0;
+        p0_pre_ro_rs1 <= 5'd0;
+        p0_pre_ro_rs2 <= 5'd0;
+        p0_pre_ro_rs1_used <= 1'b0;
+        p0_pre_ro_rs2_used <= 1'b0;
+        p0_pre_ro_src1_tag <= {RS_TAG_W_CFG{1'b0}};
+        p0_pre_ro_src2_tag <= {RS_TAG_W_CFG{1'b0}};
+        p0_pre_ro_alu_op <= 3'd0;
+        p0_pre_ro_alu_src1 <= 2'd0;
+        p0_pre_ro_alu_src2 <= 2'd0;
+        p0_pre_ro_br <= 1'b0;
+        p0_pre_ro_mem_read <= 1'b0;
+        p0_pre_ro_mem_write <= 1'b0;
+        p0_pre_ro_mem2reg <= 1'b0;
+        p0_pre_ro_regs_write <= 1'b0;
+        p0_pre_ro_br_addr_mode <= 1'b0;
+        p0_pre_ro_fu <= 3'd0;
+        p0_pre_ro_tid <= 1'b0;
+        p0_pre_ro_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
+        p0_pre_ro_epoch <= {`METADATA_EPOCH_W{1'b0}};
+        p0_pre_ro_pred_taken <= 1'b0;
+        p0_pre_ro_pred_target <= 32'd0;
+        p0_pre_ro_prs1 <= {PHYS_REG_W_CFG{1'b0}};
+        p0_pre_ro_prs2 <= {PHYS_REG_W_CFG{1'b0}};
+        p0_pre_ro_is_csr <= 1'b0;
+        p0_pre_ro_is_mret <= 1'b0;
+        p0_pre_ro_csr_addr <= 12'd0;
+        p0_pre_ro_is_rocc <= 1'b0;
+        p0_pre_ro_rocc_funct7 <= 7'd0;
+        p1_pre_ro_tag <= {RS_TAG_W_CFG{1'b0}};
+        p1_pre_ro_pc <= 32'd0;
+        p1_pre_ro_imm <= 32'd0;
+        p1_pre_ro_func3 <= 3'd0;
+        p1_pre_ro_func7 <= 1'b0;
+        p1_pre_ro_rd <= 5'd0;
+        p1_pre_ro_rs1 <= 5'd0;
+        p1_pre_ro_rs2 <= 5'd0;
+        p1_pre_ro_rs1_used <= 1'b0;
+        p1_pre_ro_rs2_used <= 1'b0;
+        p1_pre_ro_src1_tag <= {RS_TAG_W_CFG{1'b0}};
+        p1_pre_ro_src2_tag <= {RS_TAG_W_CFG{1'b0}};
+        p1_pre_ro_alu_op <= 3'd0;
+        p1_pre_ro_alu_src1 <= 2'd0;
+        p1_pre_ro_alu_src2 <= 2'd0;
+        p1_pre_ro_br <= 1'b0;
+        p1_pre_ro_mem_read <= 1'b0;
+        p1_pre_ro_mem_write <= 1'b0;
+        p1_pre_ro_mem2reg <= 1'b0;
+        p1_pre_ro_regs_write <= 1'b0;
+        p1_pre_ro_br_addr_mode <= 1'b0;
+        p1_pre_ro_fu <= 3'd0;
+        p1_pre_ro_tid <= 1'b0;
+        p1_pre_ro_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
+        p1_pre_ro_epoch <= {`METADATA_EPOCH_W{1'b0}};
+        p1_pre_ro_prs1 <= {PHYS_REG_W_CFG{1'b0}};
+        p1_pre_ro_prs2 <= {PHYS_REG_W_CFG{1'b0}};
     end else begin
         p0_pre_ro_valid <= iss0_valid && !iss0_flush_kill;
         if (iss0_valid && !iss0_flush_kill) begin
@@ -1959,6 +1986,41 @@ always @(posedge clk or negedge rstn) begin
             p0_pre_ro_csr_addr     <= iss0_csr_addr;
             p0_pre_ro_is_rocc      <= iss0_is_rocc;
             p0_pre_ro_rocc_funct7  <= iss0_rocc_funct7;
+        end else begin
+            p0_pre_ro_tag          <= {RS_TAG_W_CFG{1'b0}};
+            p0_pre_ro_pc           <= 32'd0;
+            p0_pre_ro_imm          <= 32'd0;
+            p0_pre_ro_func3        <= 3'd0;
+            p0_pre_ro_func7        <= 1'b0;
+            p0_pre_ro_rd           <= 5'd0;
+            p0_pre_ro_rs1          <= 5'd0;
+            p0_pre_ro_rs2          <= 5'd0;
+            p0_pre_ro_rs1_used     <= 1'b0;
+            p0_pre_ro_rs2_used     <= 1'b0;
+            p0_pre_ro_src1_tag     <= {RS_TAG_W_CFG{1'b0}};
+            p0_pre_ro_src2_tag     <= {RS_TAG_W_CFG{1'b0}};
+            p0_pre_ro_alu_op       <= 3'd0;
+            p0_pre_ro_alu_src1     <= 2'd0;
+            p0_pre_ro_alu_src2     <= 2'd0;
+            p0_pre_ro_br           <= 1'b0;
+            p0_pre_ro_mem_read     <= 1'b0;
+            p0_pre_ro_mem_write    <= 1'b0;
+            p0_pre_ro_mem2reg      <= 1'b0;
+            p0_pre_ro_regs_write   <= 1'b0;
+            p0_pre_ro_br_addr_mode <= 1'b0;
+            p0_pre_ro_fu           <= `FU_NOP;
+            p0_pre_ro_tid          <= 1'b0;
+            p0_pre_ro_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
+            p0_pre_ro_epoch        <= {`METADATA_EPOCH_W{1'b0}};
+            p0_pre_ro_pred_taken   <= 1'b0;
+            p0_pre_ro_pred_target  <= 32'd0;
+            p0_pre_ro_prs1         <= {PHYS_REG_W_CFG{1'b0}};
+            p0_pre_ro_prs2         <= {PHYS_REG_W_CFG{1'b0}};
+            p0_pre_ro_is_csr       <= 1'b0;
+            p0_pre_ro_is_mret      <= 1'b0;
+            p0_pre_ro_csr_addr     <= 12'd0;
+            p0_pre_ro_is_rocc      <= 1'b0;
+            p0_pre_ro_rocc_funct7  <= 7'd0;
         end
 
         p1_pre_ro_valid <= p1_winner_valid && !p1_winner_flush_kill;
@@ -2048,6 +2110,34 @@ always @(posedge clk or negedge rstn) begin
                 p1_pre_ro_prs1         <= tag_prs1_map[p1_mul_cand_tag];
                 p1_pre_ro_prs2         <= tag_prs2_map[p1_mul_cand_tag];
             end
+        end else begin
+            p1_pre_ro_tag          <= {RS_TAG_W_CFG{1'b0}};
+            p1_pre_ro_pc           <= 32'd0;
+            p1_pre_ro_imm          <= 32'd0;
+            p1_pre_ro_func3        <= 3'd0;
+            p1_pre_ro_func7        <= 1'b0;
+            p1_pre_ro_rd           <= 5'd0;
+            p1_pre_ro_rs1          <= 5'd0;
+            p1_pre_ro_rs2          <= 5'd0;
+            p1_pre_ro_rs1_used     <= 1'b0;
+            p1_pre_ro_rs2_used     <= 1'b0;
+            p1_pre_ro_src1_tag     <= {RS_TAG_W_CFG{1'b0}};
+            p1_pre_ro_src2_tag     <= {RS_TAG_W_CFG{1'b0}};
+            p1_pre_ro_alu_op       <= 3'd0;
+            p1_pre_ro_alu_src1     <= 2'd0;
+            p1_pre_ro_alu_src2     <= 2'd0;
+            p1_pre_ro_br           <= 1'b0;
+            p1_pre_ro_mem_read     <= 1'b0;
+            p1_pre_ro_mem_write    <= 1'b0;
+            p1_pre_ro_mem2reg      <= 1'b0;
+            p1_pre_ro_regs_write   <= 1'b0;
+            p1_pre_ro_br_addr_mode <= 1'b0;
+            p1_pre_ro_fu           <= `FU_NOP;
+            p1_pre_ro_tid          <= 1'b0;
+            p1_pre_ro_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
+            p1_pre_ro_epoch        <= {`METADATA_EPOCH_W{1'b0}};
+            p1_pre_ro_prs1         <= {PHYS_REG_W_CFG{1'b0}};
+            p1_pre_ro_prs2         <= {PHYS_REG_W_CFG{1'b0}};
         end
     end
 end
@@ -2060,19 +2150,46 @@ phys_regfile #(
     .clk    (clk),
     .rstn   (rstn),
     // Read ports (using phys reg addresses from tag→prs sideband maps)
-    .r0_tid  (p0_pre_ro_tid),  .r0_addr (p0_pre_ro_prs1), .r0_data (prf_r0_data),
-    .r1_tid  (p0_pre_ro_tid),  .r1_addr (p0_pre_ro_prs2), .r1_data (prf_r1_data),
-    .r2_tid  (p1_pre_ro_tid),  .r2_addr (p1_pre_ro_prs1), .r2_data (prf_r2_data),
-    .r3_tid  (p1_pre_ro_tid),  .r3_addr (p1_pre_ro_prs2), .r3_data (prf_r3_data),
+    .r0_addr (p0_pre_ro_prs1), .r0_data (prf_r0_data),
+    .r1_addr (p0_pre_ro_prs2), .r1_data (prf_r1_data),
+    .r2_addr (p1_pre_ro_prs1), .r2_data (prf_r2_data),
+    .r3_addr (p1_pre_ro_prs2), .r3_data (prf_r3_data),
     // Write ports (at WB time – speculative writes)
-    .w0_en   (prf_w0_en),  .w0_tid (prf_w0_tid), .w0_addr (prf_w0_addr), .w0_data (prf_w0_data),
-    .w1_en   (prf_w1_en),  .w1_tid (prf_w1_tid), .w1_addr (prf_w1_addr), .w1_data (prf_w1_data)
+    .w0_en   (prf_w0_en),  .w0_addr (prf_w0_addr), .w0_data (prf_w0_data),
+    .w1_en   (prf_w1_en),  .w1_addr (prf_w1_addr), .w1_data (prf_w1_data)
 );
 
 // Order ID increment logic (after scoreboard is defined)
 // Dispatch is accepted when valid is asserted and stall is not asserted
 assign disp0_accepted = disp0_valid_gated && !sb_disp_stall;
 assign disp1_accepted = disp1_valid_gated && !sb_disp_stall && !sb_disp1_blocked;
+wire fence_i_commit_hit_t0 = fence_i_pending_t0 && rob_commit0_valid &&
+                             (rob_commit0_order_id == fence_i_pending_order_t0);
+wire fence_i_commit_hit_t1 = fence_i_pending_t1 && rob_commit1_valid &&
+                             (rob_commit1_order_id == fence_i_pending_order_t1);
+wire fence_i_committed_ready_t0 = fence_i_pending_t0 &&
+                                  (fence_i_commit_seen_t0 || fence_i_commit_hit_t0) &&
+                                  lsu_debug_store_buffer_empty;
+wire fence_i_committed_ready_t1 = fence_i_pending_t1 &&
+                                  (fence_i_commit_seen_t1 || fence_i_commit_hit_t1) &&
+                                  lsu_debug_store_buffer_empty;
+wire fence_i_dcache_flush_start_t0 = USE_MEM_SUBSYS && fence_i_committed_ready_t0 &&
+                                     !fence_i_dcache_flush_active_t0 && !combined_flush_any;
+wire fence_i_dcache_flush_start_t1 = USE_MEM_SUBSYS && fence_i_committed_ready_t1 &&
+                                     !fence_i_dcache_flush_active_t1 && !combined_flush_any;
+wire fence_i_dcache_flush_req = fence_i_dcache_flush_active_t0 ||
+                                fence_i_dcache_flush_active_t1 ||
+                                fence_i_dcache_flush_start_t0 ||
+                                fence_i_dcache_flush_start_t1;
+wire fence_i_flush_done_t0 = USE_MEM_SUBSYS ?
+                             (fence_i_dcache_flush_active_t0 && mem_subsys_dcache_flush_done) :
+                             fence_i_committed_ready_t0;
+wire fence_i_flush_done_t1 = USE_MEM_SUBSYS ?
+                             (fence_i_dcache_flush_active_t1 && mem_subsys_dcache_flush_done) :
+                             fence_i_committed_ready_t1;
+wire fence_i_clear_t0 = fence_i_pending_t0 && fence_i_flush_done_t0;
+wire fence_i_clear_t1 = fence_i_pending_t1 && fence_i_flush_done_t1;
+assign fence_i_invalidate = fence_i_clear_t0 || fence_i_clear_t1;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -2084,15 +2201,29 @@ always @(posedge clk or negedge rstn) begin
         csr_pending_t1        <= 1'b0;
         csr_pending_order_t0  <= {`METADATA_ORDER_ID_W{1'b0}};
         csr_pending_order_t1  <= {`METADATA_ORDER_ID_W{1'b0}};
+        fence_i_pending_t0       <= 1'b0;
+        fence_i_pending_t1       <= 1'b0;
+        fence_i_commit_seen_t0   <= 1'b0;
+        fence_i_commit_seen_t1   <= 1'b0;
+        fence_i_dcache_flush_active_t0 <= 1'b0;
+        fence_i_dcache_flush_active_t1 <= 1'b0;
+        fence_i_pending_order_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+        fence_i_pending_order_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         if (combined_flush_any) begin
             if (!flush_is_order_based) begin
                 if (flush_tid_mux == 1'b0) begin
                     mret_pending_t0 <= 1'b0;
                     csr_pending_t0  <= 1'b0;
+                    fence_i_pending_t0 <= 1'b0;
+                    fence_i_commit_seen_t0 <= 1'b0;
+                    fence_i_dcache_flush_active_t0 <= 1'b0;
                 end else begin
                     mret_pending_t1 <= 1'b0;
                     csr_pending_t1  <= 1'b0;
+                    fence_i_pending_t1 <= 1'b0;
+                    fence_i_commit_seen_t1 <= 1'b0;
+                    fence_i_dcache_flush_active_t1 <= 1'b0;
                 end
             end else begin
                 if (mret_pending_t0 && flush_tid_mux == 1'b0 &&
@@ -2107,8 +2238,40 @@ always @(posedge clk or negedge rstn) begin
                 if (csr_pending_t1 && flush_tid_mux == 1'b1 &&
                     csr_pending_order_t1 > flush_order_id_mux)
                     csr_pending_t1 <= 1'b0;
+                if (fence_i_pending_t0 && flush_tid_mux == 1'b0 &&
+                    fence_i_pending_order_t0 > flush_order_id_mux) begin
+                    fence_i_pending_t0 <= 1'b0;
+                    fence_i_commit_seen_t0 <= 1'b0;
+                    fence_i_dcache_flush_active_t0 <= 1'b0;
+                end
+                if (fence_i_pending_t1 && flush_tid_mux == 1'b1 &&
+                    fence_i_pending_order_t1 > flush_order_id_mux) begin
+                    fence_i_pending_t1 <= 1'b0;
+                    fence_i_commit_seen_t1 <= 1'b0;
+                    fence_i_dcache_flush_active_t1 <= 1'b0;
+                end
             end
         end
+
+        if (fence_i_dcache_flush_start_t0)
+            fence_i_dcache_flush_active_t0 <= 1'b1;
+        if (fence_i_dcache_flush_start_t1)
+            fence_i_dcache_flush_active_t1 <= 1'b1;
+
+        if (fence_i_clear_t0) begin
+            fence_i_pending_t0 <= 1'b0;
+            fence_i_commit_seen_t0 <= 1'b0;
+            fence_i_dcache_flush_active_t0 <= 1'b0;
+        end
+        if (fence_i_clear_t1) begin
+            fence_i_pending_t1 <= 1'b0;
+            fence_i_commit_seen_t1 <= 1'b0;
+            fence_i_dcache_flush_active_t1 <= 1'b0;
+        end
+        if (fence_i_commit_hit_t0 && !fence_i_clear_t0)
+            fence_i_commit_seen_t0 <= 1'b1;
+        if (fence_i_commit_hit_t1 && !fence_i_clear_t1)
+            fence_i_commit_seen_t1 <= 1'b1;
 
         if (pipe0_mret_valid) begin
             if (p0_pre_ro_tid == 1'b0)
@@ -2161,6 +2324,33 @@ always @(posedge clk or negedge rstn) begin
                 csr_pending_order_t1 <= disp1_order_id;
             end
         end
+
+        if (disp0_accepted && dec0_is_fence_i) begin
+            if (dec0_tid == 1'b0) begin
+                fence_i_pending_t0       <= 1'b1;
+                fence_i_commit_seen_t0   <= 1'b0;
+                fence_i_dcache_flush_active_t0 <= 1'b0;
+                fence_i_pending_order_t0 <= disp0_order_id;
+            end else begin
+                fence_i_pending_t1       <= 1'b1;
+                fence_i_commit_seen_t1   <= 1'b0;
+                fence_i_dcache_flush_active_t1 <= 1'b0;
+                fence_i_pending_order_t1 <= disp0_order_id;
+            end
+        end
+        if (disp1_accepted && dec1_is_fence_i) begin
+            if (dec1_tid == 1'b0) begin
+                fence_i_pending_t0       <= 1'b1;
+                fence_i_commit_seen_t0   <= 1'b0;
+                fence_i_dcache_flush_active_t0 <= 1'b0;
+                fence_i_pending_order_t0 <= disp1_order_id;
+            end else begin
+                fence_i_pending_t1       <= 1'b1;
+                fence_i_commit_seen_t1   <= 1'b0;
+                fence_i_dcache_flush_active_t1 <= 1'b0;
+                fence_i_pending_order_t1 <= disp1_order_id;
+            end
+        end
     end
 end
 
@@ -2178,6 +2368,8 @@ wire trap_pc_speculative = sb_branch_pending_any ||
                            mret_pending_t1 ||
                            csr_pending_t0 ||
                            csr_pending_t1 ||
+                           fence_i_pending_t0 ||
+                           fence_i_pending_t1 ||
                            (p0_pre_ro_valid && p0_pre_ro_is_mret) ||
                            pipe0_mret_valid;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
@@ -2208,10 +2400,11 @@ end
 wire precise_interrupt_ready =
     trap_pc_retired_valid_r &&
     !pipe0_br_ctrl &&
-    !pipe0_csr_valid &&
+    !(p0_pre_ro_valid && p0_pre_ro_is_csr) &&
     !pipe0_mret_valid &&
     !csr_pending_t0 &&
     !mret_pending_t0 &&
+    !fence_i_pending_t0 &&
     !rob_recover_walk_active;
 wire csr_ext_timer_irq    = ext_timer_irq && precise_interrupt_ready;
 wire csr_ext_external_irq = ext_external_irq && precise_interrupt_ready;
@@ -2313,7 +2506,7 @@ wire        p0_ex_rd_wen;
 wire [31:0] p0_ex_result;
 wire [RS_TAG_W_CFG-1:0]  p0_ex_tag;
 wire [2:0]  p0_ex_fu;
-wire [0:0]  p0_ex_tid;
+wire [0:0]  p0_ex_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] p0_ex_order_id;
 
 // Pipe 1 ALU results (for bypass)
@@ -2323,7 +2516,7 @@ wire        p1_alu_rd_wen;
 wire [31:0] p1_alu_result;
 wire [RS_TAG_W_CFG-1:0]  p1_alu_tag;
 wire [2:0]  p1_alu_fu;
-wire [0:0]  p1_alu_tid;
+wire [0:0]  p1_alu_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] p1_alu_order_id;
 wire p0_ex_valid_safe =
     p0_ex_valid && (p0_ex_tag != {RS_TAG_W_CFG{1'b0}}) &&
@@ -2353,7 +2546,6 @@ bypass_network u_bypass0(
     .ro_rs2_addr     (p0_pre_ro_rs2  ),
     .ro_rs1_regdata  (prf_r0_data    ),
     .ro_rs2_regdata  (prf_r1_data    ),
-    .ro_tid          (p0_pre_ro_tid  ),
     .tagbuf_rs1_valid(p0_tagbuf_a_valid),
     .tagbuf_rs1_data (p0_tagbuf_a_data ),
     .tagbuf_rs2_valid(p0_tagbuf_b_valid),
@@ -2362,17 +2554,14 @@ bypass_network u_bypass0(
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
-    .pipe0_tid       (p0_ex_tid      ),
     .pipe1_valid     (p1_alu_valid_safe),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
-    .pipe1_tid       (p1_alu_tid     ),
     .mem_valid       (mem_wb_valid   ),
     .mem_rd          (mem_wb_rd      ),
     .mem_rd_wen      (mem_wb_rd_wen  ),
     .mem_data        (mem_wb_data    ),
-    .mem_tid         (mem_wb_tid_r   ),
     .op_a            (byp0_op_a      ),
     .op_b            (byp0_op_b      ),
     .fwd_src_a       (byp0_fwd_a     ),
@@ -2390,7 +2579,6 @@ bypass_network u_bypass1(
     .ro_rs2_addr     (p1_pre_ro_rs2  ),
     .ro_rs1_regdata  (prf_r2_data    ),
     .ro_rs2_regdata  (prf_r3_data    ),
-    .ro_tid          (p1_pre_ro_tid  ),
     .tagbuf_rs1_valid(p1_tagbuf_a_valid),
     .tagbuf_rs1_data (p1_tagbuf_a_data ),
     .tagbuf_rs2_valid(p1_tagbuf_b_valid),
@@ -2399,17 +2587,14 @@ bypass_network u_bypass1(
     .pipe0_rd        (p0_ex_rd       ),
     .pipe0_rd_wen    (p0_ex_rd_wen   ),
     .pipe0_data      (p0_ex_result   ),
-    .pipe0_tid       (p0_ex_tid      ),
     .pipe1_valid     (p1_alu_valid_safe),
     .pipe1_rd        (p1_alu_rd      ),
     .pipe1_rd_wen    (p1_alu_rd_wen  ),
     .pipe1_data      (p1_alu_result  ),
-    .pipe1_tid       (p1_alu_tid     ),
     .mem_valid       (mem_wb_valid   ),
     .mem_rd          (mem_wb_rd      ),
     .mem_rd_wen      (mem_wb_rd_wen  ),
     .mem_data        (mem_wb_data    ),
-    .mem_tid         (mem_wb_tid_r   ),
     .op_a            (byp1_op_a      ),
     .op_b            (byp1_op_b      ),
     .fwd_src_a       (byp1_fwd_a     ),
@@ -2463,7 +2648,7 @@ always @(posedge clk or negedge rstn) begin
 
         // Mark in-flight when RoCC command is accepted
         if (rocc_cmd_valid && rocc_cmd_ready) begin
-            rocc_cmd_epoch[rocc_cmd_tag] <= p0_pre_ro_epoch;
+            rocc_cmd_epoch[rocc_cmd_tag] <= epoch_t0;
             rocc_cmd_tid_per_tag[rocc_cmd_tag] <= p0_pre_ro_tid;
             rocc_cmd_in_flight[rocc_cmd_tag] <= 1'b1;
         end
@@ -2509,10 +2694,8 @@ exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .in_pred_target   (p0_pre_ro_pred_target),
     .in_rd            (p0_pre_ro_rd     ),
     .in_regs_write    (p0_pre_ro_regs_write),
-    .in_fu            (p0_pre_ro_fu     ),
-    .in_tid           (p0_pre_ro_tid    ),
+    .in_fu            (`FU_INT0         ),
     .flush            (combined_flush_any),
-    .flush_tid        (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
     .flush_order_valid(flush_is_order_based),
     .flush_order_id   (flush_order_id_mux),
     .in_is_csr        (p0_pre_ro_is_csr ),
@@ -2525,7 +2708,6 @@ exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .out_rd           (p0_ex_rd         ),
     .out_regs_write   (p0_ex_rd_wen     ),
     .out_fu           (p0_ex_fu         ),
-    .out_tid          (p0_ex_tid        ),
     .out_order_id     (p0_ex_order_id   ),
     .csr_valid        (pipe0_csr_valid  ),
     .csr_wdata        (pipe0_csr_wdata  ),
@@ -2535,7 +2717,6 @@ exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .mret_order_id    (pipe0_mret_order_id),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
-    .br_tid           (pipe0_br_tid     ),
     .br_order_id      (pipe0_br_order_id),
     .br_complete      (pipe0_br_complete),
     .br_update_valid  (pipe0_br_update_valid),
@@ -2557,7 +2738,7 @@ wire [4:0]  p1_mem_req_rd;
 wire        p1_mem_req_regs_write;
 wire [2:0]  p1_mem_req_fu;
 wire        p1_mem_req_mem2reg;
-wire [0:0]  p1_mem_req_tid;
+wire [0:0]  p1_mem_req_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mem_req_order_id;
 wire [7:0]  p1_mem_req_epoch;
 
@@ -2567,7 +2748,7 @@ wire [31:0] p1_mul_result;
 wire [4:0]  p1_mul_rd;
 wire        p1_mul_regs_write;
 wire [2:0]  p1_mul_fu;
-wire [0:0]  p1_mul_tid;
+wire [0:0]  p1_mul_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] p1_mul_order_id;
 
 wire        p1_div_valid;
@@ -2576,7 +2757,7 @@ wire [31:0] p1_div_result;
 wire [4:0]  p1_div_rd;
 wire        p1_div_regs_write;
 wire [2:0]  p1_div_fu;
-wire [0:0]  p1_div_tid;
+wire [0:0]  p1_div_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] p1_div_order_id;
 wire        p1_div_busy;
 
@@ -2769,6 +2950,27 @@ wire        ro1_dbg_bad_uart_store =
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         ro1_valid <= 1'b0;
+        ro1_tag <= {RS_TAG_W_CFG{1'b0}};
+        ro1_pc <= 32'd0;
+        ro1_imm <= 32'd0;
+        ro1_func3 <= 3'd0;
+        ro1_func7 <= 1'b0;
+        ro1_rd <= 5'd0;
+        ro1_alu_op <= 3'd0;
+        ro1_alu_src1 <= 2'd0;
+        ro1_alu_src2 <= 2'd0;
+        ro1_br <= 1'b0;
+        ro1_mem_read <= 1'b0;
+        ro1_mem_write <= 1'b0;
+        ro1_mem2reg <= 1'b0;
+        ro1_regs_write <= 1'b0;
+        ro1_br_addr_mode <= 1'b0;
+        ro1_fu <= 3'd0;
+        ro1_tid <= 1'b0;
+        ro1_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
+        ro1_epoch <= {`METADATA_EPOCH_W{1'b0}};
+        ro1_op_a <= 32'd0;
+        ro1_op_b <= 32'd0;
 `ifdef VERILATOR_MAINLINE
         ro1_dbg_rs1 <= 5'd0;
         ro1_dbg_rs2 <= 5'd0;
@@ -2824,6 +3026,44 @@ always @(posedge clk or negedge rstn) begin
             ro1_dbg_tagbuf_b_data  <= p1_tagbuf_b_data;
             ro1_dbg_fwd_a          <= byp1_fwd_a;
             ro1_dbg_fwd_b          <= byp1_fwd_b;
+`endif
+        end else begin
+            ro1_tag <= {RS_TAG_W_CFG{1'b0}};
+            ro1_pc <= 32'd0;
+            ro1_imm <= 32'd0;
+            ro1_func3 <= 3'd0;
+            ro1_func7 <= 1'b0;
+            ro1_rd <= 5'd0;
+            ro1_alu_op <= 3'd0;
+            ro1_alu_src1 <= 2'd0;
+            ro1_alu_src2 <= 2'd0;
+            ro1_br <= 1'b0;
+            ro1_mem_read <= 1'b0;
+            ro1_mem_write <= 1'b0;
+            ro1_mem2reg <= 1'b0;
+            ro1_regs_write <= 1'b0;
+            ro1_br_addr_mode <= 1'b0;
+            ro1_fu <= `FU_NOP;
+            ro1_tid <= 1'b0;
+            ro1_order_id <= {`METADATA_ORDER_ID_W{1'b0}};
+            ro1_epoch <= {`METADATA_EPOCH_W{1'b0}};
+            ro1_op_a <= 32'd0;
+            ro1_op_b <= 32'd0;
+`ifdef VERILATOR_MAINLINE
+            ro1_dbg_rs1 <= 5'd0;
+            ro1_dbg_rs2 <= 5'd0;
+            ro1_dbg_src1_tag <= {RS_TAG_W_CFG{1'b0}};
+            ro1_dbg_src2_tag <= {RS_TAG_W_CFG{1'b0}};
+            ro1_dbg_prs1 <= 6'd0;
+            ro1_dbg_prs2 <= 6'd0;
+            ro1_dbg_prf_a <= 32'd0;
+            ro1_dbg_prf_b <= 32'd0;
+            ro1_dbg_tagbuf_a_valid <= 1'b0;
+            ro1_dbg_tagbuf_b_valid <= 1'b0;
+            ro1_dbg_tagbuf_a_data <= 32'd0;
+            ro1_dbg_tagbuf_b_data <= 32'd0;
+            ro1_dbg_fwd_a <= 2'd0;
+            ro1_dbg_fwd_b <= 2'd0;
 `endif
         end
     end
@@ -3238,14 +3478,12 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .in_mem_read   (ro1_mem_read     ),
     .in_mem_write  (ro1_mem_write    ),
     .in_mem2reg    (ro1_mem2reg      ),
-    .in_rd         (ro1_rd           ),
+    .in_rd         (5'd0             ),
     .in_regs_write (ro1_regs_write   ),
     .in_fu         (ro1_fu           ),
-    .in_tid        (ro1_tid          ),
     .in_order_id   (ro1_order_id     ),
     .in_epoch      (ro1_epoch        ),
     .flush         (combined_flush_any),
-    .flush_tid     (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid),
     .flush_order_valid(flush_is_order_based),
     .flush_order_id(flush_order_id_mux),
     .alu_out_valid      (p1_alu_valid     ),
@@ -3254,7 +3492,6 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .alu_out_rd         (p1_alu_rd        ),
     .alu_out_regs_write (p1_alu_rd_wen    ),
     .alu_out_fu         (p1_alu_fu        ),
-    .alu_out_tid        (p1_alu_tid       ),
     .alu_out_order_id   (p1_alu_order_id  ),
     .mem_req_valid      (p1_mem_req_valid     ),
     .mem_req_accept     (lsu_req_accept       ),
@@ -3267,7 +3504,6 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .mem_req_regs_write (p1_mem_req_regs_write),
     .mem_req_fu         (p1_mem_req_fu        ),
     .mem_req_mem2reg    (p1_mem_req_mem2reg   ),
-    .mem_req_tid        (p1_mem_req_tid       ),
     .mem_req_order_id   (p1_mem_req_order_id  ),
     .mem_req_epoch      (p1_mem_req_epoch     ),
     .mul_out_valid      (p1_mul_valid         ),
@@ -3276,7 +3512,6 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .mul_out_rd         (p1_mul_rd            ),
     .mul_out_regs_write (p1_mul_regs_write    ),
     .mul_out_fu         (p1_mul_fu            ),
-    .mul_out_tid        (p1_mul_tid           ),
     .mul_out_order_id   (p1_mul_order_id      ),
     .div_out_valid      (p1_div_valid         ),
     .div_out_tag        (p1_div_tag           ),
@@ -3284,7 +3519,6 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .div_out_rd         (p1_div_rd            ),
     .div_out_regs_write (p1_div_regs_write    ),
     .div_out_fu         (p1_div_fu            ),
-    .div_out_tid        (p1_div_tid           ),
     .div_out_order_id   (p1_div_order_id      ),
     .div_busy           (p1_div_busy          )
 );
@@ -3302,7 +3536,6 @@ wire [31:0] sb_mem_write_addr;
 wire [31:0] sb_mem_write_data;
 wire [3:0]  sb_mem_write_wen;
 wire        sb_mem_write_ready;
-wire        lsu_debug_store_buffer_empty;
 wire [2:0]  lsu_debug_store_buffer_count_t0;
 wire [2:0]  lsu_debug_store_buffer_count_t1;
 wire [7:0]  legacy_tube_status;
@@ -3329,7 +3562,7 @@ lsu_shell #(
 
     // Flush interface
     .flush              (combined_flush_any ),
-    .flush_tid          (trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid ),
+    .flush_tid          (1'b0),
     .flush_new_epoch_t0 (flush_new_epoch_t0   ),
     .flush_new_epoch_t1 (flush_new_epoch_t1   ),
     .current_epoch_t0   (epoch_t0             ),
@@ -3342,7 +3575,7 @@ lsu_shell #(
     .req_accept         (lsu_req_accept       ),
     .req_tid            (p1_mem_req_tid       ),
     .req_order_id       (p1_mem_req_order_id  ),
-    .req_epoch          (p1_mem_req_epoch     ),
+    .req_epoch          (epoch_t0             ),
     .req_tag            (p1_mem_req_tag       ),
     .req_rd             (p1_mem_req_rd        ),
     .req_func3          (p1_mem_req_func3     ),
@@ -3361,7 +3594,6 @@ lsu_shell #(
 
     // Response to writeback
     .resp_valid         (lsu_resp_valid       ),
-    .resp_tid           (lsu_resp_tid         ),
     .resp_order_id      (lsu_resp_order_id    ),
     .resp_epoch         (                     ),
     .resp_tag           (lsu_resp_tag         ),
@@ -3630,14 +3862,16 @@ assign wb1_tag        = wb1_from_div ? wb1_div_sel_tag  :
                         wb1_from_mul ? wb1_mul_sel_tag  :
                         wb1_from_mem ? wb1_mem_sel_tag  :
                         wb1_from_alu ? wb1_alu_sel_tag  : {RS_TAG_W_CFG{1'b0}};
-assign wb1_rd         = wb1_from_div ? wb1_div_sel_rd  :
-                        wb1_from_mul ? wb1_mul_sel_rd  :
-                        wb1_from_mem ? wb1_mem_sel_rd  :
-                        wb1_from_alu ? wb1_alu_sel_rd  : 5'd0;
 assign wb1_regs_write = wb1_from_div ? wb1_div_sel_regs_write :
                         wb1_from_mul ? wb1_mul_sel_regs_write :
                         wb1_from_mem ? wb1_mem_sel_regs_write :
                         wb1_from_alu ? wb1_alu_sel_regs_write : 1'b0;
+`ifdef VERILATOR_MAINLINE
+assign wb1_rd         = (wb1_regs_write && (wb1_tag != {RS_TAG_W_CFG{1'b0}})) ?
+                        tag_rd_map[wb1_tag] : 5'd0;
+`else
+assign wb1_rd         = 5'd0;
+`endif
 assign wb1_fu         = wb1_from_div ? wb1_div_sel_fu  :
                         wb1_from_mul ? wb1_mul_sel_fu  :
                         wb1_from_mem ? wb1_mem_sel_fu  :
@@ -3966,7 +4200,6 @@ if (ROCC_ACCEL_ENABLE) begin : gen_rocc_accel
         .resp_rd          (rocc_resp_rd),
         .resp_data        (rocc_resp_data),
         .resp_tag         (rocc_resp_tag),
-        .resp_tid         (rocc_resp_tid),
 
         // DMA memory interface (to M2 port)
         .mem_req_valid    (rocc_mem_req_valid),
@@ -3987,7 +4220,6 @@ end else begin : gen_rocc_stub
     assign rocc_resp_rd       = 5'd0;
     assign rocc_resp_data     = 32'd0;
     assign rocc_resp_tag      = {RS_TAG_W_CFG{1'b0}};
-    assign rocc_resp_tid      = 1'b0;
     assign rocc_mem_req_valid = 1'b0;
     assign rocc_mem_req_addr  = 32'd0;
     assign rocc_mem_req_wdata = 32'd0;
@@ -4019,6 +4251,60 @@ wire [7:0]  mem_subsys_debug_uart_status_load_count;
 wire [7:0]  mem_subsys_debug_uart_tx_store_count;
 wire [127:0] mem_subsys_debug_ddr3_m0_bus;
 wire        ext_irq_src_clean = (ext_irq_src === 1'b1);
+reg  [15:0] debug_core_last_commit_pc_r;
+wire [7:0]  debug_core_status_flags_w = {
+    rob_head_valid_t0,
+    stall,
+    sb_disp_stall,
+    sb_debug_stall_rs_tag_empty,
+    sb_debug_stall_iq_int_full,
+    sb_debug_stall_iq_mem_full,
+    sb_branch_pending_any,
+    |rob_instr_retired
+};
+wire [7:0]  debug_core_branch_state_w = {
+    sb_debug_branch_in_flight_t0,
+    sb_debug_branch_gated_mem_issue,
+    sb_debug_flush_killed_speculative,
+    scoreboard_br_complete,
+    sb_debug_spec_dispatch1,
+    sb_debug_spec_dispatch0,
+    sb_branch_pending_any,
+    pipe0_br_complete_hold_r
+};
+wire [7:0]  debug_core_branch_counts_w = {
+    debug_branch_issue_count_r[3:0],
+    debug_branch_complete_count_r[3:0]
+};
+reg  [7:0]  debug_core_status_flags_r;
+reg  [7:0]  debug_core_branch_state_r;
+reg  [7:0]  debug_core_branch_counts_r;
+reg  [7:0]  debug_core_branch_issue_count_r2;
+reg  [7:0]  debug_core_branch_complete_count_r2;
+reg  [7:0]  debug_core_last_issue_pc_lo_r;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        debug_core_last_commit_pc_r <= 16'd0;
+        debug_core_status_flags_r <= 8'd0;
+        debug_core_branch_state_r <= 8'd0;
+        debug_core_branch_counts_r <= 8'd0;
+        debug_core_branch_issue_count_r2 <= 8'd0;
+        debug_core_branch_complete_count_r2 <= 8'd0;
+        debug_core_last_issue_pc_lo_r <= 8'd0;
+    end else begin
+        debug_core_status_flags_r <= debug_core_status_flags_w;
+        debug_core_branch_state_r <= debug_core_branch_state_w;
+        debug_core_branch_counts_r <= debug_core_branch_counts_w;
+        debug_core_branch_issue_count_r2 <= debug_branch_issue_count_r;
+        debug_core_branch_complete_count_r2 <= debug_branch_complete_count_r;
+        debug_core_last_issue_pc_lo_r <= debug_last_iss0_pc_lo_r;
+        if (rob_commit0_valid)
+            debug_core_last_commit_pc_r <= rob_commit0_pc[15:0];
+        else if (rob_commit1_valid)
+            debug_core_last_commit_pc_r <= rob_commit1_pc[15:0];
+    end
+end
 
 // RoCC DMA to M2 port connections
 assign m2_req_valid  = rocc_mem_req_valid;
@@ -4090,7 +4376,17 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .debug_store_buffer_empty(lsu_debug_store_buffer_empty),
         .debug_store_buffer_count_t0(lsu_debug_store_buffer_count_t0),
         .debug_store_buffer_count_t1(lsu_debug_store_buffer_count_t1),
-        .debug_ddr3_m0_bus (mem_subsys_debug_ddr3_m0_bus)
+        .debug_core_status_flags(debug_core_status_flags_r),
+        .debug_core_last_commit_pc(debug_core_last_commit_pc_r),
+        .debug_core_branch_issue_count(debug_core_branch_issue_count_r2),
+        .debug_core_branch_complete_count(debug_core_branch_complete_count_r2),
+        .debug_core_branch_state(debug_core_branch_state_r),
+        .debug_core_branch_counts(debug_core_branch_counts_r),
+        .debug_core_last_issue_pc_lo(debug_core_last_issue_pc_lo_r),
+        .debug_ddr3_m0_bus (mem_subsys_debug_ddr3_m0_bus),
+        .dcache_flush_all  (fence_i_dcache_flush_req),
+        .dcache_flush_busy (mem_subsys_dcache_flush_busy),
+        .dcache_flush_done (mem_subsys_dcache_flush_done)
 
 `ifdef ENABLE_DDR3
         ,
@@ -4127,6 +4423,8 @@ end else begin : gen_mem_subsys_tieoff
     assign mem_subsys_debug_uart_status_load_count = 8'd0;
     assign mem_subsys_debug_uart_tx_store_count = 8'd0;
     assign mem_subsys_debug_ddr3_m0_bus = 128'd0;
+    assign mem_subsys_dcache_flush_busy = 1'b0;
+    assign mem_subsys_dcache_flush_done = fence_i_dcache_flush_req;
 end
 endgenerate
 

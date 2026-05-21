@@ -16,13 +16,14 @@ set ddr3_bridge_audit [ax7203_env_or_default AX7203_DDR3_BRIDGE_AUDIT 0]
 set step2_beacon_debug [ax7203_env_or_default AX7203_STEP2_BEACON_DEBUG 0]
 set loader_beacon_debug [ax7203_env_or_default AX7203_DDR3_LOADER_BEACON_DEBUG 0]
 set transport_uart_rxdata_reg_test [ax7203_env_or_default AX7203_TRANSPORT_UART_RXDATA_REG_TEST 0]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 48] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
 set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
 set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
-set synth_jobs [ax7203_env_or_default AX7203_SYNTH_JOBS 4]
+set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
+set synth_jobs [ax7203_vivado_jobs AX7203_SYNTH_JOBS]
 set synth_timeout_min [ax7203_env_or_default AX7203_SYNTH_TIMEOUT_MIN 15]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 set project_file "$project_dir/$project_name.xpr"
@@ -49,6 +50,7 @@ puts "RS idx width: $rs_idx_w"
 puts "Fetch buffer depth: $fetch_buffer_depth"
 puts "Core clock: ${core_clk_mhz} MHz"
 puts "UART clock divider: $uart_clk_div"
+puts "DCache mode: $dcache_mode"
 puts "Top module: $top_module"
 puts "Synthesis jobs: $synth_jobs"
 puts "Synthesis timeout budget: ${synth_timeout_min} minute(s)"
@@ -111,6 +113,7 @@ if {$transport_uart_rxdata_reg_test} {
 } else {
     set transport_uart_rxdata_reg_test_def ""
 }
+set dcache_def [ax7203_dcache_define $dcache_mode]
 set_property top $top_module [get_filesets sources_1]
 set_property verilog_define [list \
     FPGA_MODE=1 \
@@ -128,6 +131,7 @@ set_property verilog_define [list \
     {*}$step2_beacon_debug_def \
     {*}$loader_beacon_debug_def \
     {*}$transport_uart_rxdata_reg_test_def \
+    {*}$dcache_def \
 ] [get_filesets sources_1]
 update_compile_order -fileset sources_1
 
@@ -145,7 +149,7 @@ set synth_timing_rpt "$report_dir/synth_timing_summary.rpt"
 file mkdir $report_dir
 file mkdir $checkpoint_dir
 
-catch {set_param general.maxThreads $synth_jobs}
+ax7203_apply_vivado_threads $synth_jobs
 catch {close_design}
 
 ax7203_clear_run_markers $runs_dir

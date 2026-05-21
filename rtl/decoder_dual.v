@@ -21,12 +21,10 @@ module decoder_dual (
     input  wire        inst0_valid,
     input  wire [31:0] inst0_word,      // instruction 0 (older in program order)
     input  wire [31:0] inst0_pc,
-    input  wire [0:0]  inst0_tid,
 
     input  wire        inst1_valid,
     input  wire [31:0] inst1_word,      // instruction 1 (younger)
     input  wire [31:0] inst1_pc,
-    input  wire [0:0]  inst1_tid,
 
     // ─── Output: Decoded instruction 0 ──────────────────────────
     output wire        dec0_valid,      // decoded & can be dispatched
@@ -49,7 +47,6 @@ module decoder_dual (
     output wire        dec0_rs1_used,
     output wire        dec0_rs2_used,
     output wire [2:0]  dec0_fu,
-    output wire [0:0]  dec0_tid,
 
     // ─── Output: Decoded instruction 1 ──────────────────────────
     output wire        dec1_valid,
@@ -72,7 +69,6 @@ module decoder_dual (
     output wire        dec1_rs1_used,
     output wire        dec1_rs2_used,
     output wire [2:0]  dec1_fu,
-    output wire [0:0]  dec1_tid,
 
     // ─── Backpressure: how many instructions consumed ───────────
     output wire        consume_0,      // decoder consumed inst0
@@ -140,6 +136,7 @@ wire [31:0] d1_pc_o;
 
 // ─── Internal SYSTEM signals ────────────────────────────────────────────────
 wire        d0_is_system, d1_is_system;
+wire        d0_is_misc_mem, d1_is_misc_mem;
 wire        d0_is_csr, d1_is_csr;
 wire        d0_is_mret, d1_is_mret;
 wire [11:0] d0_csr_addr, d1_csr_addr;
@@ -227,17 +224,20 @@ wire structural_conflict;
 wire both_branch;
 wire both_mem;
 wire waw_conflict;
-wire thread_mismatch;
 wire any_system;        // NEW: any SYSTEM instruction blocks dual-issue
+wire any_misc_mem;      // FENCE/FENCE.I serializes the decode group
 wire any_rocc;          // NEW: any RoCC instruction blocks dual-issue
 
 assign both_branch     = d0_br && d1_br;
 assign both_mem        = (d0_mem_read || d0_mem_write) && (d1_mem_read || d1_mem_write);
 assign waw_conflict    = d0_regs_write && d1_regs_write && (d0_rd == d1_rd) && (d0_rd != 5'd0);
-assign thread_mismatch = (inst0_tid != inst1_tid);
+assign d0_is_misc_mem  = (inst0_word[6:0] == `MISC_MEM);
+assign d1_is_misc_mem  = (inst1_word[6:0] == `MISC_MEM);
 assign any_system      = d0_is_system || d1_is_system;  // Serialize SYSTEM ops
+assign any_misc_mem    = d0_is_misc_mem || d1_is_misc_mem;
 assign any_rocc        = d0_is_rocc || d1_is_rocc;      // Serialize RoCC ops
-assign structural_conflict = both_branch || both_mem || waw_conflict || thread_mismatch || any_system || any_rocc;
+assign structural_conflict = both_branch || both_mem || waw_conflict ||
+                             any_system || any_misc_mem || any_rocc;
 
 // ─── Final valid signals ────────────────────────────────────────────────────
 // Important: We always consume from fetch_buffer (consume_0 always asserted if inst0_valid)
@@ -272,7 +272,6 @@ assign dec0_rs2          = d0_rs2;
 assign dec0_rs1_used     = d0_rs1_used;
 assign dec0_rs2_used     = d0_rs2_used;
 assign dec0_fu           = d0_fu;
-assign dec0_tid          = inst0_tid;
 
 assign dec1_pc           = d1_pc_o;
 assign dec1_imm          = d1_imm;
@@ -293,7 +292,6 @@ assign dec1_rs2          = d1_rs2;
 assign dec1_rs1_used     = d1_rs1_used;
 assign dec1_rs2_used     = d1_rs2_used;
 assign dec1_fu           = d1_fu;
-assign dec1_tid          = inst1_tid;
 
 // ─── Consume signals (feedback to fetch_buffer) ─────────────────────────────
 // Hold fetch-buffer entries in place whenever the downstream pipeline stalls.

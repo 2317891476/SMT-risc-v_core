@@ -52,6 +52,7 @@ struct Summary {
     bool benchmark_try_seen = false;
     bool benchmark_result_seen = false;
     bool benchmark_done_seen = false;
+    bool preload_benchmark_pass = false;
     bool loader_semantic_pass = false;
     bool trap_seen = false;
     uint32_t trap_cause = 0;
@@ -460,6 +461,7 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BenchmarkTrySeen\": " << (summary.benchmark_try_seen ? "true" : "false") << ",\n";
     ofs << "  \"BenchmarkResultSeen\": " << (summary.benchmark_result_seen ? "true" : "false") << ",\n";
     ofs << "  \"BenchmarkDoneSeen\": " << (summary.benchmark_done_seen ? "true" : "false") << ",\n";
+    ofs << "  \"PreloadBenchmarkPass\": " << (summary.preload_benchmark_pass ? "true" : "false") << ",\n";
     ofs << "  \"LoaderSemanticPass\": " << (summary.loader_semantic_pass ? "true" : "false") << ",\n";
     ofs << "  \"TrapSeen\": " << (summary.trap_seen ? "true" : "false") << ",\n";
     ofs << "  \"TrapCause\": " << summary.trap_cause << ",\n";
@@ -996,12 +998,19 @@ struct LoaderHost {
             block_checksums[block] = sum;
         }
         block_count_total = block_count;
-        phase = Phase::Header;
+        phase = Phase::Idle;
     }
 
     bool done() const { return phase == Phase::Done; }
     bool jump_ready() const { return phase == Phase::Done; }
     uint64_t bytes_injected() const { return bytes_sent_total; }
+
+    void start() {
+        if (phase == Phase::Idle) {
+            phase = Phase::Header;
+            gap_countdown = header_gap_cycles;
+        }
+    }
 
     void observe_tx_byte(uint8_t byte) {
         if (phase == Phase::WaitChunkAck && byte == 0x06u) {
@@ -1202,7 +1211,10 @@ int main(int argc, char** argv) {
     uint64_t same_pc_counter = 0;
     uint64_t small_window_counter = 0;
     bool prev_uart_tx_byte_valid = false;
+    uint32_t benchmark_uart_seen_count = 0;
     bool prev_core_clk = false;
+    bool held_fast_uart_rx_valid = false;
+    uint8_t held_fast_uart_rx_byte = 0;
     std::map<uint32_t, uint64_t> bench_redirect_pc_counts;
 
     top->sys_rstn = 0;
@@ -1240,10 +1252,19 @@ int main(int argc, char** argv) {
         bool inject_valid = false;
         uint8_t inject_byte = 0;
         if (loader_host) {
-            loader_host->drive(inject_valid, inject_byte);
+            if (top->tube_status == 0x22u) {
+                loader_host->start();
+            }
+            if (!held_fast_uart_rx_valid) {
+                loader_host->drive(inject_valid, inject_byte);
+                if (inject_valid) {
+                    held_fast_uart_rx_valid = true;
+                    held_fast_uart_rx_byte = inject_byte;
+                }
+            }
         }
-        top->fast_uart_rx_byte_valid = inject_valid ? 1 : 0;
-        top->fast_uart_rx_byte = inject_byte;
+        top->fast_uart_rx_byte_valid = held_fast_uart_rx_valid ? 1 : 0;
+        top->fast_uart_rx_byte = held_fast_uart_rx_valid ? held_fast_uart_rx_byte : 0;
 
         tick(top.get(), cycles
 #if VM_TRACE
@@ -1254,6 +1275,9 @@ int main(int argc, char** argv) {
         const bool core_clk_now = top->debug_core_clk != 0;
         const bool core_clk_rise = core_clk_now && !prev_core_clk;
         prev_core_clk = core_clk_now;
+        if (held_fast_uart_rx_valid && core_clk_rise) {
+            held_fast_uart_rx_valid = false;
+        }
 
         const bool uart_byte_fire = (top->debug_uart_tx_byte_valid != 0) && !prev_uart_tx_byte_valid;
         prev_uart_tx_byte_valid = top->debug_uart_tx_byte_valid != 0;
@@ -1308,8 +1332,10 @@ int main(int argc, char** argv) {
         if (uart_byte_fire) {
             const uint8_t byte = static_cast<uint8_t>(top->debug_uart_tx_byte);
             static const std::string kExpectedUartPrefix = "0\n1\n2\nDH\nDHRYSTONE START\r\n";
-            const uint32_t uart_index = summary.uart_tx_byte_seen_count;
-            if (!summary.unexpected_uart_seen &&
+            const bool loader_protocol_byte = loader_host && !loader_host->done();
+            const uint32_t uart_index = benchmark_uart_seen_count;
+            if (!loader_protocol_byte &&
+                !summary.unexpected_uart_seen &&
                 uart_index < kExpectedUartPrefix.size() &&
                 byte != static_cast<uint8_t>(kExpectedUartPrefix[uart_index])) {
                 summary.unexpected_uart_seen = true;
@@ -1341,19 +1367,20 @@ int main(int argc, char** argv) {
                 summary.unexpected_uart_wb1_data = top->debug_wb1_data;
                 capture_uart_store_debug();
             }
+            if (!loader_protocol_byte) {
+                ++benchmark_uart_seen_count;
+            }
             ++summary.uart_tx_byte_seen_count;
             summary.last_uart_tx_byte = byte;
-            uart_ascii.push_back(static_cast<char>(byte));
+            if (!loader_protocol_byte) {
+                uart_ascii.push_back(static_cast<char>(byte));
+            }
             if (uart_log.is_open()) {
                 uart_log << format_uart_byte(byte);
             }
             if (loader_host) {
                 loader_host->observe_tx_byte(byte);
             }
-        }
-
-        if (!summary.unexpected_uart_seen && top->debug_bad_uart_store_seen) {
-            capture_uart_store_debug();
         }
 
         if (!summary.strcpy_mv_seen && top->debug_strcpy_mv_seen) {
@@ -2036,6 +2063,15 @@ int main(int argc, char** argv) {
     if (summary.exit_reason == "timeout" && summary.benchmark_done_seen) {
         summary.exit_reason = "done";
     }
+    summary.preload_benchmark_pass =
+        summary.mode == "preload" &&
+        summary.exit_reason == "done" &&
+        summary.entry_reached &&
+        summary.benchmark_start_seen &&
+        summary.benchmark_done_seen &&
+        !summary.trap_seen &&
+        !summary.unexpected_uart_seen &&
+        summary.spec_mmio_load_violation_count == 0;
 
 #if VM_TRACE
     if (trace_open) {
@@ -2048,6 +2084,9 @@ int main(int argc, char** argv) {
     }
     write_summary_json(summary, cfg.summary_json);
 
+    if (summary.mode == "preload") {
+        return summary.preload_benchmark_pass ? 0 : 1;
+    }
     if (summary.exit_reason == "done") {
         return 0;
     }

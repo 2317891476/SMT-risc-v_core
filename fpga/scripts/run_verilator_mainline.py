@@ -183,6 +183,8 @@ def build_rom_image(mode: str) -> None:
     ]
     if mode == "preload":
         cmd.extend(["--march", "rv32i_zicsr"])
+    else:
+        cmd.extend(["--define", "SIM_FAST_STORE_DRAIN"])
     run_checked(cmd, cwd=REPO_ROOT, timeout=300)
 
 
@@ -231,7 +233,7 @@ def build_verilator_command(
         "-DENABLE_MEM_SUBSYS=1",
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DENABLE_ROCC_ACCEL=0",
     ]
     if dcache_mode == "passthrough":
@@ -326,6 +328,23 @@ def format_summary(
 ) -> str:
     instret = int(summary.get("InstRetired", 0) or 0)
     global_ipc_vs_budget = (instret / budget_cycles) if budget_cycles else 0.0
+    preload_benchmark_pass = summary.get("PreloadBenchmarkPass")
+    if preload_benchmark_pass is None:
+        preload_benchmark_pass = (
+            mode == "preload"
+            and summary.get("ExitReason") == "done"
+            and bool(summary.get("EntryReached", False))
+            and bool(summary.get("BenchmarkStartSeen", False))
+            and bool(summary.get("BenchmarkDoneSeen", False))
+            and not bool(summary.get("TrapSeen", False))
+            and not bool(summary.get("UnexpectedUartSeen", False))
+            and int(summary.get("SpecMmioLoadViolationCount", 0) or 0) == 0
+        )
+    mode_pass_line = (
+        f"PreloadBenchmarkPass: {preload_benchmark_pass}"
+        if mode == "preload"
+        else f"LoaderSemanticPass: {summary.get('LoaderSemanticPass', False)}"
+    )
     lines = [
         f"Mode: {mode}",
         f"DCacheMode: {summary.get('DCacheMode', 'full')}",
@@ -339,7 +358,7 @@ def format_summary(
         f"EntryReached: {summary.get('EntryReached', False)}",
         f"BenchmarkStartSeen: {summary.get('BenchmarkStartSeen', False)}",
         f"BenchmarkDoneSeen: {summary.get('BenchmarkDoneSeen', False)}",
-        f"LoaderSemanticPass: {summary.get('LoaderSemanticPass', False)}",
+        mode_pass_line,
         f"TrapSeen: {summary.get('TrapSeen', False)}",
         f"TrapCause: {summary.get('TrapCause', 0)}",
         f"Cycles: {summary.get('Cycles', 0)}",
@@ -459,14 +478,14 @@ def format_summary(
         f"UnexpectedUartLsuReq: valid={summary.get('UnexpectedUartLsuReqValid', False)} accept={summary.get('UnexpectedUartLsuReqAccept', False)} order={summary.get('UnexpectedUartLsuReqOrderId', 0)} tag={summary.get('UnexpectedUartLsuReqTag', 0)} addr=0x{int(summary.get('UnexpectedUartLsuReqAddr', 0)):08X} wdata=0x{int(summary.get('UnexpectedUartLsuReqWdata', 0)):08X} func3={summary.get('UnexpectedUartLsuReqFunc3', 0)} wen={summary.get('UnexpectedUartLsuReqWen', False)}",
         f"UnexpectedUartM1Req: valid={summary.get('UnexpectedUartM1ReqValid', False)} ready={summary.get('UnexpectedUartM1ReqReady', False)} addr=0x{int(summary.get('UnexpectedUartM1ReqAddr', 0)):08X} wdata=0x{int(summary.get('UnexpectedUartM1ReqWdata', 0)):08X} wen=0x{int(summary.get('UnexpectedUartM1ReqWen', 0)):X} write={summary.get('UnexpectedUartM1ReqWrite', False)}",
         f"UnexpectedUartWB: wb0_valid={summary.get('UnexpectedUartWb0Valid', False)} wb0_tag={summary.get('UnexpectedUartWb0Tag', 0)} wb0_data=0x{int(summary.get('UnexpectedUartWb0Data', 0)):08X} wb1_valid={summary.get('UnexpectedUartWb1Valid', False)} wb1_tag={summary.get('UnexpectedUartWb1Tag', 0)} wb1_fu={summary.get('UnexpectedUartWb1Fu', 0)} wb1_data=0x{int(summary.get('UnexpectedUartWb1Data', 0)):08X}",
-        f"BadUartStoreSeen: {summary.get('BadUartStoreSeen', False)}",
-        f"BadUartStoreCycle: {summary.get('BadUartStoreCycle', 0)}",
-        f"BadUartStore: pc=0x{int(summary.get('BadUartStorePc', 0)):08X} addr=0x{int(summary.get('BadUartStoreAddr', 0)):08X} op_a=0x{int(summary.get('BadUartStoreOpA', 0)):08X} op_b=0x{int(summary.get('BadUartStoreOpB', 0)):08X} imm=0x{int(summary.get('BadUartStoreImm', 0)):08X} order={summary.get('BadUartStoreOrderId', 0)} tag={summary.get('BadUartStoreTag', 0)} func3={summary.get('BadUartStoreFunc3', 0)} tid={summary.get('BadUartStoreTid', 0)}",
-        f"BadUartStoreSrc: rd=x{summary.get('BadUartStoreRd', 0)} rs1=x{summary.get('BadUartStoreRs1', 0)}/p{summary.get('BadUartStorePrs1', 0)}/tag{summary.get('BadUartStoreSrc1Tag', 0)} rs2=x{summary.get('BadUartStoreRs2', 0)}/p{summary.get('BadUartStorePrs2', 0)}/tag{summary.get('BadUartStoreSrc2Tag', 0)}",
-        f"BadUartStoreDataSrc: prf_a=0x{int(summary.get('BadUartStorePrfA', 0)):08X} prf_b=0x{int(summary.get('BadUartStorePrfB', 0)):08X} tagbuf_a={summary.get('BadUartStoreTagbufAValid', False)}:0x{int(summary.get('BadUartStoreTagbufAData', 0)):08X} tagbuf_b={summary.get('BadUartStoreTagbufBValid', False)}:0x{int(summary.get('BadUartStoreTagbufBData', 0)):08X} fwd_a={summary.get('BadUartStoreFwdA', 0)} fwd_b={summary.get('BadUartStoreFwdB', 0)}",
-        f"BadUartStoreSrc2LastWriter: pc=0x{int(summary.get('BadUartStoreSrc2LastPc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastData', 0)):08X} order={summary.get('BadUartStoreSrc2LastOrderId', 0)} tag={summary.get('BadUartStoreSrc2LastTag', 0)} rd=x{summary.get('BadUartStoreSrc2LastRd', 0)} fu={summary.get('BadUartStoreSrc2LastFu', 0)}",
-        f"BadUartStoreSrc2WriterSrc1: p{summary.get('BadUartStoreSrc2LastSrc1Prs', 0)} last_pc=0x{int(summary.get('BadUartStoreSrc2LastSrc1Pc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastSrc1Data', 0)):08X} order={summary.get('BadUartStoreSrc2LastSrc1OrderId', 0)} tag={summary.get('BadUartStoreSrc2LastSrc1Tag', 0)} rd=x{summary.get('BadUartStoreSrc2LastSrc1Rd', 0)} fu={summary.get('BadUartStoreSrc2LastSrc1Fu', 0)}",
-        f"BadUartStoreSrc2WriterSrc1Src1: p{summary.get('BadUartStoreSrc2LastSrc1Src1Prs', 0)} last_pc=0x{int(summary.get('BadUartStoreSrc2LastSrc1Src1Pc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastSrc1Src1Data', 0)):08X} order={summary.get('BadUartStoreSrc2LastSrc1Src1OrderId', 0)} tag={summary.get('BadUartStoreSrc2LastSrc1Src1Tag', 0)} rd=x{summary.get('BadUartStoreSrc2LastSrc1Src1Rd', 0)} fu={summary.get('BadUartStoreSrc2LastSrc1Src1Fu', 0)}",
+        f"UartTxStoreProbeCaptured: {summary.get('BadUartStoreSeen', False)}",
+        f"UartTxStoreProbeCycle: {summary.get('BadUartStoreCycle', 0)}",
+        f"UartTxStoreProbe: pc=0x{int(summary.get('BadUartStorePc', 0)):08X} addr=0x{int(summary.get('BadUartStoreAddr', 0)):08X} op_a=0x{int(summary.get('BadUartStoreOpA', 0)):08X} op_b=0x{int(summary.get('BadUartStoreOpB', 0)):08X} imm=0x{int(summary.get('BadUartStoreImm', 0)):08X} order={summary.get('BadUartStoreOrderId', 0)} tag={summary.get('BadUartStoreTag', 0)} func3={summary.get('BadUartStoreFunc3', 0)} tid={summary.get('BadUartStoreTid', 0)}",
+        f"UartTxStoreProbeSrc: rd=x{summary.get('BadUartStoreRd', 0)} rs1=x{summary.get('BadUartStoreRs1', 0)}/p{summary.get('BadUartStorePrs1', 0)}/tag{summary.get('BadUartStoreSrc1Tag', 0)} rs2=x{summary.get('BadUartStoreRs2', 0)}/p{summary.get('BadUartStorePrs2', 0)}/tag{summary.get('BadUartStoreSrc2Tag', 0)}",
+        f"UartTxStoreProbeDataSrc: prf_a=0x{int(summary.get('BadUartStorePrfA', 0)):08X} prf_b=0x{int(summary.get('BadUartStorePrfB', 0)):08X} tagbuf_a={summary.get('BadUartStoreTagbufAValid', False)}:0x{int(summary.get('BadUartStoreTagbufAData', 0)):08X} tagbuf_b={summary.get('BadUartStoreTagbufBValid', False)}:0x{int(summary.get('BadUartStoreTagbufBData', 0)):08X} fwd_a={summary.get('BadUartStoreFwdA', 0)} fwd_b={summary.get('BadUartStoreFwdB', 0)}",
+        f"UartTxStoreProbeSrc2LastWriter: pc=0x{int(summary.get('BadUartStoreSrc2LastPc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastData', 0)):08X} order={summary.get('BadUartStoreSrc2LastOrderId', 0)} tag={summary.get('BadUartStoreSrc2LastTag', 0)} rd=x{summary.get('BadUartStoreSrc2LastRd', 0)} fu={summary.get('BadUartStoreSrc2LastFu', 0)}",
+        f"UartTxStoreProbeSrc2WriterSrc1: p{summary.get('BadUartStoreSrc2LastSrc1Prs', 0)} last_pc=0x{int(summary.get('BadUartStoreSrc2LastSrc1Pc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastSrc1Data', 0)):08X} order={summary.get('BadUartStoreSrc2LastSrc1OrderId', 0)} tag={summary.get('BadUartStoreSrc2LastSrc1Tag', 0)} rd=x{summary.get('BadUartStoreSrc2LastSrc1Rd', 0)} fu={summary.get('BadUartStoreSrc2LastSrc1Fu', 0)}",
+        f"UartTxStoreProbeSrc2WriterSrc1Src1: p{summary.get('BadUartStoreSrc2LastSrc1Src1Prs', 0)} last_pc=0x{int(summary.get('BadUartStoreSrc2LastSrc1Src1Pc', 0)):08X} data=0x{int(summary.get('BadUartStoreSrc2LastSrc1Src1Data', 0)):08X} order={summary.get('BadUartStoreSrc2LastSrc1Src1OrderId', 0)} tag={summary.get('BadUartStoreSrc2LastSrc1Src1Tag', 0)} rd=x{summary.get('BadUartStoreSrc2LastSrc1Src1Rd', 0)} fu={summary.get('BadUartStoreSrc2LastSrc1Src1Fu', 0)}",
         f"StrcpyMvSeen: {summary.get('StrcpyMvSeen', False)}",
         f"StrcpyMvCycle: {summary.get('StrcpyMvCycle', 0)}",
         f"StrcpyMv: pc=0x{int(summary.get('StrcpyMvPc', 0)):08X} op_a=0x{int(summary.get('StrcpyMvOpA', 0)):08X} op_b=0x{int(summary.get('StrcpyMvOpB', 0)):08X} order={summary.get('StrcpyMvOrderId', 0)} tag={summary.get('StrcpyMvTag', 0)} tid={summary.get('StrcpyMvTid', 0)} rd=x{summary.get('StrcpyMvRd', 0)}/p{summary.get('StrcpyMvPrd', 0)}",

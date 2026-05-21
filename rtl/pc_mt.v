@@ -1,99 +1,63 @@
 // pc_mt.v
-// Multi-Thread PC Manager (N_T=2 threads)
-// Each thread maintains its own pc and pc_next.
-// Output is the PC/TID of the thread selected by fetch_tid.
+// Single-Thread PC Manager
+// Maintains pc and pc_next for the single thread.
 
-module pc_mt #(
-    parameter N_T             = 2,
-    parameter THREAD1_BOOT_PC = 32'h00000800  // Thread 1 boot address (default: word 512 in IROM)
-)(
+module pc_mt(
     input  wire          clk,
     input  wire          rstn,
 
-    // Per-thread branch redirect
-    input  wire [N_T-1:0] br_ctrl,          // [t] = branch taken for thread t
-    input  wire [31:0]    br_addr_t0,       // branch target for thread 0
-    input  wire [31:0]    br_addr_t1,       // branch target for thread 1
+    // Branch redirect
+    input  wire          br_ctrl,
+    input  wire [31:0]   br_addr,
 
-    // Per-thread predicted redirect for the fetch just launched.
-    input  wire [N_T-1:0] pred_ctrl,         // [t] = predicted taken for thread t
-    input  wire [31:0]    pred_addr_t0,
-    input  wire [31:0]    pred_addr_t1,
+    // Predicted redirect for the fetch just launched
+    input  wire          pred_ctrl,
+    input  wire [31:0]   pred_addr,
 
-    // Per-thread stall / flush
-    input  wire [N_T-1:0] pc_stall,         // [t] = stall PC of thread t
-    input  wire [N_T-1:0] flush,            // [t] = flush (branch misprediction) for thread t
-    input  wire [N_T-1:0] pc_advance,       // [t] = fetch request launched for thread t
+    // Stall / advance
+    input  wire          pc_stall,
+    input  wire          pc_advance,
 
-    // Thread scheduler selects which thread fetches this cycle
-    input  wire [0:0]     fetch_tid,
-
-    // Outputs: the PC and TID sent to IF stage
-    output reg  [31:0]    if_pc,
-    output reg  [0:0]     if_tid
+    // Outputs: the PC sent to IF stage
+    output reg  [31:0]   if_pc
 );
 
-reg [31:0] pc      [0:N_T-1];
-reg [31:0] pc_next [0:N_T-1];
+reg [31:0] pc;
+reg [31:0] pc_next;
 
-wire [31:0] br_addr [0:N_T-1];
-assign br_addr[0] = br_addr_t0;
-assign br_addr[1] = br_addr_t1;
-wire [31:0] pred_addr [0:N_T-1];
-assign pred_addr[0] = pred_addr_t0;
-assign pred_addr[1] = pred_addr_t1;
-
-integer t;
-
-// -----------------------------------------------------------
-// Per-thread PC update
-// -----------------------------------------------------------
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
 `ifdef VERILATOR_MAINLINE_PRELOAD_BOOT
-        pc[0]      <= 32'h80000000;
-        pc_next[0] <= 32'h80000004;
-        pc[1]      <= THREAD1_BOOT_PC;
-        pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+        pc      <= 32'h80000000;
+        pc_next <= 32'h80000004;
 `else
-        pc[0]      <= 32'h00000000;
-        pc_next[0] <= 32'h00000004;
-        pc[1]      <= THREAD1_BOOT_PC;
-        pc_next[1] <= THREAD1_BOOT_PC + 32'h4;
+        pc      <= 32'h00000000;
+        pc_next <= 32'h00000004;
 `endif
     end
     else begin
-        for (t = 0; t < N_T; t = t + 1) begin
-            if (br_ctrl[t]) begin
-                pc[t]      <= br_addr[t];
-                pc_next[t] <= br_addr[t] + 32'h4;
+        if (br_ctrl) begin
+            pc      <= br_addr;
+            pc_next <= br_addr + 32'h4;
+        end
+        else if (pc_stall) begin
+            pc      <= pc;
+            pc_next <= pc_next;
+        end
+        else if (pc_advance) begin
+            if (pred_ctrl) begin
+                pc      <= pred_addr;
+                pc_next <= pred_addr + 32'h4;
+            end else begin
+                pc      <= pc_next;
+                pc_next <= pc_next + 32'h4;
             end
-            else if (pc_stall[t]) begin
-                // hold
-                pc[t]      <= pc[t];
-                pc_next[t] <= pc_next[t];
-            end
-            else if (pc_advance[t]) begin
-                // Advance only when IF actually launches a fetch for this thread.
-                if (pred_ctrl[t]) begin
-                    pc[t]      <= pred_addr[t];
-                    pc_next[t] <= pred_addr[t] + 32'h4;
-                end else begin
-                    pc[t]      <= pc_next[t];
-                    pc_next[t] <= pc_next[t] + 32'h4;
-                end
-            end
-            // else: not selected this cycle, hold
         end
     end
 end
 
-// -----------------------------------------------------------
-// Output: combinatorial mux on fetch_tid
-// -----------------------------------------------------------
 always @(*) begin
-    if_pc  = pc[fetch_tid];
-    if_tid = fetch_tid;
+    if_pc = pc;
 end
 
 endmodule

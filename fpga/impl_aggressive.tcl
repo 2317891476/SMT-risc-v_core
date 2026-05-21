@@ -9,15 +9,30 @@ set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/
 set project_name "adam_riscv_ax7203"
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
-set impl_jobs [ax7203_env_or_default AX7203_IMPL_JOBS 4]
+set impl_jobs [ax7203_vivado_jobs AX7203_IMPL_JOBS]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
 set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 48] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
 set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
 set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
+set opt_directive [ax7203_env_or_default AX7203_IMPL_OPT_DIRECTIVE "Explore"]
+set place_directive [ax7203_env_or_default AX7203_IMPL_PLACE_DIRECTIVE "ExtraNetDelay_high"]
+set phys_opt_directive [ax7203_env_or_default AX7203_IMPL_PHYS_OPT_DIRECTIVE "AggressiveExplore"]
+set route_directive [ax7203_env_or_default AX7203_IMPL_ROUTE_DIRECTIVE "Explore"]
+set skip_pre_route_physopt [expr {[ax7203_env_or_default AX7203_IMPL_SKIP_PRE_ROUTE_PHYSOPT 0] + 0}]
+set skip_post_route_physopt [expr {[ax7203_env_or_default AX7203_IMPL_SKIP_POST_ROUTE_PHYSOPT 0] + 0}]
+set skip_final_reports [expr {[ax7203_env_or_default AX7203_IMPL_SKIP_FINAL_REPORTS 0] + 0}]
+
+proc ax7203_run_directive {cmd directive} {
+    set full_cmd $cmd
+    if {$directive ne "" && ![string equal -nocase $directive "default"]} {
+        lappend full_cmd -directive $directive
+    }
+    uplevel 1 $full_cmd
+}
 
 set report_dir "$project_dir/reports"
 set checkpoint_dir "$project_dir/checkpoints"
@@ -40,7 +55,7 @@ set ddr3_xdc "$script_dir/constraints/ax7203_ddr3.xdc"
 set clk_wiz_board_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0_board.xdc"
 set clk_wiz_timing_xdc "$project_dir/${project_name}.gen/sources_1/ip/clk_wiz_0/clk_wiz_0.xdc"
 
-catch {set_param general.maxThreads $impl_jobs}
+ax7203_apply_vivado_threads $impl_jobs
 
 puts "Opening synthesized checkpoint: $synth_checkpoint"
 open_checkpoint $synth_checkpoint
@@ -68,20 +83,35 @@ puts "RS depth: $rs_depth"
 puts "Fetch buffer depth: $fetch_buffer_depth"
 puts "Core clock: ${core_clk_mhz} MHz"
 puts "UART clock divider: $uart_clk_div"
-puts "Phase 1: opt_design -directive Explore"
-opt_design -directive Explore
+puts "Opt directive: $opt_directive"
+puts "Place directive: $place_directive"
+puts "PhysOpt directive: $phys_opt_directive"
+puts "Route directive: $route_directive"
+puts "Skip pre-route phys_opt_design: $skip_pre_route_physopt"
+puts "Skip post-route phys_opt_design: $skip_post_route_physopt"
+puts "Skip final reports: $skip_final_reports"
+puts "Phase 1: opt_design directive=$opt_directive"
+ax7203_run_directive [list opt_design] $opt_directive
 
-puts "Phase 2: place_design -directive ExtraNetDelay_high"
-place_design -directive ExtraNetDelay_high
+puts "Phase 2: place_design directive=$place_directive"
+ax7203_run_directive [list place_design] $place_directive
 
-puts "Phase 3: phys_opt_design -directive AggressiveExplore"
-phys_opt_design -directive AggressiveExplore
+if {$skip_pre_route_physopt} {
+    puts "Phase 3: pre-route phys_opt_design skipped by AX7203_IMPL_SKIP_PRE_ROUTE_PHYSOPT"
+} else {
+    puts "Phase 3: phys_opt_design directive=$phys_opt_directive"
+    ax7203_run_directive [list phys_opt_design] $phys_opt_directive
+}
 
-puts "Phase 4: route_design -directive Explore"
-route_design -directive Explore
+puts "Phase 4: route_design directive=$route_directive"
+ax7203_run_directive [list route_design] $route_directive
 
-puts "Phase 5: phys_opt_design (post-route)"
-phys_opt_design
+if {$skip_post_route_physopt} {
+    puts "Phase 5: post-route phys_opt_design skipped by AX7203_IMPL_SKIP_POST_ROUTE_PHYSOPT"
+} else {
+    puts "Phase 5: phys_opt_design (post-route)"
+    phys_opt_design
+}
 
 set unrouted_nets [get_nets -hier -quiet -filter {ROUTE_STATUS == "UNROUTED"}]
 if {[llength $unrouted_nets] > 0} {
@@ -92,14 +122,12 @@ if {[llength $unrouted_nets] > 0} {
     route_design -nets $unrouted_nets
 
     puts "Phase 7: post-repair phys_opt_design"
-    phys_opt_design
+    if {$skip_post_route_physopt} {
+        puts "Phase 7: post-repair phys_opt_design skipped by AX7203_IMPL_SKIP_POST_ROUTE_PHYSOPT"
+    } else {
+        phys_opt_design
+    }
 }
-
-report_route_status -file $report_dir/route_status_aggressive.rpt
-
-report_timing_summary -file $report_dir/timing_summary_aggressive.rpt -max_paths 10
-report_timing -file $report_dir/timing_detail_aggressive.rpt -max_paths 20
-report_utilization -file $report_dir/utilization_aggressive.rpt
 
 set wns "NA"
 set whs "NA"
@@ -145,6 +173,15 @@ if {[llength $final_unrouted_nets] > 0} {
     write_checkpoint -force $aggressive_route_checkpoint
 }
 
+if {$skip_final_reports} {
+    puts "Final route/timing/utilization reports skipped by AX7203_IMPL_SKIP_FINAL_REPORTS."
+} else {
+    report_route_status -file $report_dir/route_status_aggressive.rpt
+    report_timing_summary -file $report_dir/timing_summary_aggressive.rpt -max_paths 10
+    report_timing -file $report_dir/timing_detail_aggressive.rpt -max_paths 20
+    report_utilization -file $report_dir/utilization_aggressive.rpt
+}
+
 set evidence_file "$script_dir/../.sisyphus/evidence/task-2c-impl-aggressive.log"
 ax7203_write_evidence $evidence_file [list \
     "AggressiveImplementation: $impl_status" \
@@ -159,6 +196,13 @@ ax7203_write_evidence $evidence_file [list \
     "FetchBufferDepth: $fetch_buffer_depth" \
     "CoreClkMHz: $core_clk_mhz" \
     "UartClkDiv: $uart_clk_div" \
+    "OptDirective: $opt_directive" \
+    "PlaceDirective: $place_directive" \
+    "PhysOptDirective: $phys_opt_directive" \
+    "RouteDirective: $route_directive" \
+    "SkipPreRoutePhysOpt: $skip_pre_route_physopt" \
+    "SkipPostRoutePhysOpt: $skip_post_route_physopt" \
+    "SkipFinalReports: $skip_final_reports" \
     "WNS: $wns" \
     "WHS: $whs" \
     "TimingSummaryAggressive: $report_dir/timing_summary_aggressive.rpt" \

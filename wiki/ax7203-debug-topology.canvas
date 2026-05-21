@@ -1,0 +1,86 @@
+{
+  "nodes": [
+    {
+      "id": "rtl",
+      "type": "text",
+      "text": "RTL single-thread baseline\nadam_riscv.v, dispatch, ROB, LSU, mem_subsys",
+      "x": -520,
+      "y": -120,
+      "width": 300,
+      "height": 140
+    },
+    {
+      "id": "sim",
+      "type": "text",
+      "text": "Icarus regression\nbasic + fpga-config + directed loader tests",
+      "x": -120,
+      "y": -220,
+      "width": 300,
+      "height": 120
+    },
+    {
+      "id": "vivado",
+      "type": "text",
+      "text": "Vivado 2023.2 only\nsynth OK, impl process failure under triage",
+      "x": -120,
+      "y": 20,
+      "width": 300,
+      "height": 120
+    },
+    {
+      "id": "board",
+      "type": "text",
+      "text": "AX7203 board\nCOM5 UART loader + JTAG + DDR3 Dhrystone",
+      "x": 280,
+      "y": -80,
+      "width": 300,
+      "height": 140
+    },
+    {
+      "id": "wiki",
+      "type": "text",
+      "text": "R1 wiki sync\nINDEX + concepts + append-only devlog",
+      "x": -120,
+      "y": 240,
+      "width": 300,
+      "height": 120
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "fromNode": "rtl",
+      "fromSide": "right",
+      "toNode": "sim",
+      "toSide": "left"
+    },
+    {
+      "id": "e2",
+      "fromNode": "rtl",
+      "fromSide": "right",
+      "toNode": "vivado",
+      "toSide": "left"
+    },
+    {
+      "id": "e3",
+      "fromNode": "vivado",
+      "fromSide": "right",
+      "toNode": "board",
+      "toSide": "left"
+    },
+    {
+      "id": "e4",
+      "fromNode": "rtl",
+      "fromSide": "bottom",
+      "toNode": "wiki",
+      "toSide": "left"
+    },
+    {
+      "id": "e5",
+      "fromNode": "vivado",
+      "fromSide": "bottom",
+      "toNode": "wiki",
+      "toSide": "top"
+    }
+  ]
+}

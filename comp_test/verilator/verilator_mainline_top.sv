@@ -391,10 +391,10 @@ module verilator_mainline_top (
     wire        debug_older_store_blocked_mmio_load_unused;
     wire [7:0]  debug_branch_issue_count_unused;
     wire [7:0]  debug_branch_complete_count_unused;
-    wire [4:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head[0];
-    wire [4:0]  rob_head_idx_t1 = u_dut.u_rob.rob_head[1];
-    wire [1:0]  sb_head_idx_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_head[0];
-    wire [1:0]  sb_head_idx_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_head[1];
+    wire [4:0]  rob_head_idx_t0 = u_dut.u_rob.rob_head;
+    wire [4:0]  rob_head_idx_t1 = 5'd0;
+    wire [1:0]  sb_head_idx_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_head;
+    wire [1:0]  sb_head_idx_t1 = 2'd0;
 
     adam_riscv u_dut (
         .sys_clk(sys_clk),
@@ -486,8 +486,8 @@ module verilator_mainline_top (
         .debug_uninit_read_count(mock_mem_uninit_read_count)
     );
 
-    assign debug_pc_t0 = u_dut.u_stage_if.u_pc_mt.pc[0];
-    assign debug_pc_t1 = u_dut.u_stage_if.u_pc_mt.pc[1];
+    assign debug_pc_t0 = u_dut.u_stage_if.u_pc_mt.pc;
+    assign debug_pc_t1 = 32'd0;
     assign debug_core_clk = u_dut.debug_core_clk;
     assign debug_fetch_pc_pending = u_dut.u_stage_if.fetch_pc_pending;
     assign debug_fetch_pc_out = u_dut.debug_fetch_pc_out;
@@ -536,24 +536,24 @@ module verilator_mainline_top (
     assign debug_rob_commit1_order_id = u_dut.rob_commit1_order_id;
     assign debug_rob_head_idx_t0 = rob_head_idx_t0;
     assign debug_rob_head_idx_t1 = rob_head_idx_t1;
-    assign debug_rob_head_valid_t0 = u_dut.u_rob.rob_valid[0][rob_head_idx_t0];
-    assign debug_rob_head_valid_t1 = u_dut.u_rob.rob_valid[1][rob_head_idx_t1];
-    assign debug_rob_head_complete_t0 = u_dut.u_rob.rob_complete[0][rob_head_idx_t0];
-    assign debug_rob_head_complete_t1 = u_dut.u_rob.rob_complete[1][rob_head_idx_t1];
-    assign debug_rob_head_pc_t0 = u_dut.u_rob.rob_pc[0][rob_head_idx_t0];
-    assign debug_rob_head_pc_t1 = u_dut.u_rob.rob_pc[1][rob_head_idx_t1];
-    assign debug_rob_head_order_id_t0 = u_dut.u_rob.rob_order_id[0][rob_head_idx_t0];
-    assign debug_rob_head_order_id_t1 = u_dut.u_rob.rob_order_id[1][rob_head_idx_t1];
-    assign debug_rob_head_tag_t0 = u_dut.u_rob.rob_tag[0][rob_head_idx_t0];
-    assign debug_rob_head_tag_t1 = u_dut.u_rob.rob_tag[1][rob_head_idx_t1];
-    assign debug_rob_head_is_store_t0 = u_dut.u_rob.rob_is_store[0][rob_head_idx_t0];
-    assign debug_rob_head_is_store_t1 = u_dut.u_rob.rob_is_store[1][rob_head_idx_t1];
-    assign debug_rob_head_flushed_t0 = u_dut.u_rob.rob_flushed[0][rob_head_idx_t0];
-    assign debug_rob_head_flushed_t1 = u_dut.u_rob.rob_flushed[1][rob_head_idx_t1];
-    assign debug_rob_count_t0 = u_dut.u_rob.rob_count[0];
-    assign debug_rob_count_t1 = u_dut.u_rob.rob_count[1];
+    assign debug_rob_head_valid_t0 = u_dut.u_rob.rob_valid[rob_head_idx_t0];
+    assign debug_rob_head_valid_t1 = 1'b0;
+    assign debug_rob_head_complete_t0 = u_dut.u_rob.rob_complete[rob_head_idx_t0];
+    assign debug_rob_head_complete_t1 = 1'b0;
+    assign debug_rob_head_pc_t0 = u_dut.u_rob.rob_pc[rob_head_idx_t0];
+    assign debug_rob_head_pc_t1 = 32'd0;
+    assign debug_rob_head_order_id_t0 = u_dut.u_rob.rob_order_id[rob_head_idx_t0];
+    assign debug_rob_head_order_id_t1 = 16'd0;
+    assign debug_rob_head_tag_t0 = u_dut.u_rob.rob_tag[rob_head_idx_t0];
+    assign debug_rob_head_tag_t1 = 6'd0;
+    assign debug_rob_head_is_store_t0 = u_dut.u_rob.rob_is_store[rob_head_idx_t0];
+    assign debug_rob_head_is_store_t1 = 1'b0;
+    assign debug_rob_head_flushed_t0 = u_dut.u_rob.rob_flushed[rob_head_idx_t0];
+    assign debug_rob_head_flushed_t1 = 1'b0;
+    assign debug_rob_count_t0 = u_dut.u_rob.rob_count;
+    assign debug_rob_count_t1 = 6'd0;
     assign debug_rob_recovering = u_dut.u_rob.recovering_r;
-    assign debug_rob_recover_tid = u_dut.u_rob.recover_tid_r;
+    assign debug_rob_recover_tid = 1'b0;
     assign debug_rob_recover_ptr = u_dut.u_rob.recover_ptr_r;
     assign debug_trap_seen = u_dut.trap_enter;
     assign debug_trap_cause = u_dut.u_csr_unit.mcause;
@@ -582,12 +582,12 @@ module verilator_mainline_top (
     assign debug_mem_cand_set = u_dut.u_dispatch_unit.mem_cand_set;
     assign debug_iq_mem_sel_found = u_dut.u_dispatch_unit.u_iq_mem.sel_found;
     assign debug_iq_mem_sel_idx = u_dut.u_dispatch_unit.u_iq_mem.sel_idx;
-    assign debug_iq_mem_oldest_store_valid_t0 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_valid_t0;
-    assign debug_iq_mem_oldest_store_valid_t1 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_valid_t1;
-    assign debug_iq_mem_oldest_store_order_id_t0 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_order_id_t0;
-    assign debug_iq_mem_oldest_store_order_id_t1 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_order_id_t1;
-    assign debug_iq_mem_store_count_t0 = u_dut.u_dispatch_unit.u_iq_mem.store_count_t0_r;
-    assign debug_iq_mem_store_count_t1 = u_dut.u_dispatch_unit.u_iq_mem.store_count_t1_r;
+    assign debug_iq_mem_oldest_store_valid_t0 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_valid;
+    assign debug_iq_mem_oldest_store_valid_t1 = 1'b0;
+    assign debug_iq_mem_oldest_store_order_id_t0 = u_dut.u_dispatch_unit.u_iq_mem.oldest_store_order_id;
+    assign debug_iq_mem_oldest_store_order_id_t1 = 16'd0;
+    assign debug_iq_mem_store_count_t0 = u_dut.u_dispatch_unit.u_iq_mem.store_count_r;
+    assign debug_iq_mem_store_count_t1 = 5'd0;
     assign debug_flush = u_dut.u_dispatch_unit.flush;
     assign debug_flush_tid = u_dut.u_dispatch_unit.flush_tid;
     assign debug_flush_order_valid = u_dut.u_dispatch_unit.flush_order_valid;
@@ -617,7 +617,7 @@ module verilator_mainline_top (
     assign debug_lsu_pending_tag = u_dut.u_lsu_shell.pending_tag;
     assign debug_lsu_pending_addr = u_dut.u_lsu_shell.pending_addr;
     assign debug_lsu_pending_wen = u_dut.u_lsu_shell.pending_wen;
-    assign debug_lsu_pending_tid = u_dut.u_lsu_shell.pending_tid;
+    assign debug_lsu_pending_tid = 1'b0;
     assign debug_lsu_m1_txn_is_drain = u_dut.u_lsu_shell.m1_txn_is_drain;
     assign debug_lsu_m1_cooldown = u_dut.u_lsu_shell.m1_cooldown_r;
     assign debug_lsu_cooldown_set = u_dut.u_lsu_shell.debug_lsu_cooldown_set;
@@ -646,14 +646,14 @@ module verilator_mainline_top (
     assign debug_store_buffer_count_t1 = u_dut.lsu_debug_store_buffer_count_t1;
     assign debug_sb_head_idx_t0 = sb_head_idx_t0;
     assign debug_sb_head_idx_t1 = sb_head_idx_t1;
-    assign debug_sb_head_valid_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_valid[0][sb_head_idx_t0];
-    assign debug_sb_head_valid_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_valid[1][sb_head_idx_t1];
-    assign debug_sb_head_committed_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_committed[0][sb_head_idx_t0];
-    assign debug_sb_head_committed_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_committed[1][sb_head_idx_t1];
-    assign debug_sb_head_order_id_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_order_id[0][sb_head_idx_t0];
-    assign debug_sb_head_order_id_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_order_id[1][sb_head_idx_t1];
-    assign debug_sb_head_addr_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_addr[0][sb_head_idx_t0];
-    assign debug_sb_head_addr_t1 = u_dut.u_lsu_shell.u_store_buffer.sb_addr[1][sb_head_idx_t1];
+    assign debug_sb_head_valid_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_valid[sb_head_idx_t0];
+    assign debug_sb_head_valid_t1 = 1'b0;
+    assign debug_sb_head_committed_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_committed[sb_head_idx_t0];
+    assign debug_sb_head_committed_t1 = 1'b0;
+    assign debug_sb_head_order_id_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_order_id[sb_head_idx_t0];
+    assign debug_sb_head_order_id_t1 = 16'd0;
+    assign debug_sb_head_addr_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_addr[sb_head_idx_t0];
+    assign debug_sb_head_addr_t1 = 32'd0;
     assign debug_m1_req_valid = u_dut.m1_req_valid;
     assign debug_m1_req_ready = u_dut.m1_req_ready;
     assign debug_m1_req_addr = u_dut.m1_req_addr;

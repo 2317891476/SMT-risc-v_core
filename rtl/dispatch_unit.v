@@ -28,7 +28,7 @@ module dispatch_unit #(
     parameter DIV_IQ_DEPTH = 4,
     parameter DIV_IQ_IDX_W = 2,
     parameter NUM_FU     = 8,
-    parameter NUM_THREAD = 2
+    parameter NUM_THREAD = 1
 )(
     input  wire        clk,
     input  wire        rstn,
@@ -571,8 +571,7 @@ assign branch_pending_any = pending_branch_t0 || pending_branch_t1;
 // IQ issue inhibit: Disabled — the branch dispatch stall is sufficient
 // to serialize branches. Instructions already in-flight can issue freely;
 // incorrect speculative results are flushed via epoch by the ROB.
-wire issue_inhibit_t0 = 1'b0;
-wire issue_inhibit_t1 = 1'b0;
+wire issue_inhibit_t0_wire = 1'b0;
 
 wire int_iss_flush_kill =
     flush && int_iss_valid && int_iss_br &&
@@ -842,7 +841,7 @@ wire        int_iss_mem_write;
 wire [1:0]  int_iss_alu_src1, int_iss_alu_src2;
 wire        int_iss_br_addr_mode, int_iss_regs_write;
 wire [2:0]  int_iss_fu;
-wire [0:0]  int_iss_tid;
+wire [0:0]  int_iss_tid = 1'b0;
 wire        int_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] int_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    int_iss_epoch;
@@ -862,14 +861,12 @@ wire        mem_iss_mem_write;
 wire [1:0]  mem_iss_alu_src1, mem_iss_alu_src2;
 wire        mem_iss_br_addr_mode, mem_iss_regs_write;
 wire [2:0]  mem_iss_fu;
-wire [0:0]  mem_iss_tid;
+wire [0:0]  mem_iss_tid = 1'b0;
 wire        mem_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] mem_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    mem_iss_epoch;
-wire                            mem_oldest_store_valid_t0;
-wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t0;
-wire                            mem_oldest_store_valid_t1;
-wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id_t1;
+wire                            mem_oldest_store_valid;
+wire [`METADATA_ORDER_ID_W-1:0] mem_oldest_store_order_id;
 wire                            iq_int_order_blocked_any;
 wire                            iq_mem_order_blocked_any;
 wire                            iq_mul_order_blocked_any;
@@ -932,7 +929,7 @@ wire        mul_iss_mem_write;
 wire [1:0]  mul_iss_alu_src1, mul_iss_alu_src2;
 wire        mul_iss_br_addr_mode, mul_iss_regs_write;
 wire [2:0]  mul_iss_fu;
-wire [0:0]  mul_iss_tid;
+wire [0:0]  mul_iss_tid = 1'b0;
 wire        mul_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] mul_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    mul_iss_epoch;
@@ -952,10 +949,33 @@ wire        div_iss_mem_write;
 wire [1:0]  div_iss_alu_src1, div_iss_alu_src2;
 wire        div_iss_br_addr_mode, div_iss_regs_write;
 wire [2:0]  div_iss_fu;
-wire [0:0]  div_iss_tid;
+wire [0:0]  div_iss_tid = 1'b0;
 wire        div_iss_is_mret;
 wire [`METADATA_ORDER_ID_W-1:0] div_iss_order_id;
 wire [`METADATA_EPOCH_W-1:0]    div_iss_epoch;
+
+wire iq_int_disp0_valid = iq_int_dp0_from1 ? (d1_go && d1_is_int) : (d0_go && d0_is_int);
+wire iq_int_disp1_valid = d0_go && d0_is_int && d1_go && d1_is_int;
+wire iq_mem_disp0_valid = iq_mem_dp0_from1 ? (d1_go && d1_is_mem) : (d0_go && d0_is_mem);
+wire iq_mem_disp1_valid = d0_go && d0_is_mem && d1_go && d1_is_mem;
+wire iq_mul_disp0_valid = iq_mul_dp0_from1 ? (d1_go && d1_is_mul) : (d0_go && d0_is_mul);
+wire iq_mul_disp1_valid = d0_go && d0_is_mul && d1_go && d1_is_mul;
+wire iq_div_disp0_valid = iq_div_dp0_from1 ? (d1_go && d1_is_div) : (d0_go && d0_is_div);
+wire iq_div_disp1_valid = d0_go && d0_is_div && d1_go && d1_is_div;
+
+wire [`METADATA_EPOCH_W-1:0] epoch_zero = {`METADATA_EPOCH_W{1'b0}};
+wire [`METADATA_EPOCH_W-1:0] iq_int_disp0_epoch = iq_int_disp0_valid ?
+    (iq_int_dp0_from1 ? disp1_epoch : disp0_epoch) : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_mem_disp0_epoch = iq_mem_disp0_valid ?
+    (iq_mem_dp0_from1 ? disp1_epoch : disp0_epoch) : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_mul_disp0_epoch = iq_mul_disp0_valid ?
+    (iq_mul_dp0_from1 ? disp1_epoch : disp0_epoch) : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_div_disp0_epoch = iq_div_disp0_valid ?
+    (iq_div_dp0_from1 ? disp1_epoch : disp0_epoch) : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_int_disp1_epoch = iq_int_disp1_valid ? disp1_epoch : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_mem_disp1_epoch = iq_mem_disp1_valid ? disp1_epoch : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_mul_disp1_epoch = iq_mul_disp1_valid ? disp1_epoch : epoch_zero;
+wire [`METADATA_EPOCH_W-1:0] iq_div_disp1_epoch = iq_div_disp1_valid ? disp1_epoch : epoch_zero;
 
 // ═════════════════════════════════════════════════════════════════
 // 8. Issue Queue — INT (8 entries, commit-time dealloc)
@@ -964,19 +984,19 @@ issue_queue #(
     .IQ_DEPTH  (INT_IQ_DEPTH),
     .IQ_IDX_W  (INT_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
-    .NUM_THREAD(NUM_THREAD),
+    // NUM_THREAD removed (single-thread)
     .WAKE_HOLD (0),
     .DEALLOC_AT_COMMIT (1)
 ) u_iq_int (
     .clk        (clk),
     .rstn       (rstn),
     .flush      (flush),
-    .flush_tid  (flush_tid),
+    // tid ports removed (single-thread)
     .flush_new_epoch (flush_new_epoch),
     .flush_order_valid (flush_order_valid),
     .flush_order_id    (flush_order_id),
     // Dispatch 0 — from disp0 if INT, else from disp1 if INT
-    .disp0_valid       (iq_int_dp0_from1 ? (d1_go && d1_is_int) : (d0_go && d0_is_int)),
+    .disp0_valid       (iq_int_disp0_valid),
     .disp0_tag         (iq_int_dp0_from1 ? free1_tag   : free0_tag),
     .disp0_pc          (iq_int_dp0_from1 ? disp1_pc    : disp0_pc),
     .disp0_imm         (iq_int_dp0_from1 ? disp1_imm   : disp0_imm),
@@ -984,10 +1004,10 @@ issue_queue #(
     .disp0_func7       (iq_int_dp0_from1 ? disp1_func7 : disp0_func7),
     .disp0_rd          (iq_int_dp0_from1 ? disp1_rd    : disp0_rd),
     .disp0_br          (iq_int_dp0_from1 ? disp1_br    : disp0_br),
-    .disp0_mem_read    (iq_int_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
-    .disp0_mem2reg     (iq_int_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_mem_read    (1'b0),
+    .disp0_mem2reg     (1'b0),
     .disp0_alu_op      (iq_int_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
-    .disp0_mem_write   (iq_int_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_mem_write   (1'b0),
     .disp0_alu_src1    (iq_int_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
     .disp0_alu_src2    (iq_int_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
     .disp0_br_addr_mode(iq_int_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
@@ -996,18 +1016,18 @@ issue_queue #(
     .disp0_rs2         (iq_int_dp0_from1 ? disp1_rs2   : disp0_rs2),
     .disp0_rs1_used    (iq_int_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
     .disp0_rs2_used    (iq_int_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
-    .disp0_fu          (iq_int_dp0_from1 ? disp1_fu    : disp0_fu),
-    .disp0_tid         (iq_int_dp0_from1 ? disp1_tid   : disp0_tid),
+    .disp0_fu          (`FU_INT0),
+    // disp0_tid removed
     .disp0_is_mret     (iq_int_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
     .disp0_side_effect (iq_int_dp0_from1 ? d1_side_effect     : d0_side_effect),
     .disp0_order_id    (iq_int_dp0_from1 ? disp1_order_id    : disp0_order_id),
-    .disp0_epoch       (iq_int_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_epoch       (iq_int_disp0_epoch),
     .disp0_src1_tag    (iq_int_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_int_dp0_from1 ? d1_src2   : d0_src2),
     .disp0_src1_order_id(iq_int_dp0_from1 ? d1_src1_order : d0_src1_order),
     .disp0_src2_order_id(iq_int_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1 — only when both disp0 and disp1 are INT
-    .disp1_valid       (d0_go && d0_is_int && d1_go && d1_is_int),
+    .disp1_valid       (iq_int_disp1_valid),
     .disp1_tag         (free1_tag),
     .disp1_pc          (disp1_pc),
     .disp1_imm         (disp1_imm),
@@ -1015,10 +1035,10 @@ issue_queue #(
     .disp1_func7       (disp1_func7),
     .disp1_rd          (disp1_rd),
     .disp1_br          (disp1_br),
-    .disp1_mem_read    (disp1_mem_read),
-    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_mem_read    (1'b0),
+    .disp1_mem2reg     (1'b0),
     .disp1_alu_op      (disp1_alu_op),
-    .disp1_mem_write   (disp1_mem_write),
+    .disp1_mem_write   (1'b0),
     .disp1_alu_src1    (disp1_alu_src1),
     .disp1_alu_src2    (disp1_alu_src2),
     .disp1_br_addr_mode(disp1_br_addr_mode),
@@ -1027,12 +1047,12 @@ issue_queue #(
     .disp1_rs2         (disp1_rs2),
     .disp1_rs1_used    (disp1_rs1_used),
     .disp1_rs2_used    (disp1_rs2_used),
-    .disp1_fu          (disp1_fu),
-    .disp1_tid         (disp1_tid),
+    .disp1_fu          (`FU_INT0),
+    // disp1_tid removed
     .disp1_is_mret     (disp1_is_mret),
     .disp1_side_effect (d1_side_effect),
     .disp1_order_id    (disp1_order_id),
-    .disp1_epoch       (disp1_epoch),
+    .disp1_epoch       (iq_int_disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
     .disp1_src1_order_id(d1_src1_order),
@@ -1064,19 +1084,19 @@ issue_queue #(
     .iss_br_addr_mode(int_iss_br_addr_mode),
     .iss_regs_write  (int_iss_regs_write),
     .iss_fu          (int_iss_fu),
-    .iss_tid         (int_iss_tid),
+    // iss_tid removed
     .iss_is_mret     (int_iss_is_mret),
     .iss_order_id    (int_iss_order_id),
     .iss_epoch       (int_iss_epoch),
     // Wakeup
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
-    .wb0_tid         (wb0_tid),
+    // wb0_tid removed
     .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
-    .wb1_tid         (wb1_tid),
+    // wb1_tid removed
     .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .early_wakeup_valid(lsu_early_wakeup_valid),
@@ -1084,31 +1104,22 @@ issue_queue #(
     // Commit
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
-    .commit0_tid     (commit0_tid),
+    // commit0_tid removed
     .commit0_order_id(commit0_order_id),
     .commit1_valid   (commit1_valid),
     .commit1_tag     (commit1_tag),
-    .commit1_tid     (commit1_tid),
+    // commit1_tid removed
     .commit1_order_id(commit1_order_id),
-    .older_store_valid_t0   (mem_oldest_store_valid_t0),
-    .older_store_order_id_t0(mem_oldest_store_order_id_t0),
-    .older_store_valid_t1   (mem_oldest_store_valid_t1),
-    .older_store_order_id_t1(mem_oldest_store_order_id_t1),
+    .older_store_valid   (mem_oldest_store_valid),
+    .older_store_order_id(mem_oldest_store_order_id),
     // Issue inhibit
-    .issue_inhibit_t0(issue_inhibit_t0),
-    .issue_inhibit_t1(issue_inhibit_t1),
-    .issue_after_order_block_valid_t0(pending_branch_t0),
-    .issue_after_order_block_id_t0(pending_branch_order_id_t0),
-    .issue_after_order_block_valid_t1(pending_branch_t1),
-    .issue_after_order_block_id_t1(pending_branch_order_id_t1),
-    .issue_side_effect_block_valid_t0(pending_branch_t0),
-    .issue_side_effect_block_id_t0(pending_branch_order_id_t0),
-    .issue_side_effect_block_valid_t1(pending_branch_t1),
-    .issue_side_effect_block_id_t1(pending_branch_order_id_t1),
-    .oldest_store_valid_t0(),
-    .oldest_store_order_id_t0(),
-    .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1(),
+    .issue_inhibit(issue_inhibit_t0_wire),
+    .issue_after_order_block_valid(pending_branch_t0),
+    .issue_after_order_block_id(pending_branch_order_id_t0),
+    .issue_side_effect_block_valid(pending_branch_t0),
+    .issue_side_effect_block_id(pending_branch_order_id_t0),
+    .oldest_store_valid(),
+    .oldest_store_order_id(),
     .debug_order_blocked_any(iq_int_order_blocked_any),
     .debug_flush_killed_any(iq_int_flush_killed_any)
 );
@@ -1120,7 +1131,7 @@ issue_queue #(
     .IQ_DEPTH  (MEM_IQ_DEPTH),
     .IQ_IDX_W  (MEM_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
-    .NUM_THREAD(NUM_THREAD),
+    // NUM_THREAD removed (single-thread)
     .WAKE_HOLD (1),
     .DEALLOC_AT_COMMIT    (1),
     .CHECK_LOAD_STORE_ORDER (1)
@@ -1128,68 +1139,68 @@ issue_queue #(
     .clk        (clk),
     .rstn       (rstn),
     .flush      (flush),
-    .flush_tid  (flush_tid),
+    // tid ports removed (single-thread)
     .flush_new_epoch (flush_new_epoch),
     .flush_order_valid (flush_order_valid),
     .flush_order_id    (flush_order_id),
     // Dispatch 0
-    .disp0_valid       (iq_mem_dp0_from1 ? (d1_go && d1_is_mem) : (d0_go && d0_is_mem)),
+    .disp0_valid       (iq_mem_disp0_valid),
     .disp0_tag         (iq_mem_dp0_from1 ? free1_tag   : free0_tag),
     .disp0_pc          (iq_mem_dp0_from1 ? disp1_pc    : disp0_pc),
     .disp0_imm         (iq_mem_dp0_from1 ? disp1_imm   : disp0_imm),
     .disp0_func3       (iq_mem_dp0_from1 ? disp1_func3 : disp0_func3),
     .disp0_func7       (iq_mem_dp0_from1 ? disp1_func7 : disp0_func7),
-    .disp0_rd          (iq_mem_dp0_from1 ? disp1_rd    : disp0_rd),
-    .disp0_br          (iq_mem_dp0_from1 ? disp1_br    : disp0_br),
+    .disp0_rd          (5'd0),
+    .disp0_br          (1'b0),
     .disp0_mem_read    (iq_mem_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
     .disp0_mem2reg     (iq_mem_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
     .disp0_alu_op      (iq_mem_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
     .disp0_mem_write   (iq_mem_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
     .disp0_alu_src1    (iq_mem_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
     .disp0_alu_src2    (iq_mem_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
-    .disp0_br_addr_mode(iq_mem_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_br_addr_mode(1'b0),
     .disp0_regs_write  (iq_mem_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
-    .disp0_rs1         (iq_mem_dp0_from1 ? disp1_rs1   : disp0_rs1),
-    .disp0_rs2         (iq_mem_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1         (5'd0),
+    .disp0_rs2         (5'd0),
     .disp0_rs1_used    (iq_mem_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
     .disp0_rs2_used    (iq_mem_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
-    .disp0_fu          (iq_mem_dp0_from1 ? disp1_fu    : disp0_fu),
-    .disp0_tid         (iq_mem_dp0_from1 ? disp1_tid   : disp0_tid),
-    .disp0_is_mret     (iq_mem_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_fu          ((iq_mem_dp0_from1 ? disp1_mem_read : disp0_mem_read) ? `FU_LOAD : `FU_STORE),
+    // disp0_tid removed
+    .disp0_is_mret     (1'b0),
     .disp0_side_effect (iq_mem_dp0_from1 ? d1_side_effect     : d0_side_effect),
     .disp0_order_id    (iq_mem_dp0_from1 ? disp1_order_id    : disp0_order_id),
-    .disp0_epoch       (iq_mem_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_epoch       (iq_mem_disp0_epoch),
     .disp0_src1_tag    (iq_mem_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_mem_dp0_from1 ? d1_src2   : d0_src2),
     .disp0_src1_order_id(iq_mem_dp0_from1 ? d1_src1_order : d0_src1_order),
     .disp0_src2_order_id(iq_mem_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
-    .disp1_valid       (d0_go && d0_is_mem && d1_go && d1_is_mem),
+    .disp1_valid       (iq_mem_disp1_valid),
     .disp1_tag         (free1_tag),
     .disp1_pc          (disp1_pc),
     .disp1_imm         (disp1_imm),
     .disp1_func3       (disp1_func3),
     .disp1_func7       (disp1_func7),
-    .disp1_rd          (disp1_rd),
-    .disp1_br          (disp1_br),
+    .disp1_rd          (5'd0),
+    .disp1_br          (1'b0),
     .disp1_mem_read    (disp1_mem_read),
     .disp1_mem2reg     (disp1_mem2reg),
     .disp1_alu_op      (disp1_alu_op),
     .disp1_mem_write   (disp1_mem_write),
     .disp1_alu_src1    (disp1_alu_src1),
     .disp1_alu_src2    (disp1_alu_src2),
-    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_br_addr_mode(1'b0),
     .disp1_regs_write  (disp1_regs_write),
-    .disp1_rs1         (disp1_rs1),
-    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1         (5'd0),
+    .disp1_rs2         (5'd0),
     .disp1_rs1_used    (disp1_rs1_used),
     .disp1_rs2_used    (disp1_rs2_used),
-    .disp1_fu          (disp1_fu),
-    .disp1_tid         (disp1_tid),
-    .disp1_is_mret     (disp1_is_mret),
+    .disp1_fu          (disp1_mem_read ? `FU_LOAD : `FU_STORE),
+    // disp1_tid removed
+    .disp1_is_mret     (1'b0),
     .disp1_side_effect (d1_side_effect),
     .disp1_order_id    (disp1_order_id),
-    .disp1_epoch       (disp1_epoch),
+    .disp1_epoch       (iq_mem_disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
     .disp1_src1_order_id(d1_src1_order),
@@ -1220,48 +1231,39 @@ issue_queue #(
     .iss_br_addr_mode(mem_iss_br_addr_mode),
     .iss_regs_write  (mem_iss_regs_write),
     .iss_fu          (mem_iss_fu),
-    .iss_tid         (mem_iss_tid),
+    // iss_tid removed
     .iss_is_mret     (mem_iss_is_mret),
     .iss_order_id    (mem_iss_order_id),
     .iss_epoch       (mem_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
-    .wb0_tid         (wb0_tid),
+    // wb0_tid removed
     .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
-    .wb1_tid         (wb1_tid),
+    // wb1_tid removed
     .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .early_wakeup_valid(lsu_early_wakeup_valid),
     .early_wakeup_tag(lsu_early_wakeup_tag),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
-    .commit0_tid     (commit0_tid),
+    // commit0_tid removed
     .commit0_order_id(commit0_order_id),
     .commit1_valid   (commit1_valid),
     .commit1_tag     (commit1_tag),
-    .commit1_tid     (commit1_tid),
+    // commit1_tid removed
     .commit1_order_id(commit1_order_id),
-    .older_store_valid_t0   (1'b0),
-    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .older_store_valid_t1   (1'b0),
-    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_inhibit_t0(mem_issue_inhibit),
-    .issue_inhibit_t1(mem_issue_inhibit),
-    .issue_after_order_block_valid_t0(1'b0),
-    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_after_order_block_valid_t1(1'b0),
-    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t0(1'b0),
-    .issue_side_effect_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t1(1'b0),
-    .issue_side_effect_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .oldest_store_valid_t0   (mem_oldest_store_valid_t0),
-    .oldest_store_order_id_t0(mem_oldest_store_order_id_t0),
-    .oldest_store_valid_t1   (mem_oldest_store_valid_t1),
-    .oldest_store_order_id_t1(mem_oldest_store_order_id_t1),
+    .older_store_valid   (1'b0),
+    .older_store_order_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_inhibit(mem_issue_inhibit),
+    .issue_after_order_block_valid(1'b0),
+    .issue_after_order_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_side_effect_block_valid(1'b0),
+    .issue_side_effect_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .oldest_store_valid   (mem_oldest_store_valid),
+    .oldest_store_order_id(mem_oldest_store_order_id),
     .debug_order_blocked_any(iq_mem_order_blocked_any),
     .debug_flush_killed_any(iq_mem_flush_killed_any)
 );
@@ -1273,75 +1275,75 @@ issue_queue #(
     .IQ_DEPTH  (MUL_IQ_DEPTH),
     .IQ_IDX_W  (MUL_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
-    .NUM_THREAD(NUM_THREAD),
+    // NUM_THREAD removed (single-thread)
     .WAKE_HOLD (0),
     .DEALLOC_AT_COMMIT (1)
 ) u_iq_mul (
     .clk        (clk),
     .rstn       (rstn),
     .flush      (flush),
-    .flush_tid  (flush_tid),
+    // tid ports removed (single-thread)
     .flush_new_epoch (flush_new_epoch),
     .flush_order_valid (flush_order_valid),
     .flush_order_id    (flush_order_id),
     // Dispatch 0
-    .disp0_valid       (iq_mul_dp0_from1 ? (d1_go && d1_is_mul) : (d0_go && d0_is_mul)),
+    .disp0_valid       (iq_mul_disp0_valid),
     .disp0_tag         (iq_mul_dp0_from1 ? free1_tag   : free0_tag),
     .disp0_pc          (iq_mul_dp0_from1 ? disp1_pc    : disp0_pc),
     .disp0_imm         (iq_mul_dp0_from1 ? disp1_imm   : disp0_imm),
     .disp0_func3       (iq_mul_dp0_from1 ? disp1_func3 : disp0_func3),
     .disp0_func7       (iq_mul_dp0_from1 ? disp1_func7 : disp0_func7),
-    .disp0_rd          (iq_mul_dp0_from1 ? disp1_rd    : disp0_rd),
-    .disp0_br          (iq_mul_dp0_from1 ? disp1_br    : disp0_br),
-    .disp0_mem_read    (iq_mul_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
-    .disp0_mem2reg     (iq_mul_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_rd          (5'd0),
+    .disp0_br          (1'b0),
+    .disp0_mem_read    (1'b0),
+    .disp0_mem2reg     (1'b0),
     .disp0_alu_op      (iq_mul_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
-    .disp0_mem_write   (iq_mul_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_mem_write   (1'b0),
     .disp0_alu_src1    (iq_mul_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
     .disp0_alu_src2    (iq_mul_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
-    .disp0_br_addr_mode(iq_mul_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_br_addr_mode(1'b0),
     .disp0_regs_write  (iq_mul_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
-    .disp0_rs1         (iq_mul_dp0_from1 ? disp1_rs1   : disp0_rs1),
-    .disp0_rs2         (iq_mul_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1         (5'd0),
+    .disp0_rs2         (5'd0),
     .disp0_rs1_used    (iq_mul_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
     .disp0_rs2_used    (iq_mul_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
-    .disp0_fu          (iq_mul_dp0_from1 ? disp1_fu    : disp0_fu),
-    .disp0_tid         (iq_mul_dp0_from1 ? disp1_tid   : disp0_tid),
-    .disp0_is_mret     (iq_mul_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_fu          (`FU_MUL),
+    // disp0_tid removed
+    .disp0_is_mret     (1'b0),
     .disp0_side_effect (iq_mul_dp0_from1 ? d1_side_effect     : d0_side_effect),
     .disp0_order_id    (iq_mul_dp0_from1 ? disp1_order_id    : disp0_order_id),
-    .disp0_epoch       (iq_mul_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_epoch       (iq_mul_disp0_epoch),
     .disp0_src1_tag    (iq_mul_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_mul_dp0_from1 ? d1_src2   : d0_src2),
     .disp0_src1_order_id(iq_mul_dp0_from1 ? d1_src1_order : d0_src1_order),
     .disp0_src2_order_id(iq_mul_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
-    .disp1_valid       (d0_go && d0_is_mul && d1_go && d1_is_mul),
+    .disp1_valid       (iq_mul_disp1_valid),
     .disp1_tag         (free1_tag),
     .disp1_pc          (disp1_pc),
     .disp1_imm         (disp1_imm),
     .disp1_func3       (disp1_func3),
     .disp1_func7       (disp1_func7),
-    .disp1_rd          (disp1_rd),
-    .disp1_br          (disp1_br),
-    .disp1_mem_read    (disp1_mem_read),
-    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_rd          (5'd0),
+    .disp1_br          (1'b0),
+    .disp1_mem_read    (1'b0),
+    .disp1_mem2reg     (1'b0),
     .disp1_alu_op      (disp1_alu_op),
-    .disp1_mem_write   (disp1_mem_write),
+    .disp1_mem_write   (1'b0),
     .disp1_alu_src1    (disp1_alu_src1),
     .disp1_alu_src2    (disp1_alu_src2),
-    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_br_addr_mode(1'b0),
     .disp1_regs_write  (disp1_regs_write),
-    .disp1_rs1         (disp1_rs1),
-    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1         (5'd0),
+    .disp1_rs2         (5'd0),
     .disp1_rs1_used    (disp1_rs1_used),
     .disp1_rs2_used    (disp1_rs2_used),
-    .disp1_fu          (disp1_fu),
-    .disp1_tid         (disp1_tid),
-    .disp1_is_mret     (disp1_is_mret),
+    .disp1_fu          (`FU_MUL),
+    // disp1_tid removed
+    .disp1_is_mret     (1'b0),
     .disp1_side_effect (d1_side_effect),
     .disp1_order_id    (disp1_order_id),
-    .disp1_epoch       (disp1_epoch),
+    .disp1_epoch       (iq_mul_disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
     .disp1_src1_order_id(d1_src1_order),
@@ -1372,48 +1374,39 @@ issue_queue #(
     .iss_br_addr_mode(mul_iss_br_addr_mode),
     .iss_regs_write  (mul_iss_regs_write),
     .iss_fu          (mul_iss_fu),
-    .iss_tid         (mul_iss_tid),
+    // iss_tid removed
     .iss_is_mret     (mul_iss_is_mret),
     .iss_order_id    (mul_iss_order_id),
     .iss_epoch       (mul_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
-    .wb0_tid         (wb0_tid),
+    // wb0_tid removed
     .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
-    .wb1_tid         (wb1_tid),
+    // wb1_tid removed
     .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .early_wakeup_valid(lsu_early_wakeup_valid),
     .early_wakeup_tag(lsu_early_wakeup_tag),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
-    .commit0_tid     (commit0_tid),
+    // commit0_tid removed
     .commit0_order_id(commit0_order_id),
     .commit1_valid   (commit1_valid),
     .commit1_tag     (commit1_tag),
-    .commit1_tid     (commit1_tid),
+    // commit1_tid removed
     .commit1_order_id(commit1_order_id),
-    .older_store_valid_t0   (1'b0),
-    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .older_store_valid_t1   (1'b0),
-    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_inhibit_t0(mul_issue_inhibit),
-    .issue_inhibit_t1(mul_issue_inhibit),
-    .issue_after_order_block_valid_t0(1'b0),
-    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_after_order_block_valid_t1(1'b0),
-    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t0(1'b0),
-    .issue_side_effect_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t1(1'b0),
-    .issue_side_effect_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .oldest_store_valid_t0(),
-    .oldest_store_order_id_t0(),
-    .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1(),
+    .older_store_valid   (1'b0),
+    .older_store_order_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_inhibit(mul_issue_inhibit),
+    .issue_after_order_block_valid(1'b0),
+    .issue_after_order_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_side_effect_block_valid(1'b0),
+    .issue_side_effect_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .oldest_store_valid(),
+    .oldest_store_order_id(),
     .debug_order_blocked_any(iq_mul_order_blocked_any),
     .debug_flush_killed_any(iq_mul_flush_killed_any)
 );
@@ -1425,75 +1418,75 @@ issue_queue #(
     .IQ_DEPTH  (DIV_IQ_DEPTH),
     .IQ_IDX_W  (DIV_IQ_IDX_W),
     .RS_TAG_W  (RS_TAG_W),
-    .NUM_THREAD(NUM_THREAD),
+    // NUM_THREAD removed (single-thread)
     .WAKE_HOLD (0),
     .DEALLOC_AT_COMMIT (1)
 ) u_iq_div (
     .clk        (clk),
     .rstn       (rstn),
     .flush      (flush),
-    .flush_tid  (flush_tid),
+    // tid ports removed (single-thread)
     .flush_new_epoch (flush_new_epoch),
     .flush_order_valid (flush_order_valid),
     .flush_order_id    (flush_order_id),
     // Dispatch 0
-    .disp0_valid       (iq_div_dp0_from1 ? (d1_go && d1_is_div) : (d0_go && d0_is_div)),
+    .disp0_valid       (iq_div_disp0_valid),
     .disp0_tag         (iq_div_dp0_from1 ? free1_tag   : free0_tag),
     .disp0_pc          (iq_div_dp0_from1 ? disp1_pc    : disp0_pc),
     .disp0_imm         (iq_div_dp0_from1 ? disp1_imm   : disp0_imm),
     .disp0_func3       (iq_div_dp0_from1 ? disp1_func3 : disp0_func3),
     .disp0_func7       (iq_div_dp0_from1 ? disp1_func7 : disp0_func7),
-    .disp0_rd          (iq_div_dp0_from1 ? disp1_rd    : disp0_rd),
-    .disp0_br          (iq_div_dp0_from1 ? disp1_br    : disp0_br),
-    .disp0_mem_read    (iq_div_dp0_from1 ? disp1_mem_read    : disp0_mem_read),
-    .disp0_mem2reg     (iq_div_dp0_from1 ? disp1_mem2reg     : disp0_mem2reg),
+    .disp0_rd          (5'd0),
+    .disp0_br          (1'b0),
+    .disp0_mem_read    (1'b0),
+    .disp0_mem2reg     (1'b0),
     .disp0_alu_op      (iq_div_dp0_from1 ? disp1_alu_op      : disp0_alu_op),
-    .disp0_mem_write   (iq_div_dp0_from1 ? disp1_mem_write   : disp0_mem_write),
+    .disp0_mem_write   (1'b0),
     .disp0_alu_src1    (iq_div_dp0_from1 ? disp1_alu_src1    : disp0_alu_src1),
     .disp0_alu_src2    (iq_div_dp0_from1 ? disp1_alu_src2    : disp0_alu_src2),
-    .disp0_br_addr_mode(iq_div_dp0_from1 ? disp1_br_addr_mode: disp0_br_addr_mode),
+    .disp0_br_addr_mode(1'b0),
     .disp0_regs_write  (iq_div_dp0_from1 ? disp1_regs_write  : disp0_regs_write),
-    .disp0_rs1         (iq_div_dp0_from1 ? disp1_rs1   : disp0_rs1),
-    .disp0_rs2         (iq_div_dp0_from1 ? disp1_rs2   : disp0_rs2),
+    .disp0_rs1         (5'd0),
+    .disp0_rs2         (5'd0),
     .disp0_rs1_used    (iq_div_dp0_from1 ? disp1_rs1_used    : disp0_rs1_used),
     .disp0_rs2_used    (iq_div_dp0_from1 ? disp1_rs2_used    : disp0_rs2_used),
-    .disp0_fu          (iq_div_dp0_from1 ? disp1_fu    : disp0_fu),
-    .disp0_tid         (iq_div_dp0_from1 ? disp1_tid   : disp0_tid),
-    .disp0_is_mret     (iq_div_dp0_from1 ? disp1_is_mret     : disp0_is_mret),
+    .disp0_fu          (`FU_DIV),
+    // disp0_tid removed
+    .disp0_is_mret     (1'b0),
     .disp0_side_effect (iq_div_dp0_from1 ? d1_side_effect     : d0_side_effect),
     .disp0_order_id    (iq_div_dp0_from1 ? disp1_order_id    : disp0_order_id),
-    .disp0_epoch       (iq_div_dp0_from1 ? disp1_epoch       : disp0_epoch),
+    .disp0_epoch       (iq_div_disp0_epoch),
     .disp0_src1_tag    (iq_div_dp0_from1 ? d1_src1   : d0_src1),
     .disp0_src2_tag    (iq_div_dp0_from1 ? d1_src2   : d0_src2),
     .disp0_src1_order_id(iq_div_dp0_from1 ? d1_src1_order : d0_src1_order),
     .disp0_src2_order_id(iq_div_dp0_from1 ? d1_src2_order : d0_src2_order),
     // Dispatch 1
-    .disp1_valid       (d0_go && d0_is_div && d1_go && d1_is_div),
+    .disp1_valid       (iq_div_disp1_valid),
     .disp1_tag         (free1_tag),
     .disp1_pc          (disp1_pc),
     .disp1_imm         (disp1_imm),
     .disp1_func3       (disp1_func3),
     .disp1_func7       (disp1_func7),
-    .disp1_rd          (disp1_rd),
-    .disp1_br          (disp1_br),
-    .disp1_mem_read    (disp1_mem_read),
-    .disp1_mem2reg     (disp1_mem2reg),
+    .disp1_rd          (5'd0),
+    .disp1_br          (1'b0),
+    .disp1_mem_read    (1'b0),
+    .disp1_mem2reg     (1'b0),
     .disp1_alu_op      (disp1_alu_op),
-    .disp1_mem_write   (disp1_mem_write),
+    .disp1_mem_write   (1'b0),
     .disp1_alu_src1    (disp1_alu_src1),
     .disp1_alu_src2    (disp1_alu_src2),
-    .disp1_br_addr_mode(disp1_br_addr_mode),
+    .disp1_br_addr_mode(1'b0),
     .disp1_regs_write  (disp1_regs_write),
-    .disp1_rs1         (disp1_rs1),
-    .disp1_rs2         (disp1_rs2),
+    .disp1_rs1         (5'd0),
+    .disp1_rs2         (5'd0),
     .disp1_rs1_used    (disp1_rs1_used),
     .disp1_rs2_used    (disp1_rs2_used),
-    .disp1_fu          (disp1_fu),
-    .disp1_tid         (disp1_tid),
-    .disp1_is_mret     (disp1_is_mret),
+    .disp1_fu          (`FU_DIV),
+    // disp1_tid removed
+    .disp1_is_mret     (1'b0),
     .disp1_side_effect (d1_side_effect),
     .disp1_order_id    (disp1_order_id),
-    .disp1_epoch       (disp1_epoch),
+    .disp1_epoch       (iq_div_disp1_epoch),
     .disp1_src1_tag    (d1_src1),
     .disp1_src2_tag    (d1_src2),
     .disp1_src1_order_id(d1_src1_order),
@@ -1524,48 +1517,39 @@ issue_queue #(
     .iss_br_addr_mode(div_iss_br_addr_mode),
     .iss_regs_write  (div_iss_regs_write),
     .iss_fu          (div_iss_fu),
-    .iss_tid         (div_iss_tid),
+    // iss_tid removed
     .iss_is_mret     (div_iss_is_mret),
     .iss_order_id    (div_iss_order_id),
     .iss_epoch       (div_iss_epoch),
     .wb0_valid       (wb0_valid),
     .wb0_tag         (wb0_tag),
-    .wb0_tid         (wb0_tid),
+    // wb0_tid removed
     .wb0_order_id    (tag_live_seq[wb0_tag]),
     .wb0_regs_write  (wb0_regs_write),
     .wb1_valid       (wb1_valid),
     .wb1_tag         (wb1_tag),
-    .wb1_tid         (wb1_tid),
+    // wb1_tid removed
     .wb1_order_id    (tag_live_seq[wb1_tag]),
     .wb1_regs_write  (wb1_regs_write),
     .early_wakeup_valid(lsu_early_wakeup_valid),
     .early_wakeup_tag(lsu_early_wakeup_tag),
     .commit0_valid   (commit0_valid),
     .commit0_tag     (commit0_tag),
-    .commit0_tid     (commit0_tid),
+    // commit0_tid removed
     .commit0_order_id(commit0_order_id),
     .commit1_valid   (commit1_valid),
     .commit1_tag     (commit1_tag),
-    .commit1_tid     (commit1_tid),
+    // commit1_tid removed
     .commit1_order_id(commit1_order_id),
-    .older_store_valid_t0   (1'b0),
-    .older_store_order_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .older_store_valid_t1   (1'b0),
-    .older_store_order_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_inhibit_t0(div_issue_inhibit),
-    .issue_inhibit_t1(div_issue_inhibit),
-    .issue_after_order_block_valid_t0(1'b0),
-    .issue_after_order_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_after_order_block_valid_t1(1'b0),
-    .issue_after_order_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t0(1'b0),
-    .issue_side_effect_block_id_t0({`METADATA_ORDER_ID_W{1'b0}}),
-    .issue_side_effect_block_valid_t1(1'b0),
-    .issue_side_effect_block_id_t1({`METADATA_ORDER_ID_W{1'b0}}),
-    .oldest_store_valid_t0(),
-    .oldest_store_order_id_t0(),
-    .oldest_store_valid_t1(),
-    .oldest_store_order_id_t1(),
+    .older_store_valid   (1'b0),
+    .older_store_order_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_inhibit(div_issue_inhibit),
+    .issue_after_order_block_valid(1'b0),
+    .issue_after_order_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .issue_side_effect_block_valid(1'b0),
+    .issue_side_effect_block_id({`METADATA_ORDER_ID_W{1'b0}}),
+    .oldest_store_valid(),
+    .oldest_store_order_id(),
     .debug_order_blocked_any(iq_div_order_blocked_any),
     .debug_flush_killed_any(iq_div_flush_killed_any)
 );
@@ -2062,6 +2046,19 @@ end
 // ═════════════════════════════════════════════════════════════════
 // 14. Debug Signals (simplified — mostly zeroed)
 // ═════════════════════════════════════════════════════════════════
+// synthesis translate_off
+always @(posedge clk) begin
+    if (rstn) begin
+        if (d0_go && (free0_tag == {RS_TAG_W{1'b0}}))
+            $display("ERROR: dispatch allocated tag0 on port0 pc=%h order=%0d @%0t",
+                     disp0_pc, disp0_order_id, $time);
+        if (d1_go && (free1_tag == {RS_TAG_W{1'b0}}))
+            $display("ERROR: dispatch allocated tag0 on port1 pc=%h order=%0d @%0t",
+                     disp1_pc, disp1_order_id, $time);
+    end
+end
+// synthesis translate_on
+
 assign debug_br_found_t0        = (br_pending_cnt_t0 != 6'd0);
 assign debug_branch_in_flight_t0= branch_in_flight_t0;
 assign debug_oldest_br_ready_t0 = 1'b0;
@@ -2092,7 +2089,6 @@ assign debug_flush_killed_speculative =
     iq_mul_flush_killed_any || iq_div_flush_killed_any ||
     p1_mem_cand_flush_kill || p1_mul_cand_flush_kill || p1_div_cand_flush_kill ||
     mem_raw_issue_flush_kill || mul_raw_issue_flush_kill || div_raw_issue_flush_kill;
-
 // RoCC (unused in FPGA mode)
 assign iss0_is_rocc = 1'b0;
 

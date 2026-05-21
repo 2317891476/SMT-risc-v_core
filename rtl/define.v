@@ -8,6 +8,7 @@
 `define UtypeL 7'b0110111 //Utype for lui
 `define UtypeU 7'b0010111 //Utype for auipc
 `define Jtype  7'b1101111 //Utype for jal
+`define MISC_MEM 7'b0001111 // FENCE/FENCE.I
 `define SYSTEM 7'b1110011 // SYSTEM opcode for CSR/MRET
  
  
@@ -175,6 +176,19 @@
 `define UART_CTRL_ADDR      32'h1300_001C
 `define DDR3_STATUS_ADDR    32'h1300_0020
 `define DEBUG_BEACON_EVT_ADDR 32'h1300_0024
+`define UART16550_BASE      32'h1300_1000
+`define UART16550_RBR_ADDR  32'h1300_1000
+`define UART16550_THR_ADDR  32'h1300_1000
+`define UART16550_DLL_ADDR  32'h1300_1000
+`define UART16550_IER_ADDR  32'h1300_1001
+`define UART16550_DLM_ADDR  32'h1300_1001
+`define UART16550_IIR_ADDR  32'h1300_1002
+`define UART16550_FCR_ADDR  32'h1300_1002
+`define UART16550_LCR_ADDR  32'h1300_1003
+`define UART16550_MCR_ADDR  32'h1300_1004
+`define UART16550_LSR_ADDR  32'h1300_1005
+`define UART16550_MSR_ADDR  32'h1300_1006
+`define UART16550_SCR_ADDR  32'h1300_1007
 
 // CLINT (Core Local Interruptor) - Machine Timer
 `define CLINT_BASE          32'h0200_0000
@@ -186,6 +200,7 @@
 // PLIC (Platform Level Interrupt Controller)
 `define PLIC_BASE           32'h0C00_0000
 `define PLIC_PRIORITY1      32'h0C000004
+`define PLIC_PRIORITY2      32'h0C000008
 `define PLIC_PENDING        32'h0C001000
 `define PLIC_ENABLE         32'h0C002000
 `define PLIC_THRESHOLD      32'h0C200000

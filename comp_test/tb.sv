@@ -39,8 +39,10 @@ module tb;
 reg clk;
 reg rst;
 wire core_uart_tx;
+reg tb_uart_rx;
 localparam integer DATA_BASE_WORD = 32'h0000_1000 >> 2;
 localparam integer TB_SELECTED_TEST_ID = `TEST_ID;
+localparam integer TB_UART_BIT_CYCLES = 4;
 always begin
 #25    clk = ~clk;
 end
@@ -52,9 +54,24 @@ integer j;
 adam_riscv u_adam_riscv(
     .sys_clk  (clk ),
     .sys_rstn (rst ),
-    .uart_rx  (1'b1),
+    .uart_rx  (tb_uart_rx),
     .uart_tx  (core_uart_tx)
 );
+
+task automatic tb_uart_send_byte(input [7:0] data);
+    integer bit_idx;
+    begin
+        repeat (16) @(posedge clk);
+        tb_uart_rx <= 1'b0;
+        repeat (TB_UART_BIT_CYCLES) @(posedge clk);
+        for (bit_idx = 0; bit_idx < 8; bit_idx = bit_idx + 1) begin
+            tb_uart_rx <= data[bit_idx];
+            repeat (TB_UART_BIT_CYCLES) @(posedge clk);
+        end
+        tb_uart_rx <= 1'b1;
+        repeat (TB_UART_BIT_CYCLES * 2) @(posedge clk);
+    end
+endtask
 
 //------------------------------------------------------------------------------------------------
 // Wave dump
@@ -124,6 +141,7 @@ initial begin
         $display("%d: %h", j, `TB_IROM.mem[j]);
     clk = 1'b1;
     rst = 1'b0;
+    tb_uart_rx = 1'b1;
     #100 rst = 1'b1;
 end
 
@@ -158,6 +176,22 @@ initial begin : plic_stimulus
         force u_adam_riscv.ext_irq_src = 1'b1;
         #1000;
         force u_adam_riscv.ext_irq_src = 1'b0;
+    end
+end
+
+//------------------------------------------------------------------------------------------------
+// UART RX Stimulus for 16550A directed tests
+//------------------------------------------------------------------------------------------------
+initial begin : uart16550_stimulus
+    tb_uart_rx = 1'b1;
+    @(posedge rst);
+
+    if (TB_SELECTED_TEST_ID == 33) begin
+        #20000;
+        tb_uart_send_byte(8'hA5);
+    end else if (TB_SELECTED_TEST_ID == 34) begin
+        #20000;
+        tb_uart_send_byte(8'h3C);
     end
 end
 
@@ -263,12 +297,12 @@ always @(posedge clk) begin
     // Detect when x3 is written with RoCC status (check decode for STATUS.READ)
     // This is a heuristic: RoCC instructions use custom-0 opcode (0x0B)
     // STATUS.READ has funct7=5
-    if (!rst && `TB_REGS.reg_bank[0][3] !== 32'dx) begin
+    if (!rst && `TB_REGS.reg_bank[3] !== 32'dx) begin
         // Check if lower 3 bits match RoCC status pattern {error, done, busy}
         // and upper bits are zero (as per STATUS.READ format)
-        if ((`TB_REGS.reg_bank[0][3][31:3] == 29'd0) && 
-            (`TB_REGS.reg_bank[0][3][2:0] != 3'd0)) begin
-            rocc_status_read_value <= `TB_REGS.reg_bank[0][3];
+        if ((`TB_REGS.reg_bank[3][31:3] == 29'd0) && 
+            (`TB_REGS.reg_bank[3][2:0] != 3'd0)) begin
+            rocc_status_read_value <= `TB_REGS.reg_bank[3];
             rocc_status_read_done  <= 1'b1;
         end
     end
@@ -361,20 +395,26 @@ always @(posedge clk) begin
                      u_adam_riscv.byp0_fwd_a,
                      $time);
         end
-        if (u_adam_riscv.iss1_valid) begin
+        if (u_adam_riscv.p1_winner_valid) begin
             $display("[ISS1] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv.iss1_pc,
-                     u_adam_riscv.iss1_fu,
-                     u_adam_riscv.iss1_tag,
-                     u_adam_riscv.iss1_order_id,
-                     u_adam_riscv.iss1_rd,
-                     u_adam_riscv.iss1_tid,
+                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_pc :
+                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_pc :
+                                                    u_adam_riscv.p1_mul_cand_pc,
+                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_fu :
+                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_fu :
+                                                    u_adam_riscv.p1_mul_cand_fu,
+                     u_adam_riscv.p1_issue_tag,
+                     u_adam_riscv.p1_issue_arch_order_id,
+                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_rd :
+                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_rd :
+                                                    u_adam_riscv.p1_mul_cand_rd,
+                     u_adam_riscv.p1_issue_arch_tid,
                      $time);
-            if (u_adam_riscv.iss1_mem_write) begin
+            if (u_adam_riscv.p1_issue_is_mem && u_adam_riscv.p1_mem_cand_mem_write) begin
                 $display("[ISS1 STORE DBG] rs2=x%0d used=%0b src2_tag=%0d ro2=0x%08h byp_b=0x%08h fwd_b=%0d @%0t",
-                         u_adam_riscv.iss1_rs2,
-                         u_adam_riscv.iss1_rs2_used,
-                         u_adam_riscv.iss1_src2_tag,
+                         u_adam_riscv.p1_mem_cand_rs2,
+                         u_adam_riscv.p1_mem_cand_rs2_used,
+                         u_adam_riscv.p1_mem_cand_src2_tag,
                          u_adam_riscv.ro1_data2,
                          u_adam_riscv.byp1_op_b,
                          u_adam_riscv.byp1_fwd_b,
@@ -440,11 +480,11 @@ always @(posedge clk) begin
                      $time);
         end
         if (u_adam_riscv.u_stage_if.fetch_req_launch || (u_adam_riscv.combined_flush != 2'b00)) begin
-            $display("[IF CTRL] launch=%0b pc_out=0x%08h pending=0x%08h active=%0b flush=%b @%0t",
+            $display("[IF CTRL] launch=%0b pc_out=0x%08h pending=0x%08h flags=0x%02h flush=%b @%0t",
                      u_adam_riscv.u_stage_if.fetch_req_launch,
                      u_adam_riscv.u_stage_if.pc_out,
                      u_adam_riscv.u_stage_if.fetch_pc_pending,
-                     u_adam_riscv.u_stage_if.fetch_req_active,
+                     u_adam_riscv.u_stage_if.debug_if_flags,
                      u_adam_riscv.combined_flush,
                      $time);
         end
@@ -492,14 +532,14 @@ always @(posedge clk) begin
                      u_adam_riscv.rob1_full,
                      $time);
             $display("[ROB WIN DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_flushed=%0b h_tag=%0d h_ord=%0d @%0t",
-                     u_adam_riscv.u_rob.rob_head[0],
-                     u_adam_riscv.u_rob.rob_tail[0],
-                     u_adam_riscv.u_rob.rob_count[0],
-                     u_adam_riscv.u_rob.rob_valid[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_complete[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_flushed[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_tag[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_order_id[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_head,
+                     u_adam_riscv.u_rob.rob_tail,
+                     u_adam_riscv.u_rob.rob_count,
+                     u_adam_riscv.u_rob.rob_valid[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_complete[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_flushed[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_tag[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_order_id[u_adam_riscv.u_rob.rob_head],
                      $time);
         end
         if (u_adam_riscv.ext_timer_irq || u_adam_riscv.ext_external_irq ||
@@ -522,12 +562,12 @@ always @(posedge clk) begin
         if ((u_adam_riscv.dec0_pc >= 32'h00000054) &&
             (u_adam_riscv.dec0_pc <= 32'h0000005c)) begin
             $display("[ROB DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_tag=%0d @%0t",
-                     u_adam_riscv.u_rob.rob_head[0],
-                     u_adam_riscv.u_rob.rob_tail[0],
-                     u_adam_riscv.u_rob.rob_count[0],
-                     u_adam_riscv.u_rob.rob_valid[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_complete[0][u_adam_riscv.u_rob.rob_head[0]],
-                     u_adam_riscv.u_rob.rob_tag[0][u_adam_riscv.u_rob.rob_head[0]],
+                     u_adam_riscv.u_rob.rob_head,
+                     u_adam_riscv.u_rob.rob_tail,
+                     u_adam_riscv.u_rob.rob_count,
+                     u_adam_riscv.u_rob.rob_valid[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_complete[u_adam_riscv.u_rob.rob_head],
+                     u_adam_riscv.u_rob.rob_tag[u_adam_riscv.u_rob.rob_head],
                      $time);
             $display("[IQ INT DBG] slot0 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d | slot1 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d @%0t",
                      u_adam_riscv.u_dispatch_unit.u_iq_int.e_valid[0],
@@ -572,7 +612,7 @@ always @(posedge clk) begin
                      u_adam_riscv.rob_disp_stall,
                      u_adam_riscv.sb_disp_stall,
                      u_adam_riscv.sb_branch_pending_any,
-                     u_adam_riscv.u_rob.rob_count[0],
+                     u_adam_riscv.u_rob.rob_count,
                      rst,
                      $time);
         end

@@ -34,9 +34,9 @@ set_false_path -from [get_ports uart_rx]
 
 # Core UART TX crosses from core clock to sys_clk domain via the
 # uart_rx_monitor's 2-FF synchronizer (rx_sync_reg).
-set_max_delay -datapath_only 5.000 \
-    -from [get_cells -hierarchical -filter {NAME =~ *u_uart_tx/tx_reg*}] \
-    -to   [get_cells -hierarchical -filter {NAME =~ *u_core_uart_monitor/rx_sync_reg*}]
+set_max_delay -quiet -datapath_only 5.000 \
+    -from [get_cells -quiet -hierarchical -filter {NAME =~ *u_uart_tx/tx_reg*}] \
+    -to   [get_cells -quiet -hierarchical -filter {NAME =~ *u_core_uart_monitor/rx_sync_reg*}]
 
 ################################################################################
 # 3) Debug visibility recommendations (optional, commented)

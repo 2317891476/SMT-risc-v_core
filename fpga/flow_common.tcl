@@ -8,6 +8,95 @@ proc ax7203_env_or_default {name default_value} {
     return $default_value
 }
 
+proc ax7203_vivado_thread_cap {} {
+    set cap [ax7203_env_or_default AX7203_VIVADO_THREAD_CAP 8]
+    if {![string is integer -strict $cap] || $cap < 1} {
+        puts "WARNING: Invalid AX7203_VIVADO_THREAD_CAP='$cap'; using 8"
+        set cap 8
+    }
+    return [expr {$cap + 0}]
+}
+
+proc ax7203_host_thread_count {fallback} {
+    set candidates {}
+    foreach env_name [list NUMBER_OF_PROCESSORS PROCESSOR_COUNT] {
+        if {[info exists ::env($env_name)] && $::env($env_name) ne ""} {
+            lappend candidates $::env($env_name)
+        }
+    }
+
+    set nproc_bin [auto_execok nproc]
+    if {$nproc_bin ne "" && ![catch {exec $nproc_bin} nproc_out]} {
+        lappend candidates [string trim $nproc_out]
+    }
+
+    foreach value $candidates {
+        if {[string is integer -strict $value] && $value > 0} {
+            return [expr {$value + 0}]
+        }
+    }
+    return $fallback
+}
+
+proc ax7203_default_vivado_jobs {} {
+    set cap [ax7203_vivado_thread_cap]
+    set host_threads [ax7203_host_thread_count $cap]
+    if {$host_threads > $cap} {
+        return $cap
+    }
+    if {$host_threads < 1} {
+        return 1
+    }
+    return $host_threads
+}
+
+proc ax7203_vivado_jobs {env_name} {
+    set cap [ax7203_vivado_thread_cap]
+    set default_jobs [ax7203_default_vivado_jobs]
+    set jobs [ax7203_env_or_default $env_name $default_jobs]
+    if {![string is integer -strict $jobs] || $jobs < 1} {
+        puts "WARNING: Invalid $env_name='$jobs'; using $default_jobs"
+        set jobs $default_jobs
+    }
+    if {$jobs > $cap} {
+        puts "WARNING: $env_name=$jobs exceeds AX7203_VIVADO_THREAD_CAP=$cap; using $cap"
+        set jobs $cap
+    }
+    return [expr {$jobs + 0}]
+}
+
+proc ax7203_apply_vivado_threads {threads} {
+    puts "INFO: Setting Vivado general.maxThreads to $threads"
+    if {[catch {set_param general.maxThreads $threads} err]} {
+        puts "WARNING: Unable to set general.maxThreads=$threads: $err"
+    }
+}
+
+proc ax7203_patch_generated_vivado_tcl {run_script threads} {
+    if {![file exists $run_script]} {
+        error "Generated Vivado Tcl not found: $run_script"
+    }
+
+    set fh [open $run_script r]
+    set contents [read $fh]
+    close $fh
+
+    if {[string first "AX7203 generated run general.maxThreads" $contents] >= 0} {
+        return
+    }
+
+    set insert [join [list \
+        "# AX7203: use the wider worker pool requested by the batch flow." \
+        "catch {set_param general.maxThreads $threads}" \
+        "puts \"INFO: AX7203 generated run general.maxThreads=$threads\"" \
+        "" \
+    ] "\n"]
+
+    set fh [open $run_script w]
+    puts -nonewline $fh "$insert$contents"
+    close $fh
+}
+
 proc ax7203_clog2 {value} {
     if {$value <= 1} {
         return 1
@@ -35,6 +124,27 @@ proc ax7203_uart_clk_div {core_clk_mhz {baud 115200}} {
         set div 1
     }
     return $div
+}
+
+proc ax7203_dcache_define {mode} {
+    set normalized [string tolower $mode]
+    switch -- $normalized {
+        "full" {
+            return {}
+        }
+        "passthrough" {
+            return [list DCACHE_PASSTHROUGH=1]
+        }
+        "registered-pt" {
+            return [list DCACHE_REGISTERED_PT=1]
+        }
+        "read-only" {
+            return [list DCACHE_READ_ONLY=1]
+        }
+        default {
+            error "Unsupported AX7203_DCACHE_MODE '$mode' (expected full, passthrough, registered-pt, or read-only)"
+        }
+    }
 }
 
 proc ax7203_status_is_complete {status} {
@@ -142,7 +252,13 @@ proc ax7203_build_board_rom {script_dir} {
         lappend launchers $launcher
     }
 
-    set script_args [list $rom_build_py --asm $rom_asm]
+    set script_args [list $rom_build_py --asm $rom_asm --define BOARD_BUILD=1]
+    set rom_defines [ax7203_env_or_default AX7203_ROM_DEFINES ""]
+    if {$rom_defines ne ""} {
+        foreach define [regexp -all -inline {[^,; \t\r\n]+} $rom_defines] {
+            lappend script_args --define $define
+        }
+    }
     if {$rom_march ne ""} {
         lappend script_args --march $rom_march
     }

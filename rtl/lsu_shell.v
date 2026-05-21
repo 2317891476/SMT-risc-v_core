@@ -184,7 +184,7 @@ wire                     sb_load_hazard;
 wire                     sb_older_store_pending_for_load;
 wire                     sb_debug_empty;
 wire [2:0]               sb_debug_count_t0;
-wire [2:0]               sb_debug_count_t1;
+wire [2:0]               sb_debug_count_t1 = 3'd0; // Single-thread: no T1
 wire                     sb_stall_event;
 wire                     sb_drain_urgent;
 
@@ -206,12 +206,12 @@ wire req_at_rob_head_t0 =
 wire req_at_rob_head_t1 =
     rob_head_valid_t1 && !rob_head_flushed_t1 &&
     (rob_head_order_id_t1 == req_order_id);
-wire req_at_rob_head = req_tid ? req_at_rob_head_t1 : req_at_rob_head_t0;
+wire req_at_rob_head = req_at_rob_head_t0;
 wire mmio_load_spec_block = req_is_mmio_load && !req_at_rob_head;
 wire mmio_load_older_store_block =
     req_is_mmio_load && req_at_rob_head && sb_older_store_pending_for_load;
 wire req_flush_kill =
-    req_valid && flush && (req_tid == flush_tid) &&
+    req_valid && flush &&
     (!flush_order_valid || (req_order_id > flush_order_id));
 
 
@@ -231,6 +231,8 @@ wire req_flush_kill =
 // response path consumes the old pending metadata, while the state machine
 // captures the new request with nonblocking assignments.
 wire state_machine_idle = (lsu_state == LSU_IDLE);
+wire sb_drain_ready_to_issue =
+    use_mem_subsys && state_machine_idle && sb_mem_write_valid_int;
 wire mem_subsys_load_resp_fire =
                 use_mem_subsys && (lsu_state == LSU_WAIT_RESP) &&
                 m1_resp_valid && !m1_txn_is_drain;
@@ -248,13 +250,16 @@ reg m1_cooldown_r;
 wire sb_has_pending_stores = (sb_debug_count_t0 > 0) || (sb_debug_count_t1 > 0);
 wire m1_drain_holdoff = m1_cooldown_r && sb_has_pending_stores;
 
-// Accept stores when store buffer has space and state machine idle
-wire store_accept = sb_store_accept && state_machine_idle && !m1_drain_holdoff &&
-                    !req_flush_kill;
+// Accept stores when store buffer has space and the state machine is idle.
+// In mem_subsys mode, a committed store-buffer drain takes priority over new
+// requests so the LSU cannot acknowledge a request while capturing a drain.
+wire store_accept = sb_store_accept && state_machine_idle &&
+                    !sb_drain_ready_to_issue && !req_flush_kill;
 
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
 wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
+                   !sb_drain_ready_to_issue &&
                    !req_flush_kill &&
                    !mmio_load_spec_block && !mmio_load_older_store_block &&
                    (state_machine_idle ||
@@ -275,19 +280,15 @@ store_buffer #(
     .SB_DEPTH      (4),
     .SB_IDX_W      (2),
     .ORDER_ID_W    (ORDER_ID_W),
-    .EPOCH_W       (EPOCH_W),
-    .NUM_THREAD    (2)
+    .EPOCH_W       (EPOCH_W)
 ) u_store_buffer (
     .clk                    (clk),
     .rstn                   (rstn),
 
     // Flush interface
     .flush                  (flush),
-    .flush_tid              (flush_tid),
     .flush_new_epoch_t0     (flush_new_epoch_t0),
-    .flush_new_epoch_t1     (flush_new_epoch_t1),
     .current_epoch_t0       (current_epoch_t0),
-    .current_epoch_t1       (current_epoch_t1),
     .flush_order_valid      (flush_order_valid),
     .flush_order_id         (flush_order_id),
 
@@ -298,7 +299,6 @@ store_buffer #(
     // incomplete store entry.
     .store_req_valid        (store_enqueue_fire),
     .store_req_accept       (sb_store_accept),
-    .store_tid              (req_tid),
     .store_order_id         (req_order_id),
     .store_epoch            (req_epoch),
     .store_addr             (req_addr),
@@ -307,11 +307,8 @@ store_buffer #(
 
     // ROB commit interface
     .commit0_valid          (commit0_valid),
-    .commit1_valid          (commit1_valid),
     .commit0_order_id       (commit0_order_id),
-    .commit1_order_id       (commit1_order_id),
     .commit0_is_store       (commit0_is_store),
-    .commit1_is_store       (commit1_is_store),
 
     // Memory write interface (drain)
     .mem_write_valid        (sb_mem_write_valid_int),
@@ -323,7 +320,6 @@ store_buffer #(
 
     // Load query interface (for store-to-load forwarding)
     .load_query_valid       (is_load),
-    .load_query_tid         (req_tid),
     .load_query_order_id    (req_order_id),
     .load_query_addr        (req_addr),
     .load_query_func3       (req_func3),
@@ -334,7 +330,6 @@ store_buffer #(
     .older_store_pending_for_load(sb_older_store_pending_for_load),
     .debug_empty            (sb_debug_empty),
     .debug_count_t0         (sb_debug_count_t0),
-    .debug_count_t1         (sb_debug_count_t1),
     .sb_stall_event         (sb_stall_event),
     .sb_drain_urgent        (sb_drain_urgent)
 );
@@ -358,6 +353,7 @@ localparam LSU_IDLE      = 2'b00;  // Ready to accept new request
 localparam LSU_REQ       = 2'b01;  // Request sent, waiting for grant
 localparam LSU_WAIT_RESP = 2'b10;  // Waiting for response
 localparam LSU_RESP      = 2'b11;  // Response ready
+localparam [19:0] LSU_WAIT_WATCHDOG_MAX = 20'hfffff;
 
 reg [1:0] lsu_state;
 reg               m1_req_valid_r;
@@ -365,10 +361,10 @@ reg [31:0]        m1_req_addr_r;
 reg               m1_req_write_r;
 reg [31:0]        m1_req_wdata_r;
 reg [3:0]         m1_req_wen_r;
+reg [19:0]        lsu_wait_watchdog_r;
 
 // Pending request registers (for both legacy and mem_subsys modes)
 reg               pending_valid;
-reg [0:0]         pending_tid;
 reg [ORDER_ID_W-1:0] pending_order_id;
 reg [EPOCH_W-1:0] pending_epoch;
 reg [TAG_W-1:0]   pending_tag;
@@ -387,7 +383,7 @@ reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
 reg               dbg_beacon_block_reported_r;
 wire              flush_hits_pending =
-                    pending_valid && (pending_tid == flush_tid);
+                    pending_valid;
 // Only kill when there IS a pending speculative request to kill.
 // The old `!pending_valid || ...` made the flush branch vacuously
 // true when idle, which silently dropped new requests arriving in
@@ -399,8 +395,7 @@ wire              flush_kills_pending =
 wire              pending_flush_kill = flush && flush_kills_pending;
 
 assign sb_mem_write_ready_mux = use_mem_subsys ?
-                                ((lsu_state == LSU_IDLE) &&
-                                 (sb_drain_urgent || !(req_valid && req_accept))) :
+                                state_machine_idle :
                                 sb_mem_write_ready;
 
 wire mem_subsys_load_issue_fire =
@@ -420,7 +415,7 @@ wire pending_at_rob_head_t0 =
 wire pending_at_rob_head_t1 =
     rob_head_valid_t1 && !rob_head_flushed_t1 &&
     (rob_head_order_id_t1 == pending_order_id);
-wire pending_at_rob_head = pending_tid ? pending_at_rob_head_t1 : pending_at_rob_head_t0;
+wire pending_at_rob_head = pending_at_rob_head_t0;
 wire m1_req_addr_is_mmio_0x13 = (m1_req_addr[31:16] == 16'h1300);
 wire m1_req_addr_is_clint     = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire m1_req_addr_is_plic      = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
@@ -448,6 +443,7 @@ always @(posedge clk or negedge rstn) begin
         m1_req_write_r    <= 1'b0;
         m1_req_wdata_r    <= 32'd0;
         m1_req_wen_r      <= 4'd0;
+        lsu_wait_watchdog_r <= 20'd0;
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
         dbg_beacon_block_reported_r <= 1'b0;
@@ -457,6 +453,8 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         debug_lsu_cooldown_set <= 1'b0;
         debug_lsu_cooldown_skipped_l1hit <= 1'b0;
+        if (lsu_state != LSU_WAIT_RESP)
+            lsu_wait_watchdog_r <= 20'd0;
         if (!sb_has_pending_stores)
             m1_cooldown_r <= 1'b0;
         if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
@@ -467,8 +465,8 @@ always @(posedge clk or negedge rstn) begin
             // committed store-buffer drain that has already been handed off.
             // Branch redirects only kill younger requests from the flushed thread.
             `ifdef VERBOSE_SIM_LOGS
-            $display("[LSU FLUSH] pending_valid=%0b pending_tid=%0d pending_order=%0d flush_tid=%0d flush_order_valid=%0b flush_order=%0d @%0t",
-                     pending_valid, pending_tid, pending_order_id,
+            $display("[LSU FLUSH] pending_valid=%0b pending_tid=0 pending_order=%0d flush_tid=%0d flush_order_valid=%0b flush_order=%0d @%0t",
+                     pending_valid, pending_order_id,
                      flush_tid, flush_order_valid, flush_order_id, $time);
             `endif
             pending_valid   <= 1'b0;
@@ -494,7 +492,7 @@ always @(posedge clk or negedge rstn) begin
                 // When store buffer is nearly full with committed stores,
                 // prioritize drain over new request acceptance to prevent
                 // store buffer starvation during long-latency loads.
-                if (use_mem_subsys && sb_drain_urgent &&
+                if (use_mem_subsys &&
                     sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
                     pending_valid       <= 1'b0;
                     m1_txn_is_drain     <= 1'b1;
@@ -518,7 +516,7 @@ always @(posedge clk or negedge rstn) begin
                     `endif
                     // Capture request metadata
                     pending_valid         <= 1'b1;
-                    pending_tid           <= req_tid;
+                    // pending_tid removed (single-thread)
                     pending_order_id      <= req_order_id;
                     pending_epoch         <= req_epoch;
                     pending_tag           <= req_tag;
@@ -629,6 +627,7 @@ always @(posedge clk or negedge rstn) begin
                 end
                 // Waiting for mem_subsys response
                 if (m1_resp_valid) begin
+                    lsu_wait_watchdog_r <= 20'd0;
 `ifdef VERBOSE_SIM_LOGS
                     if (m1_txn_is_drain && (m1_req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
                         $display("[DBG_LSU_RESP_SEEN] t=%0t drain=%0d addr=%h data=%h",
@@ -647,7 +646,7 @@ always @(posedge clk or negedge rstn) begin
                         // load in the same cycle.  resp_* below still observes
                         // the old pending metadata for this response.
                         pending_valid         <= 1'b1;
-                        pending_tid           <= req_tid;
+                        // pending_tid removed (single-thread)
                         pending_order_id      <= req_order_id;
                         pending_epoch         <= req_epoch;
                         pending_tag           <= req_tag;
@@ -685,6 +684,19 @@ always @(posedge clk or negedge rstn) begin
                             debug_lsu_cooldown_set <= 1'b1;
                         end
                     end
+                end else if (lsu_wait_watchdog_r == LSU_WAIT_WATCHDOG_MAX) begin
+                    lsu_wait_watchdog_r <= 20'd0;
+                    if (m1_txn_is_drain) begin
+                        lsu_state       <= LSU_IDLE;
+                        m1_txn_is_drain <= 1'b0;
+                    end else begin
+                        raw_mem_rdata   <= 32'd0;
+                        lsu_state       <= LSU_RESP;
+                        m1_txn_is_drain <= 1'b0;
+                        m1_cooldown_r   <= 1'b0;
+                    end
+                end else begin
+                    lsu_wait_watchdog_r <= lsu_wait_watchdog_r + 20'd1;
                 end
             end
 
@@ -814,7 +826,7 @@ end
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         resp_valid        <= 1'b0;
-        resp_tid          <= 1'b0;
+        resp_valid        <= 1'b0;
         resp_order_id     <= {ORDER_ID_W{1'b0}};
         resp_epoch        <= {EPOCH_W{1'b0}};
         resp_tag          <= {TAG_W{1'b0}};
@@ -826,7 +838,7 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         if (store_accept_resp_fire) begin
             resp_valid        <= 1'b1;
-            resp_tid          <= req_tid;
+            resp_valid        <= 1'b1;
             resp_order_id     <= req_order_id;
             resp_epoch        <= req_epoch;
             resp_tag          <= req_tag;
@@ -840,7 +852,7 @@ always @(posedge clk or negedge rstn) begin
             if (!pending_wen) begin
                 // Load response
                 resp_valid        <= 1'b1;
-                resp_tid          <= pending_tid;
+                // resp_tid removed (single-thread)
                 resp_order_id     <= pending_order_id;
                 resp_epoch        <= pending_epoch;
                 resp_tag          <= pending_tag;
@@ -857,7 +869,7 @@ always @(posedge clk or negedge rstn) begin
             end else begin
                 // Store response (speculative completion - store is in buffer)
                 resp_valid        <= 1'b1;
-                resp_tid          <= pending_tid;
+                // resp_tid removed (single-thread)
                 resp_order_id     <= pending_order_id;
                 resp_epoch        <= pending_epoch;
                 resp_tag          <= pending_tag;

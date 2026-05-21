@@ -32,7 +32,11 @@ module l1_dcache_m1 (
     input  wire        dn_m1_resp_valid,
     input  wire [31:0] dn_m1_resp_data,
 
-    output wire        dcache_miss_event
+    output wire        dcache_miss_event,
+
+    input  wire        flush_all,
+    output wire        flush_busy,
+    output wire        flush_done
 );
 
 `ifdef DCACHE_PASSTHROUGH
@@ -47,6 +51,8 @@ assign up_m1_resp_valid = dn_m1_resp_valid;
 assign up_m1_resp_data  = dn_m1_resp_data;
 assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
+assign flush_busy = 1'b0;
+assign flush_done = flush_all;
 
 `elsif DCACHE_REGISTERED_PT
 // Registered pass-through: all requests go to DDR3, but through a registered FSM.
@@ -91,6 +97,8 @@ assign up_m1_resp_valid = rpt_resp_valid;
 assign up_m1_resp_data  = rpt_resp_data;
 assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
+assign flush_busy = 1'b0;
+assign flush_done = flush_all;
 
 wire [2:0] rpt_req_word = rpt_addr[4:2];
 
@@ -130,12 +138,13 @@ always @(posedge clk or negedge rstn) begin
         end
 
         RPT_STORE_REQ: begin
-            rpt_dn_valid <= 1'b1;
-            rpt_dn_addr  <= rpt_addr;
-            rpt_dn_write <= 1'b1;
-            rpt_dn_wdata <= rpt_wdata;
-            rpt_dn_wen   <= rpt_wen;
-            if (dn_m1_req_ready) begin
+            if (!rpt_dn_valid) begin
+                rpt_dn_valid <= 1'b1;
+                rpt_dn_addr  <= rpt_addr;
+                rpt_dn_write <= 1'b1;
+                rpt_dn_wdata <= rpt_wdata;
+                rpt_dn_wen   <= rpt_wen;
+            end else if (dn_m1_req_ready) begin
                 rpt_dn_valid <= 1'b0;
                 rpt_state <= RPT_STORE_RSP;
             end
@@ -151,12 +160,13 @@ always @(posedge clk or negedge rstn) begin
         end
 
         RPT_FILL_REQ: begin
-            rpt_dn_valid <= 1'b1;
-            rpt_dn_addr  <= rpt_addr;
-            rpt_dn_write <= 1'b0;
-            rpt_dn_wdata <= 32'd0;
-            rpt_dn_wen   <= 4'd0;
-            if (dn_m1_req_ready) begin
+            if (!rpt_dn_valid) begin
+                rpt_dn_valid <= 1'b1;
+                rpt_dn_addr  <= rpt_addr;
+                rpt_dn_write <= 1'b0;
+                rpt_dn_wdata <= 32'd0;
+                rpt_dn_wen   <= 4'd0;
+            end else if (dn_m1_req_ready) begin
                 rpt_dn_valid <= 1'b0;
                 rpt_state <= RPT_FILL_RSP;
             end
@@ -195,12 +205,14 @@ localparam RO_WAYS     = 4;
 localparam RO_TAG_W    = 22;
 localparam RO_WPL      = 8;
 
-localparam RO_IDLE      = 2'd0;
-localparam RO_FILL_REQ  = 2'd1;
-localparam RO_FILL_RESP = 2'd2;
-localparam RO_INSTALL   = 2'd3;
+localparam RO_IDLE       = 3'd0;
+localparam RO_FILL_REQ   = 3'd1;
+localparam RO_FILL_RESP  = 3'd2;
+localparam RO_INSTALL    = 3'd3;
+localparam RO_STORE_REQ  = 3'd4;
+localparam RO_STORE_RESP = 3'd5;
 
-reg [1:0] ro_state;
+reg [2:0] ro_state;
 
 reg [RO_TAG_W-1:0] ro_tag   [0:RO_SETS-1][0:RO_WAYS-1];
 reg                 ro_valid [0:RO_SETS-1][0:RO_WAYS-1];
@@ -261,40 +273,42 @@ reg        ro_hit_resp_valid;
 reg [31:0] ro_hit_resp_data;
 reg        ro_install_resp_valid;
 reg [31:0] ro_install_resp_data;
+reg        ro_store_resp_valid;
 
-// Stores: pass-through (combinational when idle, blocked during refill)
+// Stores: registered pass-through. The earlier combinational store path relied
+// on the downstream arbiter selecting in one cycle and returning ready in the
+// next. Registering the store keeps the upstream and DDR3-side handshakes
+// single-owner and avoids board-only CDC/MIG timing sensitivity.
 wire ro_is_store = up_m1_req_valid && up_m1_req_write;
 wire ro_is_load  = up_m1_req_valid && !up_m1_req_write;
 
-wire ro_can_accept = (ro_state == RO_IDLE) && !ro_hit_resp_valid && !ro_install_resp_valid && !ro_pt_pending;
+wire ro_can_accept = (ro_state == RO_IDLE) && !ro_hit_resp_valid && !ro_install_resp_valid && !ro_store_resp_valid;
 
-// Store pass-through tracking
-reg ro_pt_pending;
-wire ro_pt_resp = ro_pt_pending && dn_m1_resp_valid && (ro_state == RO_IDLE);
-
-// Upstream ready: load hit = accept, load miss = accept (will stall in FSM), store = pass-through
-assign up_m1_req_ready = ro_is_store ? (ro_can_accept && dn_m1_req_ready) :
-                         ro_is_load  ? ro_can_accept :
-                         1'b0;
+// Upstream ready: accept one load or store into the read-only cache FSM.
+assign up_m1_req_ready = (ro_is_store || ro_is_load) ? ro_can_accept : 1'b0;
 
 // Downstream request mux
 reg        ro_dn_valid;
 reg [31:0] ro_dn_addr;
-assign dn_m1_req_valid = (ro_state == RO_FILL_REQ) ? ro_dn_valid :
-                          ro_is_store && ro_can_accept ? up_m1_req_valid : 1'b0;
-assign dn_m1_req_addr  = (ro_state == RO_FILL_REQ) ? ro_dn_addr : up_m1_req_addr;
-assign dn_m1_req_write = (ro_state == RO_FILL_REQ) ? 1'b0 : up_m1_req_write;
-assign dn_m1_req_wdata = up_m1_req_wdata;
-assign dn_m1_req_wen   = (ro_state == RO_FILL_REQ) ? 4'd0 : up_m1_req_wen;
+reg        ro_dn_write;
+reg [31:0] ro_dn_wdata;
+reg [3:0]  ro_dn_wen;
+assign dn_m1_req_valid = ro_dn_valid;
+assign dn_m1_req_addr  = ro_dn_addr;
+assign dn_m1_req_write = ro_dn_write;
+assign dn_m1_req_wdata = ro_dn_wdata;
+assign dn_m1_req_wen   = ro_dn_wen;
 
 // Upstream response
-assign up_m1_resp_valid = ro_hit_resp_valid || ro_install_resp_valid || ro_pt_resp;
+assign up_m1_resp_valid = ro_hit_resp_valid || ro_install_resp_valid || ro_store_resp_valid;
 assign up_m1_resp_data  = ro_hit_resp_valid     ? ro_hit_resp_data :
                           ro_install_resp_valid  ? ro_install_resp_data :
-                          dn_m1_resp_data;
+                          32'd0;
 assign up_m1_resp_l1d_hit = ro_hit_resp_valid;
 
 assign dcache_miss_event = ro_can_accept && ro_is_load && !ro_hit;
+assign flush_busy = 1'b0;
+assign flush_done = flush_all;
 
 integer ro_si, ro_sj;
 always @(posedge clk or negedge rstn) begin
@@ -302,9 +316,12 @@ always @(posedge clk or negedge rstn) begin
         ro_state <= RO_IDLE;
         ro_hit_resp_valid <= 1'b0;
         ro_install_resp_valid <= 1'b0;
+        ro_store_resp_valid <= 1'b0;
         ro_dn_valid <= 1'b0;
+        ro_dn_write <= 1'b0;
+        ro_dn_wdata <= 32'd0;
+        ro_dn_wen <= 4'd0;
         ro_word_cnt <= 3'd0;
-        ro_pt_pending <= 1'b0;
         ro_miss_addr <= 32'd0;
         ro_victim_r <= 2'd0;
         ro_fill_line <= 256'd0;
@@ -321,21 +338,20 @@ always @(posedge clk or negedge rstn) begin
     end else begin
         ro_hit_resp_valid <= 1'b0;
         ro_install_resp_valid <= 1'b0;
-
-        // Store pass-through tracking
-        if (ro_is_store && up_m1_req_ready && dn_m1_req_ready)
-            ro_pt_pending <= 1'b1;
-        if (ro_pt_resp)
-            ro_pt_pending <= 1'b0;
-
-        // Store invalidation: if store hits a cached line, invalidate it
-        if (ro_is_store && up_m1_req_ready && ro_hit)
-            ro_valid[ro_req_index][ro_hit_way] <= 1'b0;
+        ro_store_resp_valid <= 1'b0;
 
         case (ro_state)
         RO_IDLE: begin
             ro_dn_valid <= 1'b0;
-            if (ro_can_accept && ro_is_load) begin
+            if (ro_can_accept && ro_is_store) begin
+                ro_dn_addr  <= up_m1_req_addr;
+                ro_dn_write <= 1'b1;
+                ro_dn_wdata <= up_m1_req_wdata;
+                ro_dn_wen   <= up_m1_req_wen;
+                if (ro_hit)
+                    ro_valid[ro_req_index][ro_hit_way] <= 1'b0;
+                ro_state <= RO_STORE_REQ;
+            end else if (ro_can_accept && ro_is_load) begin
                 if (ro_hit) begin
                     ro_hit_resp_valid <= 1'b1;
                     ro_hit_resp_data  <= ro_cached_word;
@@ -356,9 +372,13 @@ always @(posedge clk or negedge rstn) begin
         end
 
         RO_FILL_REQ: begin
-            ro_dn_valid <= 1'b1;
-            ro_dn_addr  <= {ro_miss_addr[31:5], ro_word_cnt, 2'b00};
-            if (dn_m1_req_ready) begin
+            if (!ro_dn_valid) begin
+                ro_dn_valid <= 1'b1;
+                ro_dn_addr  <= {ro_miss_addr[31:5], ro_word_cnt, 2'b00};
+                ro_dn_write <= 1'b0;
+                ro_dn_wdata <= 32'd0;
+                ro_dn_wen   <= 4'd0;
+            end else if (dn_m1_req_ready) begin
                 ro_dn_valid <= 1'b0;
                 ro_state <= RO_FILL_RESP;
             end
@@ -410,6 +430,23 @@ always @(posedge clk or negedge rstn) begin
             ro_state <= RO_IDLE;
         end
 
+        RO_STORE_REQ: begin
+            if (!ro_dn_valid) begin
+                ro_dn_valid <= 1'b1;
+            end else if (dn_m1_req_ready) begin
+                ro_dn_valid <= 1'b0;
+                ro_state <= RO_STORE_RESP;
+            end
+        end
+
+        RO_STORE_RESP: begin
+            ro_dn_valid <= 1'b0;
+            if (dn_m1_resp_valid) begin
+                ro_store_resp_valid <= 1'b1;
+                ro_state <= RO_IDLE;
+            end
+        end
+
         default: ro_state <= RO_IDLE;
         endcase
     end
@@ -430,14 +467,17 @@ localparam WPL      = 8;   // words per line
 // ─────────────────────────────────────────────────────────────
 // FSM states
 // ─────────────────────────────────────────────────────────────
-localparam S_IDLE      = 3'd0;
-localparam S_WB_REQ    = 3'd1;
-localparam S_WB_RESP   = 3'd2;
-localparam S_FILL_REQ  = 3'd3;
-localparam S_FILL_RESP = 3'd4;
-localparam S_INSTALL   = 3'd5;
+localparam S_IDLE          = 4'd0;
+localparam S_WB_REQ        = 4'd1;
+localparam S_WB_RESP       = 4'd2;
+localparam S_FILL_REQ      = 4'd3;
+localparam S_FILL_RESP     = 4'd4;
+localparam S_INSTALL       = 4'd5;
+localparam S_FLUSH_SCAN    = 4'd6;
+localparam S_FLUSH_WB_REQ  = 4'd7;
+localparam S_FLUSH_WB_RESP = 4'd8;
 
-reg [2:0] state;
+reg [3:0] state;
 
 // ─────────────────────────────────────────────────────────────
 // Storage arrays
@@ -508,6 +548,9 @@ reg [3:0]   miss_wen_r;
 reg [1:0]   victim_r;
 reg [255:0] fill_line_r;
 reg [2:0]   word_cnt_r;
+reg [INDEX_W-1:0] flush_set_r;
+reg [1:0]         flush_way_r;
+reg [2:0]         flush_word_r;
 
 wire [INDEX_W-1:0] miss_index = miss_addr_r[9:5];
 wire [2:0]         miss_word  = miss_addr_r[4:2];
@@ -517,6 +560,8 @@ wire [2:0]         miss_word  = miss_addr_r[4:2];
 // ─────────────────────────────────────────────────────────────
 wire [TAG_W-1:0]   wb_tag  = tag_array[miss_index][victim_r];
 wire [31:0]        wb_addr = {wb_tag, miss_index, word_cnt_r, 2'b00};
+wire [31:0]        flush_wb_addr = {tag_array[flush_set_r][flush_way_r],
+                                    flush_set_r, flush_word_r, 2'b00};
 
 // ─────────────────────────────────────────────────────────────
 // Response registers
@@ -525,16 +570,22 @@ reg        hit_resp_valid_r;
 reg [31:0] hit_resp_data_r;
 reg        install_resp_valid_r;
 reg [31:0] install_resp_data_r;
+reg        flush_done_r;
 
 // ─────────────────────────────────────────────────────────────
 // Upstream interface
 // ─────────────────────────────────────────────────────────────
-wire can_accept = (state == S_IDLE) && !hit_resp_valid_r && !install_resp_valid_r;
+wire can_accept = (state == S_IDLE) && !flush_all &&
+                  !hit_resp_valid_r && !install_resp_valid_r;
 assign up_m1_req_ready = can_accept && up_m1_req_valid;
 
 assign up_m1_resp_valid = hit_resp_valid_r || install_resp_valid_r;
 assign up_m1_resp_data  = hit_resp_valid_r ? hit_resp_data_r : install_resp_data_r;
 assign up_m1_resp_l1d_hit = hit_resp_valid_r;
+assign flush_busy = (state == S_FLUSH_SCAN) ||
+                    (state == S_FLUSH_WB_REQ) ||
+                    (state == S_FLUSH_WB_RESP);
+assign flush_done = flush_done_r;
 
 // ─────────────────────────────────────────────────────────────
 // Downstream interface mux
@@ -606,6 +657,10 @@ always @(posedge clk or negedge rstn) begin
         victim_r           <= 2'd0;
         fill_line_r        <= 256'd0;
         word_cnt_r         <= 3'd0;
+        flush_set_r        <= {INDEX_W{1'b0}};
+        flush_way_r        <= 2'd0;
+        flush_word_r       <= 3'd0;
+        flush_done_r       <= 1'b0;
         for (si = 0; si < SETS; si = si + 1) begin
             for (sj = 0; sj < WAYS; sj = sj + 1) begin
                 valid_array[si][sj] <= 1'b0;
@@ -619,13 +674,19 @@ always @(posedge clk or negedge rstn) begin
         // Default: clear response pulses
         hit_resp_valid_r     <= 1'b0;
         install_resp_valid_r <= 1'b0;
+        flush_done_r         <= 1'b0;
 
         case (state)
         // ─────────────────────────────────────────────────────
         S_IDLE: begin
             dn_req_valid_r <= 1'b0;
 
-            if (can_accept && up_m1_req_valid) begin
+            if (flush_all) begin
+                flush_set_r  <= {INDEX_W{1'b0}};
+                flush_way_r  <= 2'd0;
+                flush_word_r <= 3'd0;
+                state        <= S_FLUSH_SCAN;
+            end else if (can_accept && up_m1_req_valid) begin
                 if (hit) begin
                     // === HIT PATH ===
                     if (up_m1_req_write) begin
@@ -670,13 +731,13 @@ always @(posedge clk or negedge rstn) begin
 
         // ─────────────────────────────────────────────────────
         S_WB_REQ: begin
-            dn_req_valid_r <= 1'b1;
-            dn_req_addr_r  <= wb_addr;
-            dn_req_write_r <= 1'b1;
-            dn_req_wdata_r <= data_array[miss_index][victim_r][word_cnt_r*32 +: 32];
-            dn_req_wen_r   <= 4'b1111;
-
-            if (dn_m1_req_ready) begin
+            if (!dn_req_valid_r) begin
+                dn_req_valid_r <= 1'b1;
+                dn_req_addr_r  <= wb_addr;
+                dn_req_write_r <= 1'b1;
+                dn_req_wdata_r <= data_array[miss_index][victim_r][word_cnt_r*32 +: 32];
+                dn_req_wen_r   <= 4'b1111;
+            end else if (dn_m1_req_ready) begin
                 dn_req_valid_r <= 1'b0;
                 state <= S_WB_RESP;
             end
@@ -698,13 +759,13 @@ always @(posedge clk or negedge rstn) begin
 
         // ─────────────────────────────────────────────────────
         S_FILL_REQ: begin
-            dn_req_valid_r <= 1'b1;
-            dn_req_addr_r  <= {miss_addr_r[31:5], word_cnt_r, 2'b00};
-            dn_req_write_r <= 1'b0;
-            dn_req_wdata_r <= 32'd0;
-            dn_req_wen_r   <= 4'd0;
-
-            if (dn_m1_req_ready) begin
+            if (!dn_req_valid_r) begin
+                dn_req_valid_r <= 1'b1;
+                dn_req_addr_r  <= {miss_addr_r[31:5], word_cnt_r, 2'b00};
+                dn_req_write_r <= 1'b0;
+                dn_req_wdata_r <= 32'd0;
+                dn_req_wen_r   <= 4'd0;
+            end else if (dn_m1_req_ready) begin
                 dn_req_valid_r <= 1'b0;
                 state <= S_FILL_RESP;
             end
@@ -750,6 +811,60 @@ always @(posedge clk or negedge rstn) begin
             endcase
 
             state <= S_IDLE;
+        end
+
+        S_FLUSH_SCAN: begin
+            dn_req_valid_r <= 1'b0;
+            if (valid_array[flush_set_r][flush_way_r] &&
+                dirty_array[flush_set_r][flush_way_r]) begin
+                flush_word_r <= 3'd0;
+                state        <= S_FLUSH_WB_REQ;
+            end else if (flush_way_r != 2'd3) begin
+                flush_way_r <= flush_way_r + 2'd1;
+            end else if (flush_set_r != {INDEX_W{1'b1}}) begin
+                flush_set_r <= flush_set_r + {{(INDEX_W-1){1'b0}}, 1'b1};
+                flush_way_r <= 2'd0;
+            end else begin
+                flush_done_r <= 1'b1;
+                state        <= S_IDLE;
+            end
+        end
+
+        S_FLUSH_WB_REQ: begin
+            if (!dn_req_valid_r) begin
+                dn_req_valid_r <= 1'b1;
+                dn_req_addr_r  <= flush_wb_addr;
+                dn_req_write_r <= 1'b1;
+                dn_req_wdata_r <= data_array[flush_set_r][flush_way_r][flush_word_r*32 +: 32];
+                dn_req_wen_r   <= 4'b1111;
+            end else if (dn_m1_req_ready) begin
+                dn_req_valid_r <= 1'b0;
+                state          <= S_FLUSH_WB_RESP;
+            end
+        end
+
+        S_FLUSH_WB_RESP: begin
+            dn_req_valid_r <= 1'b0;
+            if (dn_m1_resp_valid) begin
+                if (flush_word_r == 3'd7) begin
+                    dirty_array[flush_set_r][flush_way_r] <= 1'b0;
+                    flush_word_r <= 3'd0;
+                    if (flush_way_r != 2'd3) begin
+                        flush_way_r <= flush_way_r + 2'd1;
+                        state       <= S_FLUSH_SCAN;
+                    end else if (flush_set_r != {INDEX_W{1'b1}}) begin
+                        flush_set_r <= flush_set_r + {{(INDEX_W-1){1'b0}}, 1'b1};
+                        flush_way_r <= 2'd0;
+                        state       <= S_FLUSH_SCAN;
+                    end else begin
+                        flush_done_r <= 1'b1;
+                        state        <= S_IDLE;
+                    end
+                end else begin
+                    flush_word_r <= flush_word_r + 3'd1;
+                    state        <= S_FLUSH_WB_REQ;
+                end
+            end
         end
 
         default: state <= S_IDLE;

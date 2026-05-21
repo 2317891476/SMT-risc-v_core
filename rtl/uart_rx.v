@@ -7,7 +7,8 @@
 // =============================================================================
 
 module uart_rx #(
-    parameter integer CLK_DIV = 434
+    parameter integer CLK_DIV = 434,
+    parameter integer USE_OVERSAMPLE = 1
 ) (
     input  wire       clk,
     input  wire       rst_n,
@@ -19,7 +20,6 @@ module uart_rx #(
 );
 
     reg [2:0] rx_sync;
-    reg       rx_filtered_prev;
     wire      rx_filtered = (rx_sync[2] & rx_sync[1]) |
                             (rx_sync[2] & rx_sync[0]) |
                             (rx_sync[1] & rx_sync[0]);
@@ -27,15 +27,13 @@ module uart_rx #(
     always @(posedge clk or negedge rst_n) begin
         if (!rst_n) begin
             rx_sync <= 3'b111;
-            rx_filtered_prev <= 1'b1;
         end else begin
             rx_sync <= {rx_sync[1:0], rx};
-            rx_filtered_prev <= rx_filtered;
         end
     end
 
     generate
-        if (CLK_DIV >= 16) begin : gen_uart_rx_oversampled
+        if ((USE_OVERSAMPLE != 0) && (CLK_DIV >= 16)) begin : gen_uart_rx_oversampled
             localparam integer OS_RATE = 16;
             localparam [1:0] S_IDLE  = 2'd0;
             localparam [1:0] S_START = 2'd1;
@@ -69,8 +67,8 @@ module uart_rx #(
                     data_shift <= 8'd0;
                     sample_sum <= 2'd0;
                     start_low_count <= 2'd0;
-                    idle_high_count <= 5'd0;
-                    idle_armed <= 1'b0;
+                    idle_high_count <= 5'd16;
+                    idle_armed <= 1'b1;
                     byte_valid <= 1'b0;
                     byte_data <= 8'd0;
                     frame_error <= 1'b0;
@@ -85,8 +83,8 @@ module uart_rx #(
                         bit_idx <= 3'd0;
                         sample_sum <= 2'd0;
                         start_low_count <= 2'd0;
-                        idle_high_count <= 5'd0;
-                        idle_armed <= 1'b0;
+                        idle_high_count <= rx_filtered ? 5'd16 : 5'd0;
+                        idle_armed <= rx_filtered;
                     end else begin
                         os_acc <= os_acc_advance;
 
@@ -118,7 +116,7 @@ module uart_rx #(
                                         if (start_low_count != 2'd3)
                                             start_low_count <= start_low_count + 2'd1;
                                     end
-                                    if (os_idx >= 4'd7 && os_idx <= 4'd9 && rx_filtered) begin
+                                    if (os_idx >= 4'd6 && os_idx <= 4'd8 && rx_filtered) begin
                                         if (sample_sum != 2'd3)
                                             sample_sum <= sample_sum + 2'd1;
                                     end
@@ -144,7 +142,7 @@ module uart_rx #(
                                 S_DATA: begin
                                     idle_high_count <= 5'd0;
                                     idle_armed <= 1'b0;
-                                    if (os_idx >= 4'd7 && os_idx <= 4'd9 && rx_filtered) begin
+                                    if (os_idx >= 4'd6 && os_idx <= 4'd8 && rx_filtered) begin
                                         if (sample_sum != 2'd3)
                                             sample_sum <= sample_sum + 2'd1;
                                     end
@@ -164,12 +162,12 @@ module uart_rx #(
                                 end
 
                                 S_STOP: begin
-                                    if (os_idx >= 4'd7 && os_idx <= 4'd9 && rx_filtered) begin
+                                    if (os_idx >= 4'd4 && os_idx <= 4'd6 && rx_filtered) begin
                                         if (sample_sum != 2'd3)
                                             sample_sum <= sample_sum + 2'd1;
                                     end
 
-                                    if (os_idx == 4'd15) begin
+                                    if (os_idx == 4'd7) begin
                                         state <= S_IDLE;
                                         os_idx <= 4'd0;
                                         sample_sum <= 2'd0;
@@ -213,7 +211,8 @@ module uart_rx #(
             localparam [1:0] S_DATA  = 2'd2;
             localparam [1:0] S_STOP  = 2'd3;
             localparam integer CNT_W = (CLK_DIV <= 1) ? 1 : $clog2(CLK_DIV + 1);
-            localparam [CNT_W-1:0] HALF_DIV_CNT = HALF_DIV;
+            localparam integer START_SAMPLE_INT = (HALF_DIV <= 0) ? 0 : (HALF_DIV - 1);
+            localparam [CNT_W-1:0] START_SAMPLE_CNT = START_SAMPLE_INT;
             localparam [CNT_W-1:0] FULL_DIV_CNT = CLK_DIV - 1;
 
             reg [1:0] state;
@@ -224,6 +223,7 @@ module uart_rx #(
             reg             idle_ready_r;
             localparam integer IDLE_ARM_INT = (CLK_DIV <= 1) ? 0 : (CLK_DIV - 2);
             localparam [CNT_W-1:0] IDLE_ARM_CNT = IDLE_ARM_INT;
+            wire            rx_legacy_sample = (CLK_DIV < 8) ? rx : rx_filtered;
 
             always @(posedge clk or negedge rst_n) begin
                 if (!rst_n) begin
@@ -231,8 +231,8 @@ module uart_rx #(
                     sample_cnt <= {CNT_W{1'b0}};
                     bit_idx <= 3'd0;
                     data_shift <= 8'd0;
-                    idle_high_cnt <= {CNT_W{1'b0}};
-                    idle_ready_r <= 1'b0;
+                    idle_high_cnt <= FULL_DIV_CNT;
+                    idle_ready_r <= 1'b1;
                     byte_valid <= 1'b0;
                     byte_data <= 8'd0;
                     frame_error <= 1'b0;
@@ -244,17 +244,17 @@ module uart_rx #(
                         state <= S_IDLE;
                         sample_cnt <= {CNT_W{1'b0}};
                         bit_idx <= 3'd0;
-                        idle_high_cnt <= {CNT_W{1'b0}};
-                        idle_ready_r <= 1'b0;
+                        idle_high_cnt <= rx_legacy_sample ? FULL_DIV_CNT : {CNT_W{1'b0}};
+                        idle_ready_r <= rx_legacy_sample;
                     end else begin
                         case (state)
                             S_IDLE: begin
-                                if (rx_filtered_prev && !rx_filtered && idle_ready_r) begin
+                                if (!rx_legacy_sample && idle_ready_r) begin
                                     state <= S_START;
-                                    sample_cnt <= HALF_DIV_CNT;
+                                    sample_cnt <= START_SAMPLE_CNT;
                                     idle_high_cnt <= {CNT_W{1'b0}};
                                     idle_ready_r <= 1'b0;
-                                end else if (!rx_filtered) begin
+                                end else if (!rx_legacy_sample) begin
                                     idle_high_cnt <= {CNT_W{1'b0}};
                                     idle_ready_r <= 1'b0;
                                 end else begin
@@ -270,7 +270,7 @@ module uart_rx #(
                                 idle_ready_r <= 1'b0;
                                 if (sample_cnt != {CNT_W{1'b0}}) begin
                                     sample_cnt <= sample_cnt - {{(CNT_W-1){1'b0}}, 1'b1};
-                                end else if (!rx_filtered) begin
+                                end else if (!rx_legacy_sample) begin
                                     state <= S_DATA;
                                     sample_cnt <= FULL_DIV_CNT;
                                     bit_idx <= 3'd0;
@@ -285,11 +285,11 @@ module uart_rx #(
                                 if (sample_cnt != {CNT_W{1'b0}}) begin
                                     sample_cnt <= sample_cnt - {{(CNT_W-1){1'b0}}, 1'b1};
                                 end else if (bit_idx == 3'd7) begin
-                                    data_shift[bit_idx] <= rx_filtered;
+                                    data_shift[bit_idx] <= rx_legacy_sample;
                                     state <= S_STOP;
                                     sample_cnt <= FULL_DIV_CNT;
                                 end else begin
-                                    data_shift[bit_idx] <= rx_filtered;
+                                    data_shift[bit_idx] <= rx_legacy_sample;
                                     bit_idx <= bit_idx + 3'd1;
                                     sample_cnt <= FULL_DIV_CNT;
                                 end
@@ -302,7 +302,7 @@ module uart_rx #(
                                     sample_cnt <= sample_cnt - {{(CNT_W-1){1'b0}}, 1'b1};
                                 end else begin
                                     state <= S_IDLE;
-                                    if (rx_filtered) begin
+                                    if (rx_legacy_sample) begin
                                         // A valid stop bit should arm the receiver for the next
                                         // start bit immediately, otherwise standard back-to-back
                                         // UART bytes are dropped.

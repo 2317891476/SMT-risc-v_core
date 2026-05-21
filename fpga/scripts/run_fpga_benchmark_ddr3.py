@@ -56,7 +56,12 @@ TRANSPORT_PAYLOAD_HEX = ROM_DIR / "uart_loader_transport_payload.hex"
 TIMING_SUMMARY_AGGR = PROJECT_DIR / "reports" / "timing_summary_aggressive.rpt"
 TIMING_DETAIL_AGGR = PROJECT_DIR / "reports" / "timing_detail_aggressive.rpt"
 UTILIZATION_AGGR = PROJECT_DIR / "reports" / "utilization_aggressive.rpt"
-BUILD_ID_FILE = PROJECT_DIR / "adam_riscv_ax7203_bitstream_id.txt"
+TIMING_SUMMARY_INCR = PROJECT_DIR / "reports" / "timing_summary_incremental.rpt"
+TIMING_DETAIL_INCR = PROJECT_DIR / "reports" / "timing_detail_incremental.rpt"
+UTILIZATION_INCR = PROJECT_DIR / "reports" / "utilization_incremental.rpt"
+SYNTH_TIMING_SUMMARY = PROJECT_DIR / "reports" / "synth_timing_summary.rpt"
+BUILD_ID_FILE = Path(os.environ.get("BUILD_ID_FILE", str(PROJECT_DIR / "adam_riscv_ax7203_bitstream_id.txt")))
+BITSTREAM_FILE = Path(os.environ.get("BITSTREAM_FILE", str(PROJECT_DIR / "adam_riscv_ax7203_xc7a200tfbg484-2.bit")))
 UART_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.txt"
 UART_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.bin"
 UART_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.loader.decoded.txt"
@@ -77,15 +82,62 @@ BRIDGE_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_uart_capture.txt"
 BRIDGE_STEPS_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_steps_uart_capture.txt"
 STEP2_ONLY_CAPTURE_FILE = BUILD_DIR / "ddr3_bridge_audit_step2_only_uart_capture.bin"
 STEP2_ONLY_CAPTURE_DECODED_FILE = BUILD_DIR / "ddr3_bridge_audit_step2_only_uart_capture.decoded.txt"
+
+
+def env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        raise SystemExit(f"{name} must be a floating-point value, got {raw!r}")
+
+
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    return raw.strip().lower() not in ("0", "false", "no", "off")
+
+
+def env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or raw == "":
+        return default
+    try:
+        return int(raw, 0)
+    except ValueError:
+        raise SystemExit(f"{name} must be an integer value, got {raw!r}")
+
+
+def dcache_iverilog_defines(mode: str) -> list[str]:
+    if mode == "passthrough":
+        return ["-DDCACHE_PASSTHROUGH=1"]
+    if mode == "registered-pt":
+        return ["-DDCACHE_REGISTERED_PT=1"]
+    if mode == "read-only":
+        return ["-DDCACHE_READ_ONLY=1"]
+    return []
+
+
 UART_PAYLOAD_CHUNK_BYTES = 4
 UART_PAYLOAD_ACK = 0x06
-UART_BLOCK_CHECKSUM_BYTES = 64
+UART_BLOCK_CHECKSUM_BYTES = int(env_float("AX7203_UART_BLOCK_BYTES", 64))
+if UART_BLOCK_CHECKSUM_BYTES <= 0 or (UART_BLOCK_CHECKSUM_BYTES % UART_PAYLOAD_CHUNK_BYTES) != 0:
+    raise SystemExit("AX7203_UART_BLOCK_BYTES must be a positive multiple of 4")
 UART_BLOCK_ACK = 0x17
 UART_BLOCK_NACK = 0x15
 UART_PAYLOAD_ACK_TIMEOUT_S = 5.0
 UART_BLOCK_REPLY_TIMEOUT_S = 5.0
-UART_HEADER_BYTE_DELAY_S = 0.002
-UART_HEADER_TO_PAYLOAD_GRACE_S = 0.75
+UART_HEADER_BYTE_DELAY_S = env_float("AX7203_UART_HEADER_BYTE_DELAY_S", 0.005)
+UART_HEADER_TO_PAYLOAD_GRACE_S = env_float("AX7203_UART_HEADER_TO_PAYLOAD_GRACE_S", 2.0)
+UART_HEADER_RETRY_GAP_S = env_float("AX7203_UART_HEADER_RETRY_GAP_S", 1.0)
+UART_HEADER_RETRY_LIMIT = int(env_float("AX7203_UART_HEADER_RETRY_LIMIT", 20))
+UART_HEADER_TRAINING_BYTE = env_int("AX7203_UART_HEADER_TRAINING_BYTE", 0x55) & 0xFF
+UART_HEADER_TRAINING_COUNT = max(0, env_int("AX7203_UART_HEADER_TRAINING_COUNT", 32))
+UART_READY_TO_HEADER_DELAY_S = env_float("AX7203_UART_READY_TO_HEADER_DELAY_S", 0.050)
+UART_LOAD_START_TO_PAYLOAD_DELAY_S = env_float("AX7203_UART_LOAD_START_TO_PAYLOAD_DELAY_S", 0.100)
 UART_BOARD_PAYLOAD_BYTE_DELAY_S = 0.002
 UART_BOARD_PAYLOAD_CHUNK_GAP_S = 0.020
 UART_BOARD_PRE_BLOCK_CHECKSUM_GAP_S = 0.050
@@ -93,15 +145,17 @@ UART_BOARD_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
 UART_BOARD_BLOCK_GAP_S = 0.050
 UART_BOARD_BLOCK_RETRY_GAP_S = 0.500
 UART_BLOCK_RETRY_LIMIT = 8
-UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S = 8.0
-UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S = 8.0
-UART_MAINLINE_PAYLOAD_BYTE_DELAY_S = 0.002
-UART_MAINLINE_PAYLOAD_CHUNK_GAP_S = 0.030
-UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S = 0.080
-UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S = 0.003
-UART_MAINLINE_BLOCK_GAP_S = 0.080
-UART_MAINLINE_BLOCK_RETRY_GAP_S = 1.000
-UART_MAINLINE_BLOCK_RETRY_LIMIT = 10
+UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S = env_float("AX7203_UART_MAINLINE_PAYLOAD_ACK_TIMEOUT_S", 8.0)
+UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S = env_float("AX7203_UART_MAINLINE_BLOCK_REPLY_TIMEOUT_S", 15.0)
+UART_MAINLINE_PAYLOAD_BYTE_DELAY_S = env_float("AX7203_UART_MAINLINE_PAYLOAD_BYTE_DELAY_S", 0.003)
+UART_MAINLINE_PAYLOAD_CHUNK_GAP_S = env_float("AX7203_UART_MAINLINE_PAYLOAD_CHUNK_GAP_S", 0.050)
+UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S = env_float("AX7203_UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S", 0.100)
+UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S = env_float("AX7203_UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S", 0.003)
+UART_MAINLINE_BLOCK_GAP_S = env_float("AX7203_UART_MAINLINE_BLOCK_GAP_S", 0.100)
+UART_MAINLINE_BLOCK_RETRY_GAP_S = env_float("AX7203_UART_MAINLINE_BLOCK_RETRY_GAP_S", 1.500)
+UART_MAINLINE_BLOCK_RETRY_LIMIT = int(env_float("AX7203_UART_MAINLINE_BLOCK_RETRY_LIMIT", 12))
+UART_MAINLINE_CHECKSUM_RETRY_GAP_S = env_float("AX7203_UART_MAINLINE_CHECKSUM_RETRY_GAP_S", 0.500)
+UART_MAINLINE_CHECKSUM_RETRY_LIMIT = int(env_float("AX7203_UART_MAINLINE_CHECKSUM_RETRY_LIMIT", 3))
 EARLY_AUDIT_TRAINING_BYTE = 0x55
 EARLY_AUDIT_TRAINING_COUNT_SIM = 16
 EARLY_AUDIT_TRAINING_COUNT_BOARD = 32
@@ -110,10 +164,17 @@ LOADER_FULL_PREFIX1_BLOCKS = 1
 LOADER_FULL_PREFIX4_BLOCKS = 4
 LOADER_FULL_PREFIX16_BLOCKS = 16
 USE_REGISTERED_UART_RXDATA = True
-BLOCK_CHECKSUM_BYTES = 64
+LOADER_STREAM_TO_DDR3_ENABLED = env_bool("AX7203_LOADER_STREAM_TO_DDR3", False)
+LOADER_WAIT_DRAIN_PER_CHUNK_ENABLED = env_bool("AX7203_LOADER_WAIT_DRAIN_PER_CHUNK", False)
+FPGA_DCACHE_MODE = os.environ.get("AX7203_DCACHE_MODE", "read-only").strip().lower()
+if FPGA_DCACHE_MODE not in {"full", "passthrough", "registered-pt", "read-only"}:
+    raise SystemExit(
+        "AX7203_DCACHE_MODE must be one of: full, passthrough, registered-pt, read-only"
+    )
+BLOCK_CHECKSUM_BYTES = UART_BLOCK_CHECKSUM_BYTES
 TRANSPORT_CASE_SIZES = [16, 64, 256, 1024]
 TRANSPORT_READY_TOKEN = "BOOT TRANSPORT READY"
-TRANSPORT_TOP_SIM_TIMEOUT_S = 600
+TRANSPORT_TOP_SIM_TIMEOUT_S = 1200
 TRANSPORT_TOP_SIM_TB_TIMEOUT_NS = 35_000_000
 BRIDGE_TOP_SIM_TIMEOUT_S = 300
 BRIDGE_TOP_SIM_TB_TIMEOUT_NS = 30_000_000
@@ -140,8 +201,30 @@ STEP2_EVT_TRAP = 0xEF
 STEP2_EVT_SUMMARY = 0xF0
 LOADER_EVT_READY = 0x01
 LOADER_EVT_LOAD_START = 0x02
+LOADER_EVT_BOOT = 0x03
 LOADER_EVT_BLOCK_ACK = 0x11
 LOADER_EVT_BLOCK_NACK = 0x12
+LOADER_EVT_BLOCK_DATA_DONE = 0x13
+LOADER_EVT_BLOCK_CSUM_RX = 0x14
+LOADER_EVT_CHUNK_START = 0x16
+LOADER_EVT_CHUNK_PACKED = 0x18
+LOADER_EVT_CHUNK_STORED = 0x19
+LOADER_EVT_RX_ENTER = 0x1A
+LOADER_EVT_RX_POLL = 0x1B
+LOADER_EVT_RX_LSR = 0x1C
+LOADER_EVT_HW_M1_NOT_READY = 0xD1
+LOADER_EVT_HW_MMIO_WATCHDOG = 0xD2
+LOADER_EVT_HW_SB_STUCK = 0xD3
+LOADER_EVT_HW_RX_STALLED = 0xD4
+LOADER_EVT_HW_RX_ERROR = 0xD5
+LOADER_EVT_HW_CORE_PC_LO = 0xD6
+LOADER_EVT_HW_CORE_PC_HI = 0xD7
+LOADER_EVT_HW_CORE_FLAGS = 0xD8
+LOADER_EVT_HW_CORE_BR_ISSUE = 0xD9
+LOADER_EVT_HW_CORE_BR_COMPLETE = 0xDA
+LOADER_EVT_HW_CORE_BR_STATE = 0xDB
+LOADER_EVT_HW_CORE_BR_COUNTS = 0xDC
+LOADER_EVT_HW_CORE_ISSUE_PC_LO = 0xDD
 LOADER_EA_EVT_HDR_B0_RX = 0x31
 LOADER_EA_EVT_HDR_B1_RX = 0x32
 LOADER_EA_EVT_HDR_B2_RX = 0x33
@@ -164,6 +247,7 @@ LOADER_EVT_RX_OVERRUN = 0xE5
 LOADER_EVT_RX_FRAME_ERR = 0xE6
 LOADER_EVT_DRAIN_TIMEOUT = 0xE7
 LOADER_EVT_SIZE_TOO_BIG = 0xE8
+LOADER_EVT_RX_TIMEOUT = 0xEC
 LOADER_EA_EVT_TRAIN_TIMEOUT = 0xE9
 LOADER_EA_EVT_FLUSH_TIMEOUT = 0xEA
 LOADER_EVT_TRAP = 0xEF
@@ -237,6 +321,11 @@ def run_logged(
         raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}; see {log_path}")
 
 
+def clear_serial_after_jtag(ser, *, settle_s: float = 0.20) -> None:
+    """Let post-program UART output accumulate before starting protocol traffic."""
+    time.sleep(settle_s)
+
+
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8", errors="replace")
 
@@ -255,6 +344,15 @@ def derive_clk_wiz_half_div(core_clk_mhz: float) -> int:
 
 def derive_uart_clk_div(core_clk_mhz: float, baud: int = 115200) -> int:
     return max(1, round((core_clk_mhz * 1_000_000.0) / float(baud)))
+
+
+def default_vivado_jobs() -> str:
+    try:
+        cap = int(os.environ.get("AX7203_VIVADO_THREAD_CAP", "8"))
+    except ValueError:
+        cap = 8
+    cap = max(1, cap)
+    return str(max(1, min(os.cpu_count() or cap, cap)))
 
 
 def parse_build_id(path: Path) -> str:
@@ -301,11 +399,14 @@ def build_env(
     fetch_buffer_depth: int,
     core_clk_mhz: float,
     *,
-    smt_mode: int = 1,
+    smt_mode: int = 0,
     fetch_debug: bool = False,
     bridge_audit: bool = False,
     step2_beacon_debug: bool = False,
     loader_beacon_debug: bool = False,
+    loader_block_trace: bool = False,
+    loader_chunk_trace: bool = False,
+    loader_rx_trace: bool = False,
     uart_baud: int = 115200,
     rom_asm: Path | None = None,
     rom_march: str | None = None,
@@ -329,12 +430,29 @@ def build_env(
             "AX7203_DDR3_BRIDGE_AUDIT": "1" if bridge_audit else "0",
             "AX7203_STEP2_BEACON_DEBUG": "1" if step2_beacon_debug else "0",
             "AX7203_DDR3_LOADER_BEACON_DEBUG": "1" if loader_beacon_debug else "0",
+            "AX7203_ROM_DEFINES": " ".join(
+                define
+                for define, enabled in (
+                    ("LOADER_BLOCK_TRACE=1", loader_block_trace),
+                    ("LOADER_CHUNK_TRACE=1", loader_chunk_trace),
+                    (f"LOADER_CHUNK_TRACE_FIRST_BLOCK={int(os.environ.get('AX7203_LOADER_CHUNK_TRACE_FIRST_BLOCK', '0'))}", loader_chunk_trace),
+                    (f"LOADER_CHUNK_TRACE_BLOCK_LIMIT={int(os.environ.get('AX7203_LOADER_CHUNK_TRACE_BLOCK_LIMIT', '8'))}", loader_chunk_trace),
+                    ("LOADER_RX_TRACE=1", loader_rx_trace),
+                    ("LOADER_STREAM_TO_DDR3=1", LOADER_STREAM_TO_DDR3_ENABLED),
+                    ("LOADER_WAIT_DRAIN_PER_CHUNK=1", LOADER_WAIT_DRAIN_PER_CHUNK_ENABLED),
+                    (f"LOADER_BLOCK_CHECKSUM_BYTES={UART_BLOCK_CHECKSUM_BYTES}", True),
+                )
+                if enabled
+            ),
             "AX7203_TRANSPORT_UART_RXDATA_REG_TEST": "1" if transport_uart_rxdata_reg_test else "0",
-            "AX7203_MAX_THREADS": "4",
-            "AX7203_SYNTH_JOBS": "4",
-            "AX7203_IMPL_JOBS": "4",
+            "AX7203_DCACHE_MODE": FPGA_DCACHE_MODE,
         }
     )
+    jobs = default_vivado_jobs()
+    env.setdefault("AX7203_MAX_THREADS", jobs)
+    env.setdefault("AX7203_SYNTH_JOBS", jobs)
+    env.setdefault("AX7203_IMPL_JOBS", jobs)
+    env.setdefault("AX7203_SYNTH_TIMEOUT_MIN", "30")
     if rom_asm is not None:
         env["AX7203_ROM_ASM"] = str(rom_asm)
     if rom_march is not None:
@@ -444,7 +562,7 @@ def run_loader_top_sim(
     full_gate_prefix_block_ack_target: int = LOADER_FULL_PREFIX1_BLOCKS,
     fetch_debug: bool = False,
     uart_baud: int = 115200,
-    smt_mode: int = 1,
+    smt_mode: int = 0,
     log_name: str = "05_run_loader_top_sim.log",
     fast_uart_profile: bool = False,
     fast_uart_inject: int | None = None,
@@ -459,19 +577,39 @@ def run_loader_top_sim(
     early_audit_enable: bool = False,
     early_audit_bad_magic_byte: int = -1,
     beacon_selftest_enable: bool = False,
+    loader_block_trace: bool = False,
+    loader_chunk_trace: bool = False,
+    loader_rx_trace: bool = False,
 ) -> Path:
     write_payload_hex(Path(str(manifest["bin"])))
     rom_to_build = rom_asm if rom_asm is not None else LOADER_ROM
+    rom_build_cmd = [
+        sys.executable,
+        str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
+        "--asm",
+        str(rom_to_build),
+        "--define",
+        "SIM_FAST_STORE_DRAIN=1",
+        "--define",
+        f"LOADER_BLOCK_CHECKSUM_BYTES={UART_BLOCK_CHECKSUM_BYTES}",
+    ]
+    if loader_block_trace:
+        rom_build_cmd.extend(["--define", "LOADER_BLOCK_TRACE=1"])
+    if loader_chunk_trace:
+        rom_build_cmd.extend(["--define", "LOADER_CHUNK_TRACE=1"])
+        first_block = int(os.environ.get("AX7203_LOADER_CHUNK_TRACE_FIRST_BLOCK", "0"))
+        block_limit = int(os.environ.get("AX7203_LOADER_CHUNK_TRACE_BLOCK_LIMIT", "8"))
+        rom_build_cmd.extend(["--define", f"LOADER_CHUNK_TRACE_FIRST_BLOCK={first_block}"])
+        rom_build_cmd.extend(["--define", f"LOADER_CHUNK_TRACE_BLOCK_LIMIT={block_limit}"])
+    if loader_rx_trace:
+        rom_build_cmd.extend(["--define", "LOADER_RX_TRACE=1"])
+    if LOADER_STREAM_TO_DDR3_ENABLED:
+        rom_build_cmd.extend(["--define", "LOADER_STREAM_TO_DDR3=1"])
+    if LOADER_WAIT_DRAIN_PER_CHUNK_ENABLED:
+        rom_build_cmd.extend(["--define", "LOADER_WAIT_DRAIN_PER_CHUNK=1"])
+    rom_build_cmd.append("--merge-mem-subsys")
     run_logged(
-        [
-            sys.executable,
-            str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
-            "--asm",
-            str(rom_to_build),
-            "--define",
-            "SIM_FAST_STORE_DRAIN=1",
-            "--merge-mem-subsys",
-        ],
+        rom_build_cmd,
         cwd=REPO_ROOT,
         log_path=logs_dir / "03_build_loader_rom.log",
         timeout=300,
@@ -526,7 +664,7 @@ def run_loader_top_sim(
         if tb_timeout_ns is None:
             tb_timeout_ns = 3_000_000
         if sim_timeout_s is None:
-            sim_timeout_s = 180
+            sim_timeout_s = 600
     elif expect_exec_pass:
         if tb_timeout_ns is None:
             tb_timeout_ns = max(5_000_000, int((payload_size + 512) * 14 * tb_uart_bit_ns * 6))
@@ -554,6 +692,7 @@ def run_loader_top_sim(
         "-DENABLE_DDR3=1",
         "-DAX7203_DDR3_LOADER_BEACON_DEBUG=1",
         "-DL2_PASSTHROUGH=1",
+        *dcache_iverilog_defines(FPGA_DCACHE_MODE),
         "-DTRANSPORT_UART_RXDATA_REG_TEST=1",
         *(["-DFULL_GATE_FAST_UART=1"] if fast_uart_profile else []),
         *debug_defines,
@@ -590,6 +729,7 @@ def run_loader_top_sim(
             str(out_file),
             f"+PAYLOAD_SIZE={int(manifest['size_bytes'])}",
             f"+PAYLOAD_CHECKSUM={int(manifest['checksum32'])}",
+            f"+BLOCK_CHECKSUM_BYTES={UART_BLOCK_CHECKSUM_BYTES}",
             f"+EXPECT_EXEC_PASS={1 if expect_exec_pass else 0}",
             f"+FULL_GATE_PREFIX_ENABLE={1 if full_gate_prefix_enable else 0}",
             f"+FULL_GATE_PREFIX_BLOCK_ACK_TARGET={full_gate_prefix_block_ack_target}",
@@ -658,7 +798,7 @@ def run_loader_beacon_selftest_top_sim(
     fetch_buffer_depth: int,
     core_clk_mhz: float,
     uart_baud: int,
-    smt_mode: int = 1,
+    smt_mode: int = 0,
     log_name: str = "05_run_loader_beacon_selftest_top_sim.log",
     rom_asm: Path | None = None,
     tb_timeout_ns: int | None = None,
@@ -917,7 +1057,7 @@ def run_bridge_top_sim(
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DDDR3_BRIDGE_AUDIT=1",
         f"-DTB_SHORT_TIMEOUT_NS={BRIDGE_TOP_SIM_TB_TIMEOUT_NS}",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
@@ -991,7 +1131,7 @@ def run_bridge_steps_top_sim(
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DDDR3_BRIDGE_AUDIT=1",
         f"-DTB_SHORT_TIMEOUT_NS={BRIDGE_STEPS_TOP_SIM_TB_TIMEOUT_NS}",
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
@@ -1063,7 +1203,7 @@ def run_step2_only_top_sim(
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DDDR3_BRIDGE_AUDIT=1",
         "-DAX7203_STEP2_BEACON_DEBUG=1",
         f"-DTB_SHORT_TIMEOUT_NS={STEP2_ONLY_TOP_SIM_TB_TIMEOUT_NS}",
@@ -1139,7 +1279,7 @@ def run_transport_top_sim(
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
         "-DENABLE_ROCC_ACCEL=0",
-        "-DSMT_MODE=1",
+        "-DSMT_MODE=0",
         "-DTRANSPORT_UART_RXDATA_REG_TEST=1",
         f"-DTB_SHORT_TIMEOUT_NS={TRANSPORT_TOP_SIM_TB_TIMEOUT_NS}",
         f"-DTB_UART_BIT_NS={tb_uart_bit_ns}",
@@ -1249,6 +1389,20 @@ def load_existing_early_audit_manifest(logs_dir: Path, *, stem: str = "dhrystone
     return manifest
 
 
+def load_existing_payload_manifest(logs_dir: Path, stem: str) -> dict[str, object]:
+    bin_path = logs_dir / "payload_manifests" / f"{stem}.bin"
+    if not bin_path.exists():
+        raise RuntimeError(f"Existing board payload not found: {bin_path}. Run a non-board-only flow once first.")
+    payload = bin_path.read_bytes()
+    return {
+        "bin": str(bin_path),
+        "entry": 0x80000000,
+        "load_addr": 0x80000000,
+        "size_bytes": len(payload),
+        "checksum32": sum(payload) & 0xFFFFFFFF,
+    }
+
+
 def early_audit_passed(result: dict[str, object]) -> bool:
     return bool(
         result.get("loader_ready_seen")
@@ -1295,6 +1449,88 @@ def write_beacon_selftest_summary(path: Path, result: dict[str, object], *, buil
         f"JtagLog: {jtag_log}",
     ]
     write_summary(path, lines)
+
+
+def run_dhrystone_board_capture(
+    logs_dir: Path,
+    *,
+    port: str,
+    uart_baud: int,
+    capture_seconds: int,
+    dhrystone_runs: int,
+    smoke_manifest: dict[str, object],
+    baseline_manifest: dict[str, object],
+    vivado: str,
+    env: dict[str, str],
+) -> tuple[dict[str, object], dict[str, object], str, Path]:
+    try:
+        import serial  # type: ignore
+    except ImportError as exc:  # pragma: no cover - depends on local environment
+        raise RuntimeError("pyserial is required for board benchmark UART loading") from exc
+
+    build_id = "N/A"
+    with serial.Serial(port, uart_baud, timeout=0.05) as ser:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        run_logged(
+            [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
+            cwd=REPO_ROOT,
+            env=env,
+            log_path=logs_dir / "10_program_jtag_smoke.log",
+            timeout=1800,
+        )
+        build_id = parse_build_id(BUILD_ID_FILE)
+        clear_serial_after_jtag(ser)
+        uart_smoke_result = run_uart_loader_capture(
+            None,
+            smoke_manifest,
+            capture_seconds,
+            UART_SMOKE_CAPTURE_FILE,
+            uart_baud=uart_baud,
+            raw_log_path=UART_SMOKE_CAPTURE_RAW_FILE,
+            loader_decoded_path=UART_SMOKE_CAPTURE_LOADER_DECODED_FILE,
+            expect_dhrystone=True,
+            ser=ser,
+        )
+
+    if uart_smoke_result.get("loader_bad_seen"):
+        raise RuntimeError(f"Smoke loader beacon reported failure ({uart_smoke_result.get('bad_reason', 'unknown')}); see {UART_SMOKE_CAPTURE_FILE}")
+    if not uart_smoke_result.get("loader_summary_seen"):
+        raise RuntimeError(f"Smoke loader beacon missing SUMMARY; see {UART_SMOKE_CAPTURE_FILE}")
+    if not uart_smoke_result.get("loader_summary_ok"):
+        raise RuntimeError(f"Smoke loader SUMMARY indicates failure; see {UART_SMOKE_CAPTURE_FILE}")
+    if not uart_smoke_result.get("saw_start"):
+        raise RuntimeError(f"Smoke board run missing DHRYSTONE START; see {UART_SMOKE_CAPTURE_FILE}")
+    if not uart_smoke_result.get("saw_done"):
+        raise RuntimeError(f"Smoke board run missing DHRYSTONE DONE; see {UART_SMOKE_CAPTURE_FILE}")
+
+    if dhrystone_runs == 1:
+        return dict(uart_smoke_result), dict(uart_smoke_result), build_id, UART_SMOKE_CAPTURE_FILE
+
+    with serial.Serial(port, uart_baud, timeout=0.05) as ser:
+        ser.reset_input_buffer()
+        ser.reset_output_buffer()
+        run_logged(
+            [vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")],
+            cwd=REPO_ROOT,
+            env=env,
+            log_path=logs_dir / "11_program_jtag_baseline.log",
+            timeout=1800,
+        )
+        build_id = parse_build_id(BUILD_ID_FILE)
+        clear_serial_after_jtag(ser)
+        uart_result = run_uart_loader_capture(
+            None,
+            baseline_manifest,
+            capture_seconds,
+            UART_CAPTURE_FILE,
+            uart_baud=uart_baud,
+            raw_log_path=UART_CAPTURE_RAW_FILE,
+            loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
+            expect_dhrystone=True,
+            ser=ser,
+        )
+    return uart_result, uart_smoke_result, build_id, UART_CAPTURE_FILE
 
 
 def run_loader_beacon_selftest_board(
@@ -1965,8 +2201,30 @@ def loader_event_name(evt_type: int) -> str:
     names = {
         LOADER_EVT_READY: "READY",
         LOADER_EVT_LOAD_START: "LOAD_START",
+        LOADER_EVT_BOOT: "BOOT",
         LOADER_EVT_BLOCK_ACK: "BLOCK_ACK",
         LOADER_EVT_BLOCK_NACK: "BLOCK_NACK",
+        LOADER_EVT_BLOCK_DATA_DONE: "BLOCK_DATA_DONE",
+        LOADER_EVT_BLOCK_CSUM_RX: "BLOCK_CSUM_RX",
+        LOADER_EVT_CHUNK_START: "CHUNK_START",
+        LOADER_EVT_CHUNK_PACKED: "CHUNK_PACKED",
+        LOADER_EVT_CHUNK_STORED: "CHUNK_STORED",
+        LOADER_EVT_RX_ENTER: "RX_ENTER",
+        LOADER_EVT_RX_POLL: "RX_POLL",
+        LOADER_EVT_RX_LSR: "RX_LSR",
+        LOADER_EVT_HW_M1_NOT_READY: "HW_M1_NOT_READY",
+        LOADER_EVT_HW_MMIO_WATCHDOG: "HW_MMIO_WATCHDOG",
+        LOADER_EVT_HW_SB_STUCK: "HW_SB_STUCK",
+        LOADER_EVT_HW_RX_STALLED: "HW_RX_STALLED",
+        LOADER_EVT_HW_RX_ERROR: "HW_RX_ERROR",
+        LOADER_EVT_HW_CORE_PC_LO: "HW_CORE_PC_LO",
+        LOADER_EVT_HW_CORE_PC_HI: "HW_CORE_PC_HI",
+        LOADER_EVT_HW_CORE_FLAGS: "HW_CORE_FLAGS",
+        LOADER_EVT_HW_CORE_BR_ISSUE: "HW_CORE_BR_ISSUE",
+        LOADER_EVT_HW_CORE_BR_COMPLETE: "HW_CORE_BR_COMPLETE",
+        LOADER_EVT_HW_CORE_BR_STATE: "HW_CORE_BR_STATE",
+        LOADER_EVT_HW_CORE_BR_COUNTS: "HW_CORE_BR_COUNTS",
+        LOADER_EVT_HW_CORE_ISSUE_PC_LO: "HW_CORE_ISSUE_PC_LO",
         LOADER_EA_EVT_HDR_B0_RX: "HDR_B0_RX",
         LOADER_EA_EVT_HDR_B1_RX: "HDR_B1_RX",
         LOADER_EA_EVT_HDR_B2_RX: "HDR_B2_RX",
@@ -1989,6 +2247,7 @@ def loader_event_name(evt_type: int) -> str:
         LOADER_EVT_RX_FRAME_ERR: "RX_FRAME_ERR",
         LOADER_EVT_DRAIN_TIMEOUT: "DRAIN_TIMEOUT",
         LOADER_EVT_SIZE_TOO_BIG: "SIZE_TOO_BIG",
+        LOADER_EVT_RX_TIMEOUT: "RX_TIMEOUT",
         LOADER_EA_EVT_TRAIN_TIMEOUT: "TRAIN_TIMEOUT",
         LOADER_EA_EVT_FLUSH_TIMEOUT: "FLUSH_TIMEOUT",
         LOADER_EVT_TRAP: "TRAP",
@@ -2092,6 +2351,33 @@ def decode_loader_beacon_frames(raw_bytes: bytes) -> dict[str, object]:
     }
 
 
+class LoaderBeaconStreamFilter:
+    """Incrementally strip loader beacon frames from a serial byte stream."""
+
+    def __init__(self) -> None:
+        self._pending = bytearray()
+
+    def feed(self, chunk: bytes) -> bytes:
+        self._pending.extend(chunk)
+        passthrough = bytearray()
+        while self._pending:
+            if self._pending[0] != STEP2_BEACON_SOF:
+                passthrough.append(self._pending.pop(0))
+                continue
+            if len(self._pending) < 5:
+                break
+            seq = self._pending[1]
+            evt_type = self._pending[2]
+            evt_arg = self._pending[3]
+            evt_chk = self._pending[4]
+            exp_chk = STEP2_BEACON_SOF ^ seq ^ evt_type ^ evt_arg
+            if evt_chk == exp_chk:
+                del self._pending[:5]
+            else:
+                passthrough.append(self._pending.pop(0))
+        return bytes(passthrough)
+
+
 def reduce_loader_events(
     events: list[tuple[int, int, int, int]],
     *,
@@ -2133,6 +2419,8 @@ def reduce_loader_events(
 
         if evt_type == LOADER_EVT_READY:
             pass
+        elif evt_type == LOADER_EVT_BOOT:
+            pass
         elif evt_type == LOADER_EVT_LOAD_START:
             load_start_seen = True
         elif evt_type == LOADER_EVT_BLOCK_ACK:
@@ -2141,6 +2429,22 @@ def reduce_loader_events(
                 max_block_ack_arg = evt_arg
         elif evt_type == LOADER_EVT_BLOCK_NACK:
             block_nack_events += 1
+        elif evt_type == LOADER_EVT_BLOCK_DATA_DONE:
+            pass
+        elif evt_type == LOADER_EVT_BLOCK_CSUM_RX:
+            pass
+        elif evt_type == LOADER_EVT_CHUNK_START:
+            pass
+        elif evt_type == LOADER_EVT_CHUNK_PACKED:
+            pass
+        elif evt_type == LOADER_EVT_CHUNK_STORED:
+            pass
+        elif evt_type in (
+            LOADER_EVT_RX_ENTER,
+            LOADER_EVT_RX_POLL,
+            LOADER_EVT_RX_LSR,
+        ):
+            pass
         elif evt_type == LOADER_EVT_READ_OK:
             read_ok_seen = True
         elif evt_type == LOADER_EVT_LOAD_OK:
@@ -3114,6 +3418,10 @@ def capture_bridge_audit(port: str, capture_seconds: int, log_path: Path, *, uar
 
 
 def write_uart_bytes_slow(ser, payload: bytes, *, byte_delay_s: float) -> None:
+    if byte_delay_s <= 0:
+        ser.write(payload)
+        ser.flush()
+        return
     for byte in payload:
         ser.write(bytes([byte]))
         ser.flush()
@@ -3132,21 +3440,36 @@ def send_uart_payload_with_ack(
     chunk_bytes: int = UART_PAYLOAD_CHUNK_BYTES,
     byte_delay_s: float = UART_BOARD_PAYLOAD_BYTE_DELAY_S,
     chunk_gap_s: float = UART_BOARD_PAYLOAD_CHUNK_GAP_S,
+    allow_ack_miss: bool = False,
+    trace_event=None,
+    block_idx: int = 0,
+    block_start: int = 0,
 ) -> dict[str, int | bool]:
     payload_chunks_sent = 0
     payload_ack_timeout = False
+    payload_chunk_ack_miss_count = 0
 
     for off in range(0, len(payload), chunk_bytes):
-        write_uart_bytes_slow(ser, payload[off : off + chunk_bytes], byte_delay_s=byte_delay_s)
+        chunk = payload[off : off + chunk_bytes]
+        if trace_event is not None:
+            trace_event(f"SEND_CHUNK block={block_idx} off=0x{block_start + off:08X} len={len(chunk)} data={chunk.hex()}")
+        write_uart_bytes_slow(ser, chunk, byte_delay_s=byte_delay_s)
         payload_chunks_sent += 1
-        if not wait_for_ack():
-            payload_ack_timeout = True
-            break
-        time.sleep(chunk_gap_s)
+        ack_seen = wait_for_ack()
+        if trace_event is not None:
+            trace_event(f"ACK_CHUNK block={block_idx} off=0x{block_start + off:08X} seen={int(ack_seen)}")
+        if not ack_seen:
+            payload_chunk_ack_miss_count += 1
+            if not allow_ack_miss:
+                payload_ack_timeout = True
+                break
+        if off + chunk_bytes < len(payload):
+            time.sleep(chunk_gap_s)
 
     return {
         "payload_chunks_sent": payload_chunks_sent,
         "payload_ack_timeout": payload_ack_timeout,
+        "payload_chunk_ack_miss_count": payload_chunk_ack_miss_count,
     }
 
 
@@ -3163,12 +3486,18 @@ def send_uart_payload_with_block_checksums(
     chunk_gap_s: float = UART_BOARD_PAYLOAD_CHUNK_GAP_S,
     pre_block_checksum_gap_s: float = UART_BOARD_PRE_BLOCK_CHECKSUM_GAP_S,
     checksum_byte_delay_s: float = UART_BOARD_BLOCK_CHECKSUM_BYTE_DELAY_S,
+    checksum_retry_gap_s: float = 0.0,
+    checksum_retry_limit: int = 1,
     block_gap_s: float = UART_BOARD_BLOCK_GAP_S,
     block_retry_gap_s: float = UART_BOARD_BLOCK_RETRY_GAP_S,
     retry_limit: int = UART_BLOCK_RETRY_LIMIT,
+    allow_chunk_ack_miss: bool = False,
+    trace_event=None,
 ) -> dict[str, int | bool | str]:
     payload_chunks_sent = 0
     payload_ack_timeout = False
+    payload_chunk_ack_miss_count = 0
+    payload_checksum_ack_miss_count = 0
     payload_block_ack_count = 0
     payload_block_nack_count = 0
     payload_block_retry_count = 0
@@ -3180,6 +3509,8 @@ def send_uart_payload_with_block_checksums(
         block_checksum = sum(block) & 0xFFFFFFFF
         block_done = False
         for attempt in range(retry_limit):
+            if trace_event is not None:
+                trace_event(f"BLOCK_BEGIN block={block_idx} attempt={attempt}")
             send_result = send_uart_payload_with_ack(
                 ser,
                 block,
@@ -3187,19 +3518,51 @@ def send_uart_payload_with_block_checksums(
                 chunk_bytes=chunk_bytes,
                 byte_delay_s=byte_delay_s,
                 chunk_gap_s=chunk_gap_s,
+                allow_ack_miss=allow_chunk_ack_miss,
+                trace_event=trace_event,
+                block_idx=block_idx,
+                block_start=block_start,
             )
             payload_chunks_sent += int(send_result["payload_chunks_sent"])
+            payload_chunk_ack_miss_count += int(send_result["payload_chunk_ack_miss_count"])
             if bool(send_result["payload_ack_timeout"]):
                 payload_ack_timeout = True
                 payload_failed_block = block_idx
                 break
             time.sleep(pre_block_checksum_gap_s)
-            write_uart_u32_le_slow(ser, block_checksum, byte_delay_s=checksum_byte_delay_s)
-            if not wait_for_chunk_ack():
-                payload_ack_timeout = True
-                payload_failed_block = block_idx
+            checksum_ack_seen = False
+            reply = "timeout"
+            checksum_attempts = max(1, checksum_retry_limit)
+            for checksum_try in range(checksum_attempts):
+                if checksum_try != 0:
+                    time.sleep(checksum_retry_gap_s)
+                if trace_event is not None:
+                    trace_event(f"SEND_BLOCK_CHECKSUM block={block_idx} try={checksum_try} value=0x{block_checksum:08X}")
+                write_uart_u32_le_slow(ser, block_checksum, byte_delay_s=checksum_byte_delay_s)
+                if wait_for_chunk_ack():
+                    checksum_ack_seen = True
+                    if trace_event is not None:
+                        trace_event(f"ACK_BLOCK_CHECKSUM block={block_idx} try={checksum_try} seen=1")
+                    break
+                payload_checksum_ack_miss_count += 1
+                if trace_event is not None:
+                    trace_event(f"ACK_BLOCK_CHECKSUM block={block_idx} try={checksum_try} seen=0")
+                if allow_chunk_ack_miss:
+                    reply = wait_for_block_reply()
+                    if trace_event is not None:
+                        trace_event(f"BLOCK_REPLY_AFTER_CSUM_MISS block={block_idx} reply={reply}")
+                    if reply != "timeout":
+                        break
+                else:
+                    payload_ack_timeout = True
+                    payload_failed_block = block_idx
+                    break
+            if payload_ack_timeout:
                 break
-            reply = wait_for_block_reply()
+            if reply == "timeout":
+                reply = wait_for_block_reply()
+            if trace_event is not None:
+                trace_event(f"BLOCK_REPLY block={block_idx} reply={reply}")
             if reply == "ack":
                 payload_block_ack_count += 1
                 block_done = True
@@ -3225,6 +3588,8 @@ def send_uart_payload_with_block_checksums(
     return {
         "payload_chunks_sent": payload_chunks_sent,
         "payload_ack_timeout": payload_ack_timeout,
+        "payload_chunk_ack_miss_count": payload_chunk_ack_miss_count,
+        "payload_checksum_ack_miss_count": payload_checksum_ack_miss_count,
         "payload_block_ack_count": payload_block_ack_count,
         "payload_block_nack_count": payload_block_nack_count,
         "payload_block_retry_count": payload_block_retry_count,
@@ -3252,13 +3617,17 @@ def drive_uart_loader(
         len(payload),
         int(manifest["checksum32"]),
     )
+    header_wire = bytes([UART_HEADER_TRAINING_BYTE]) * UART_HEADER_TRAINING_COUNT + header
 
     raw_bytes = bytearray()
     loader_analysis = analyze_loader_beacon(b"")
-    passthrough_len = 0
+    beacon_filter = LoaderBeaconStreamFilter()
     sent_header = False
     sent_payload = False
     header_sent_at = 0.0
+    header_send_count = 0
+    last_header_sent_at = 0.0
+    ready_seen_ever = False
     start = time.monotonic()
     blind_header_deadline = start + 1.0
     deadline = start + capture_seconds
@@ -3268,6 +3637,8 @@ def drive_uart_loader(
     payload_ack_timeout = False
     payload_ack_credit = 0
     payload_ack_count = 0
+    payload_chunk_ack_miss_count = 0
+    payload_checksum_ack_miss_count = 0
     payload_chunks_sent = 0
     payload_block_ack_count = 0
     payload_block_nack_count = 0
@@ -3275,18 +3646,21 @@ def drive_uart_loader(
     payload_block_retry_limit_hit = False
     payload_failed_block = -1
     pending_block_replies: list[str] = []
+    host_trace_lines: list[str] = []
+    host_trace_path = raw_log_path.with_suffix(".host_trace.txt")
+
+    def trace_event(message: str) -> None:
+        host_trace_lines.append(f"{time.monotonic() - start:10.6f} {message}")
 
     def active_text() -> str:
         return bytes(loader_analysis.get("passthrough_bytes", b"")).decode("latin1", errors="ignore")
 
     def ingest_serial_bytes(chunk: bytes) -> str:
-        nonlocal loader_analysis, passthrough_len, payload_ack_credit, payload_ack_count
+        nonlocal loader_analysis, payload_ack_credit, payload_ack_count
         if chunk:
             raw_bytes.extend(chunk)
+            new_passthrough = beacon_filter.feed(chunk)
             loader_analysis = analyze_loader_beacon(bytes(raw_bytes))
-            passthrough = bytes(loader_analysis.get("passthrough_bytes", b""))
-            new_passthrough = passthrough[passthrough_len:]
-            passthrough_len = len(passthrough)
             for byte in new_passthrough:
                 if byte == UART_PAYLOAD_ACK:
                     payload_ack_credit += 1
@@ -3339,17 +3713,29 @@ def drive_uart_loader(
                 time.sleep(0.001)
 
     def write_header_slow() -> None:
-        write_uart_bytes_slow(ser, header, byte_delay_s=UART_HEADER_BYTE_DELAY_S)
+        write_uart_bytes_slow(ser, header_wire, byte_delay_s=UART_HEADER_BYTE_DELAY_S)
+
+    def send_header_once() -> None:
+        nonlocal sent_header, header_sent_at, header_send_count, last_header_sent_at
+        trace_event(
+            f"SEND_HEADER try={header_send_count} len={len(header)} "
+            f"training={UART_HEADER_TRAINING_COUNT}"
+        )
+        write_header_slow()
+        sent_header = True
+        header_sent_at = time.monotonic()
+        last_header_sent_at = header_sent_at
+        header_send_count += 1
 
     while time.monotonic() < deadline:
         chunk = ser.read(4096)
         if chunk:
             current_text = ingest_serial_bytes(chunk)
-            if (not sent_header) and bool(loader_analysis.get("ready_seen", False)):
-                time.sleep(0.2)
-                write_header_slow()
-                sent_header = True
-                header_sent_at = time.monotonic()
+            if bool(loader_analysis.get("ready_seen", False)):
+                ready_seen_ever = True
+            if (not sent_header) and ready_seen_ever:
+                time.sleep(UART_READY_TO_HEADER_DELAY_S)
+                send_header_once()
             if expect_dhrystone and sent_payload and "DHRYSTONE DONE" in current_text:
                 break
             if (
@@ -3361,19 +3747,34 @@ def drive_uart_loader(
             if bool(loader_analysis.get("bad_seen", False)):
                 break
         elif (not sent_header) and time.monotonic() >= blind_header_deadline:
-            write_header_slow()
-            sent_header = True
-            header_sent_at = time.monotonic()
+            send_header_once()
+
+        if (
+            sent_header
+            and (not sent_payload)
+            and (not bool(loader_analysis.get("load_start_seen", False)))
+            and (not bool(loader_analysis.get("bad_seen", False)))
+            and header_send_count < UART_HEADER_RETRY_LIMIT
+            and last_header_sent_at != 0.0
+            and time.monotonic() >= (last_header_sent_at + UART_HEADER_RETRY_GAP_S)
+        ):
+            send_header_once()
 
         if (
             sent_header
             and (not sent_payload)
             and (
                 bool(loader_analysis.get("load_start_seen", False))
-                or (header_sent_at != 0.0 and time.monotonic() >= (header_sent_at + UART_HEADER_TO_PAYLOAD_GRACE_S))
+                or (
+                    not ready_seen_ever
+                    and
+                    header_sent_at != 0.0
+                    and header_send_count >= UART_HEADER_RETRY_LIMIT
+                    and time.monotonic() >= (header_sent_at + UART_HEADER_TO_PAYLOAD_GRACE_S)
+                )
             )
         ):
-            time.sleep(0.2)
+            time.sleep(UART_LOAD_START_TO_PAYLOAD_DELAY_S)
             send_result = send_uart_payload_with_block_checksums(
                 ser,
                 payload,
@@ -3384,12 +3785,18 @@ def drive_uart_loader(
                 chunk_gap_s=UART_MAINLINE_PAYLOAD_CHUNK_GAP_S,
                 pre_block_checksum_gap_s=UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S,
                 checksum_byte_delay_s=UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S,
+                checksum_retry_gap_s=UART_MAINLINE_CHECKSUM_RETRY_GAP_S,
+                checksum_retry_limit=UART_MAINLINE_CHECKSUM_RETRY_LIMIT,
                 block_gap_s=UART_MAINLINE_BLOCK_GAP_S,
                 block_retry_gap_s=UART_MAINLINE_BLOCK_RETRY_GAP_S,
                 retry_limit=UART_MAINLINE_BLOCK_RETRY_LIMIT,
+                allow_chunk_ack_miss=True,
+                trace_event=trace_event,
             )
             payload_chunks_sent += int(send_result["payload_chunks_sent"])
             payload_ack_timeout = bool(send_result["payload_ack_timeout"])
+            payload_chunk_ack_miss_count = int(send_result["payload_chunk_ack_miss_count"])
+            payload_checksum_ack_miss_count = int(send_result["payload_checksum_ack_miss_count"])
             payload_block_ack_count = int(send_result["payload_block_ack_count"])
             payload_block_nack_count = int(send_result["payload_block_nack_count"])
             payload_block_retry_count = int(send_result["payload_block_retry_count"])
@@ -3406,6 +3813,7 @@ def drive_uart_loader(
     text_log_path.write_text(current_text, encoding="latin1", errors="ignore")
     raw_log_path.write_bytes(bytes(raw_bytes))
     loader_decoded_path.write_text(str(loader_analysis.get("decoded_text", "")), encoding="utf-8")
+    host_trace_path.write_text("\n".join(host_trace_lines) + ("\n" if host_trace_lines else ""), encoding="utf-8")
 
     fetch_probe = parse_fetch_probe(current_text)
     bad_block = analyze_loader_bad_block(current_text, payload)
@@ -3431,6 +3839,8 @@ def drive_uart_loader(
         "payload_ack_timeout": payload_ack_timeout,
         "payload_ack_count": payload_ack_count,
         "payload_ack_credit_remaining": payload_ack_credit,
+        "payload_chunk_ack_miss_count": payload_chunk_ack_miss_count,
+        "payload_checksum_ack_miss_count": payload_checksum_ack_miss_count,
         "payload_chunks_sent": payload_chunks_sent,
         "payload_block_ack_count": payload_block_ack_count,
         "payload_block_nack_count": payload_block_nack_count,
@@ -3475,6 +3885,7 @@ def drive_uart_loader(
         "bench_instret": benchmark_counters["instret"],
         "bench_ipc_x1000": benchmark_counters["ipc_x1000"],
         "capture_bytes": len(raw_bytes),
+        "host_trace_file": str(host_trace_path),
     }
 
 
@@ -3506,7 +3917,7 @@ def drive_uart_loader_early_audit(
 
     raw_bytes = bytearray()
     loader_analysis = analyze_loader_early_audit_beacon(b"")
-    passthrough_len = 0
+    beacon_filter = LoaderBeaconStreamFilter()
     sent_header = False
     sent_payload = False
     header_sent_at = 0.0
@@ -3533,13 +3944,11 @@ def drive_uart_loader_early_audit(
         return bytes(loader_analysis.get("passthrough_bytes", b"")).decode("latin1", errors="ignore")
 
     def ingest_serial_bytes(chunk: bytes) -> str:
-        nonlocal loader_analysis, passthrough_len, payload_ack_credit, payload_ack_count
+        nonlocal loader_analysis, payload_ack_credit, payload_ack_count
         if chunk:
             raw_bytes.extend(chunk)
+            new_passthrough = beacon_filter.feed(chunk)
             loader_analysis = analyze_loader_early_audit_beacon(bytes(raw_bytes))
-            passthrough = bytes(loader_analysis.get("passthrough_bytes", b""))
-            new_passthrough = passthrough[passthrough_len:]
-            passthrough_len = len(passthrough)
             for byte in new_passthrough:
                 if byte == UART_PAYLOAD_ACK:
                     payload_ack_credit += 1
@@ -3635,6 +4044,8 @@ def drive_uart_loader_early_audit(
                 chunk_gap_s=UART_MAINLINE_PAYLOAD_CHUNK_GAP_S,
                 pre_block_checksum_gap_s=UART_MAINLINE_PRE_BLOCK_CHECKSUM_GAP_S,
                 checksum_byte_delay_s=UART_MAINLINE_BLOCK_CHECKSUM_BYTE_DELAY_S,
+                checksum_retry_gap_s=UART_MAINLINE_CHECKSUM_RETRY_GAP_S,
+                checksum_retry_limit=UART_MAINLINE_CHECKSUM_RETRY_LIMIT,
                 block_gap_s=UART_MAINLINE_BLOCK_GAP_S,
                 block_retry_gap_s=UART_MAINLINE_BLOCK_RETRY_GAP_S,
                 retry_limit=1,
@@ -3736,6 +4147,7 @@ def drive_uart_transport_sessions(ser, manifests: list[dict[str, object]], captu
             "DRAIN TIMEOUT",
             "BAD MAGIC",
             "CAL FAIL",
+            "RX WAIT",
             "RX OVERRUN",
             "RX FRAME ERR",
         ):
@@ -3880,7 +4292,7 @@ def drive_uart_transport_sessions(ser, manifests: list[dict[str, object]], captu
 
 
 def run_uart_loader_capture(
-    port: str,
+    port: str | None,
     manifest: dict[str, object],
     capture_seconds: int,
     text_log_path: Path,
@@ -3889,12 +4301,26 @@ def run_uart_loader_capture(
     raw_log_path: Path,
     loader_decoded_path: Path,
     expect_dhrystone: bool = True,
+    ser=None,
 ) -> dict[str, object]:
+    if ser is not None:
+        return drive_uart_loader(
+            ser,
+            manifest,
+            capture_seconds,
+            text_log_path,
+            raw_log_path=raw_log_path,
+            loader_decoded_path=loader_decoded_path,
+            expect_dhrystone=expect_dhrystone,
+        )
+
     try:
         import serial  # type: ignore
     except ImportError as exc:  # pragma: no cover - depends on local environment
         raise RuntimeError("pyserial is required for board benchmark UART loading") from exc
 
+    if port is None:
+        raise RuntimeError("Serial port must be provided when no open serial object is passed")
     with serial.Serial(port, uart_baud, timeout=0.05) as ser:
         ser.reset_input_buffer()
         ser.reset_output_buffer()
@@ -4075,6 +4501,10 @@ def write_summary(path: Path, lines: list[str]) -> None:
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+class FlowComplete(Exception):
+    """Internal control flow marker for successful early-stop modes."""
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--benchmark", choices=("dhrystone",), default="dhrystone")
@@ -4103,7 +4533,16 @@ def main() -> int:
     parser.add_argument("--transport-ack-mode", choices=("tight", "loose"), default="loose", help="ACK pacing style for transport-only disturbance cases.")
     parser.add_argument("--transport-seeds", type=int, default=3, help="Number of combo disturbance seeds to run for 1KB transport TB coverage.")
     parser.add_argument("--run-loader-long-sim", action="store_true", help="Also run the non-blocking prefix16 loader full-payload simulation.")
+    parser.add_argument("--loader-block-trace", action="store_true", help="Build the DDR3 loader ROM with lightweight per-block trace UART events.")
+    parser.add_argument("--loader-chunk-trace", action="store_true", help="Build the DDR3 loader ROM with first-block chunk trace UART events.")
+    parser.add_argument("--loader-rx-trace", action="store_true", help="Build the DDR3 loader ROM with first-byte 16550 RX polling trace UART events.")
     parser.add_argument("--skip-vivado", action="store_true", help="Stop after RTL/top simulation and payload build.")
+    parser.add_argument(
+        "--fpga-impl-mode",
+        choices=("aggressive", "incremental", "synth-only", "board-only"),
+        default="aggressive",
+        help="FPGA backend mode: full aggressive implementation, incremental implementation, top synthesis only, or reuse the existing bitstream for board UART capture.",
+    )
     args = parser.parse_args()
 
     active_modes = [
@@ -4125,6 +4564,10 @@ def main() -> int:
         raise SystemExit("--fetch-debug, --transport-only, --bridge-audit, --bridge-audit-steps, --bridge-audit-step2-only, --loader-early-audit, --loader-early-audit-board-only, --loader-beacon-selftest, and --loader-beacon-selftest-board-only are mutually exclusive")
     if args.early_audit_sweep_3point and not args.loader_early_audit_board_only:
         raise SystemExit("--early-audit-sweep-3point requires --loader-early-audit-board-only")
+    if args.fpga_impl_mode == "board-only" and active_modes and not (
+        args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only
+    ):
+        raise SystemExit("--fpga-impl-mode board-only is only supported for the standard dhrystone DDR3 loader flow and bridge DDR3 diagnostic modes; use the existing dedicated *-board-only options for loader diagnostics")
 
     logs_dir_name = (
         "fpga_bridge_audit_step2_only"
@@ -4145,16 +4588,11 @@ def main() -> int:
     )
     logs_dir = BUILD_DIR / logs_dir_name
     logs_dir.mkdir(parents=True, exist_ok=True)
-    diagnostic_single_thread = not (
-        args.transport_only
-        or args.bridge_audit
-        or args.bridge_audit_steps
-        or args.bridge_audit_step2_only
-    )
-    diagnostic_smt_mode = 0 if diagnostic_single_thread else 1
+    diagnostic_smt_mode = 0
     failed_stage = "none"
     failure_detail = ""
     current_stage = "init"
+    actual_fpga_impl_mode = args.fpga_impl_mode
     manifest: dict[str, object] = {}
     early_audit_manifest: dict[str, object] = {}
     smoke_manifest: dict[str, object] = {}
@@ -4207,6 +4645,9 @@ def main() -> int:
         bridge_audit=args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only,
         step2_beacon_debug=args.bridge_audit_step2_only,
         loader_beacon_debug=not (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only),
+        loader_block_trace=args.loader_block_trace,
+        loader_chunk_trace=args.loader_chunk_trace,
+        loader_rx_trace=args.loader_rx_trace,
         uart_baud=args.uart_baud,
         rom_asm=STEP2_ONLY_ROM if args.bridge_audit_step2_only else (BRIDGE_STEPS_ROM if args.bridge_audit_steps else (BRIDGE_STRESS_ROM if args.bridge_audit else (TRANSPORT_ROM if args.transport_only else (BEACON_SELFTEST_ROM if (args.loader_beacon_selftest or args.loader_beacon_selftest_board_only) else (EARLY_AUDIT_ROM if (args.loader_early_audit or args.loader_early_audit_board_only) else LOADER_ROM))))),
         rom_march="rv32i_zicsr" if (args.transport_only or args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only) else None,
@@ -4283,6 +4724,177 @@ def main() -> int:
             ],
         )
         return 0 if single_trial["pass"] else 1
+    if args.fpga_impl_mode == "board-only" and (args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only):
+        if not BITSTREAM_FILE.exists():
+            raise SystemExit(f"Existing bitstream not found for board-only mode: {BITSTREAM_FILE}")
+        vivado = which_required("vivado.bat", "vivado")
+        failed_stage = "none"
+        failure_detail = "none"
+        try:
+            try:
+                import serial  # type: ignore
+            except ImportError as exc:  # pragma: no cover - depends on local environment
+                raise RuntimeError("pyserial is required for bridge-audit UART capture") from exc
+            with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                ser.reset_input_buffer()
+                ser.reset_output_buffer()
+                run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                build_id = parse_build_id(BUILD_ID_FILE)
+                if not (args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only):
+                    clear_serial_after_jtag(ser)
+                if args.bridge_audit_step2_only:
+                    uart_result = capture_step2_only_stream(ser, args.capture_seconds, capture_file, reset_buffers=False)
+                elif args.bridge_audit_steps:
+                    uart_result = capture_bridge_audit_steps_stream(ser, args.capture_seconds, capture_file, reset_buffers=False)
+                else:
+                    uart_result = capture_bridge_audit_stream(ser, args.capture_seconds, capture_file, reset_buffers=False)
+        except Exception as exc:  # noqa: BLE001
+            failed_stage = "board_only_uart_capture"
+            failure_detail = str(exc)
+            build_id = parse_build_id(BUILD_ID_FILE) if BUILD_ID_FILE.exists() else "N/A"
+        if args.bridge_audit_step2_only:
+            passed = (
+                failed_stage == "none"
+                and not bool(uart_result.get("saw_bad", False))
+                and not bool(uart_result.get("saw_trap", False))
+                and not bool(uart_result.get("saw_cal_fail", False))
+                and bool(uart_result.get("ready_seen", False))
+                and bool(uart_result.get("case1_pass", False))
+                and bool(uart_result.get("case2_pass", False))
+                and bool(uart_result.get("case3_pass", False))
+                and bool(uart_result.get("case4_pass", False))
+                and bool(uart_result.get("case5_pass", False))
+                and bool(uart_result.get("summary_seen", False))
+                and uart_result.get("summary_mask") == 0x1F
+            )
+        elif args.bridge_audit_steps:
+            passed = (
+                failed_stage == "none"
+                and not bool(uart_result.get("saw_bad", False))
+                and bool(uart_result.get("ready_seen", False))
+                and bool(uart_result.get("step1_pass", False))
+                and bool(uart_result.get("step2_pass", False))
+                and bool(uart_result.get("step3_pass", False))
+                and bool(uart_result.get("all_ok_seen", False))
+            )
+        else:
+            passed = (
+                failed_stage == "none"
+                and not bool(uart_result.get("saw_bad", False))
+                and bool(uart_result.get("ready_seen", False))
+                and int(uart_result.get("ok_count", 0)) >= 2
+            )
+        write_json(
+            logs_dir / "summary.json",
+            {
+                "Flow": flow_name,
+                "FpgaImplMode": args.fpga_impl_mode,
+                "Result": "PASS" if passed else "FAIL",
+                "BuildID": build_id,
+                "FailedStage": failed_stage,
+                "FailureDetail": failure_detail,
+                "CaptureFile": str(capture_file),
+                "BoardResult": uart_result,
+            },
+        )
+        write_summary(
+            logs_dir / "summary.txt",
+            [
+                f"Flow: {flow_name}",
+                f"Result: {'PASS' if passed else 'FAIL'}",
+                f"FpgaImplMode: {args.fpga_impl_mode}",
+                f"BuildID: {build_id}",
+                f"FailedStage: {failed_stage}",
+                f"FailureDetail: {failure_detail}",
+                f"Bitstream: {BITSTREAM_FILE}",
+                f"CaptureFile: {capture_file}",
+                f"DecodedCaptureFile: {uart_result.get('decoded_log_path', 'N/A')}",
+                f"CaptureBytes: {uart_result.get('capture_bytes', 0)}",
+                f"ReadySeen: {uart_result.get('ready_seen', False)}",
+                f"SawBad: {uart_result.get('saw_bad', False)}",
+                f"BadReason: {uart_result.get('bad_reason', 'none')}",
+                f"Step2SummarySeen: {uart_result.get('summary_seen', False)}",
+                f"Step2SummaryMask: {fmt_optional_hex(uart_result.get('summary_mask', 'N/A'))}",
+                f"BridgeOkCount: {uart_result.get('ok_count', 0)}",
+                f"BridgeStepsAllOkSeen: {uart_result.get('all_ok_seen', False)}",
+            ],
+        )
+        return 0 if passed else 1
+    if args.fpga_impl_mode == "board-only":
+        if not BITSTREAM_FILE.exists():
+            raise SystemExit(f"Existing bitstream not found for board-only mode: {BITSTREAM_FILE}")
+        smoke_manifest = load_existing_payload_manifest(BUILD_DIR / "fpga_benchmark_ddr3", "dhrystone_smoke")
+        baseline_manifest = (
+            smoke_manifest
+            if args.dhrystone_runs == 1
+            else load_existing_payload_manifest(BUILD_DIR / "fpga_benchmark_ddr3", "dhrystone_baseline")
+        )
+        manifest = baseline_manifest
+        vivado = which_required("vivado.bat", "vivado")
+        failed_stage = "none"
+        failure_detail = "none"
+        try:
+            uart_result, uart_smoke_result, build_id, capture_file = run_dhrystone_board_capture(
+                logs_dir,
+                port=args.port,
+                uart_baud=args.uart_baud,
+                capture_seconds=args.capture_seconds,
+                dhrystone_runs=args.dhrystone_runs,
+                smoke_manifest=smoke_manifest,
+                baseline_manifest=baseline_manifest,
+                vivado=vivado,
+                env=env,
+            )
+        except Exception as exc:  # noqa: BLE001
+            failed_stage = "board_only_uart_load_and_capture"
+            failure_detail = str(exc)
+            uart_result = {}
+            uart_smoke_result = {}
+            build_id = parse_build_id(BUILD_ID_FILE)
+            capture_file = UART_SMOKE_CAPTURE_FILE
+        passed = failed_stage == "none" and bool(uart_result.get("loader_summary_ok", False) and uart_result.get("saw_start", False) and uart_result.get("saw_done", False))
+        write_json(
+            logs_dir / "summary.json",
+            {
+                "Flow": flow_name,
+                "FpgaImplMode": args.fpga_impl_mode,
+                "Result": "PASS" if passed else "FAIL",
+                "BuildID": build_id,
+                "FailedStage": failed_stage,
+                "FailureDetail": failure_detail,
+                "CaptureFile": str(capture_file),
+                "SmokeResult": uart_smoke_result,
+                "BoardResult": uart_result,
+            },
+        )
+        write_summary(
+            logs_dir / "summary.txt",
+            [
+                f"Flow: {flow_name}",
+                f"Result: {'PASS' if passed else 'FAIL'}",
+                f"FpgaImplMode: {args.fpga_impl_mode}",
+                f"BuildID: {build_id}",
+                f"FailedStage: {failed_stage}",
+                f"FailureDetail: {failure_detail}",
+                f"Bitstream: {BITSTREAM_FILE}",
+                f"SmokeCaptureFile: {UART_SMOKE_CAPTURE_FILE}",
+                f"SmokeCaptureRawFile: {UART_SMOKE_CAPTURE_RAW_FILE}",
+                f"SmokeLoaderDecodedFile: {UART_SMOKE_CAPTURE_LOADER_DECODED_FILE}",
+                f"SmokePassed: {bool(uart_smoke_result.get('loader_summary_ok', False) and uart_smoke_result.get('saw_start', False) and uart_smoke_result.get('saw_done', False))}",
+                f"BaselineCaptureFile: {UART_CAPTURE_FILE}",
+                f"BaselineCaptureRawFile: {UART_CAPTURE_RAW_FILE}",
+                f"BaselineLoaderDecodedFile: {UART_CAPTURE_LOADER_DECODED_FILE}",
+                f"BaselinePassed: {bool(uart_result.get('loader_summary_ok', False) and uart_result.get('saw_start', False) and uart_result.get('saw_done', False))}",
+                f"LoaderSummaryMask: {fmt_optional_hex(uart_result.get('loader_summary_mask', 'N/A'))}",
+                f"UartSawReady: {uart_result.get('saw_ready', False)}",
+                f"UartSawLoadStart: {uart_result.get('saw_load_start', False)}",
+                f"UartSawDhrystoneStart: {uart_result.get('saw_start', False)}",
+                f"UartSawDhrystoneDone: {uart_result.get('saw_done', False)}",
+                f"UartBadReason: {uart_result.get('bad_reason', 'none')}",
+                f"CaptureFile: {capture_file}",
+            ],
+        )
+        return 0 if passed else 1
     try:
         current_stage = "basic"
         run_logged([sys.executable, str(REPO_ROOT / "verification" / "run_all_tests.py"), "--basic"], cwd=REPO_ROOT, log_path=logs_dir / "01_basic.log", timeout=3600)
@@ -4465,6 +5077,9 @@ def main() -> int:
                     uart_baud=args.uart_baud,
                     smt_mode=diagnostic_smt_mode,
                     log_name="05_run_loader_top_sim.log",
+                    loader_block_trace=args.loader_block_trace,
+                    loader_chunk_trace=args.loader_chunk_trace,
+                    loader_rx_trace=args.loader_rx_trace,
                 )
             else:
                 current_stage = "build_loader_quick_payload"
@@ -4490,6 +5105,17 @@ def main() -> int:
                     uart_baud=args.uart_baud,
                     smt_mode=diagnostic_smt_mode,
                     log_name="05_run_loader_quick_sim.log",
+                    fast_uart_inject=1,
+                    initial_header_wait_bits=4,
+                    initial_payload_wait_bits=4,
+                    inter_u32_gap_bits=1,
+                    chunk_ack_gap_bits=1,
+                    block_done_gap_bits=1,
+                    tb_timeout_ns=2_000_000,
+                    sim_timeout_s=720,
+                    loader_block_trace=args.loader_block_trace,
+                    loader_chunk_trace=args.loader_chunk_trace,
+                    loader_rx_trace=args.loader_rx_trace,
                 )
                 current_stage = "build_dhrystone_smoke_payload"
                 smoke_manifest = build_dhrystone_payload(
@@ -4524,6 +5150,9 @@ def main() -> int:
                     block_done_gap_bits=prefix1_profile["block_done_gap_bits"],
                     tb_timeout_ns=prefix1_profile["tb_timeout_ns"],
                     sim_timeout_s=prefix1_profile["sim_timeout_s"],
+                    loader_block_trace=args.loader_block_trace,
+                    loader_chunk_trace=args.loader_chunk_trace,
+                    loader_rx_trace=args.loader_rx_trace,
                 )
                 if args.run_loader_long_sim:
                     prefix16_profile = loader_full_gate_profile(LOADER_FULL_PREFIX16_BLOCKS, args.core_clk_mhz)
@@ -4554,6 +5183,9 @@ def main() -> int:
                             block_done_gap_bits=prefix4_profile["block_done_gap_bits"],
                             tb_timeout_ns=prefix4_profile["tb_timeout_ns"],
                             sim_timeout_s=prefix4_profile["sim_timeout_s"],
+                            loader_block_trace=args.loader_block_trace,
+                            loader_chunk_trace=args.loader_chunk_trace,
+                            loader_rx_trace=args.loader_rx_trace,
                         )
                     except Exception as prefix4_exc:  # noqa: BLE001
                         loader_full_prefix4_failure_detail = str(prefix4_exc)
@@ -4581,6 +5213,9 @@ def main() -> int:
                             block_done_gap_bits=prefix16_profile["block_done_gap_bits"],
                             tb_timeout_ns=prefix16_profile["tb_timeout_ns"],
                             sim_timeout_s=prefix16_profile["sim_timeout_s"],
+                            loader_block_trace=args.loader_block_trace,
+                            loader_chunk_trace=args.loader_chunk_trace,
+                            loader_rx_trace=args.loader_rx_trace,
                         )
                     except Exception as long_exc:  # noqa: BLE001
                         loader_full_long_failure_detail = str(long_exc)
@@ -4608,16 +5243,66 @@ def main() -> int:
         if not args.skip_vivado:
             vivado = which_required("vivado.bat", "vivado")
             current_stage = "create_project"
-            if PROJECT_DIR.exists():
-                shutil.rmtree(PROJECT_DIR)
-            run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "create_project_ax7203.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "07_create_project.log", timeout=3600)
+            project_file = PROJECT_DIR / "adam_riscv_ax7203.xpr"
+            mig_generated_dir = PROJECT_DIR / "adam_riscv_ax7203.gen" / "sources_1" / "ip" / "mig_7series_0"
+            needs_project_create = not project_file.exists()
+            create_reason = "project missing"
+            if (
+                not needs_project_create
+                and env.get("AX7203_ENABLE_DDR3") == "1"
+                and not mig_generated_dir.exists()
+            ):
+                needs_project_create = True
+                create_reason = f"DDR3 MIG generated directory missing: {mig_generated_dir}"
+            if not needs_project_create:
+                (logs_dir / "07_create_project.log").write_text(
+                    f"Reusing existing Vivado project for --fpga-impl-mode {args.fpga_impl_mode}: {project_file}\n",
+                    encoding="utf-8",
+                )
+            else:
+                (logs_dir / "07_create_project.reason.txt").write_text(
+                    f"Creating Vivado project because {create_reason}.\n",
+                    encoding="utf-8",
+                )
+                run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "create_project_ax7203.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "07_create_project.log", timeout=3600)
             current_stage = "synth"
             run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "run_ax7203_synth.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "08_run_synth.log", timeout=7200)
-            current_stage = "impl_aggressive"
-            run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "impl_aggressive.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "09_impl_aggressive.log", timeout=7200)
-            timing = parse_timing_summary(TIMING_SUMMARY_AGGR)
+            if args.fpga_impl_mode == "synth-only":
+                current_stage = "none"
+                raise FlowComplete()
+            if args.fpga_impl_mode == "incremental":
+                current_stage = "impl_incremental"
+                incr_script = REPO_ROOT / "fpga" / "impl_incremental.tcl"
+                incr_log = logs_dir / "09_impl_incremental.log"
+                try:
+                    run_logged([vivado, "-mode", "batch", "-source", str(incr_script)], cwd=REPO_ROOT, env=env, log_path=incr_log, timeout=18000)
+                    incr_timing = parse_timing_summary(TIMING_SUMMARY_INCR)
+                    if incr_timing["constraints_met"] != "True" or float(incr_timing["wns"]) < 0.0 or float(incr_timing["whs"]) < 0.0:
+                        raise RuntimeError(f"incremental implementation timing failed; see {TIMING_SUMMARY_INCR}")
+                    timing_report = TIMING_SUMMARY_INCR
+                except Exception as incr_exc:  # noqa: BLE001
+                    fallback_log = logs_dir / "09_impl_incremental_fallback.log"
+                    fallback_log.write_text(
+                        "Incremental implementation failed; falling back to aggressive implementation.\n"
+                        f"Reason: {incr_exc}\n"
+                        f"Incremental log: {incr_log}\n",
+                        encoding="utf-8",
+                    )
+                    current_stage = "impl_aggressive_fallback"
+                    actual_fpga_impl_mode = "aggressive-fallback"
+                    impl_script = REPO_ROOT / "fpga" / "impl_aggressive.tcl"
+                    impl_log = logs_dir / "09_impl_aggressive_fallback.log"
+                    run_logged([vivado, "-mode", "batch", "-source", str(impl_script)], cwd=REPO_ROOT, env=env, log_path=impl_log, timeout=18000)
+                    timing_report = TIMING_SUMMARY_AGGR
+            else:
+                current_stage = "impl_aggressive"
+                impl_script = REPO_ROOT / "fpga" / "impl_aggressive.tcl"
+                impl_log = logs_dir / "09_impl_aggressive.log"
+                timing_report = TIMING_SUMMARY_AGGR
+                run_logged([vivado, "-mode", "batch", "-source", str(impl_script)], cwd=REPO_ROOT, env=env, log_path=impl_log, timeout=18000)
+            timing = parse_timing_summary(timing_report)
             if timing["constraints_met"] != "True" or float(timing["wns"]) < 0.0 or float(timing["whs"]) < 0.0:
-                raise RuntimeError(f"Aggressive implementation timing failed; see {TIMING_SUMMARY_AGGR}")
+                raise RuntimeError(f"{actual_fpga_impl_mode} implementation timing failed; see {timing_report}")
             if args.loader_beacon_selftest:
                 board_result, build_id, board_failed_stage, board_failure_detail, _jtag_log = run_loader_beacon_selftest_board(
                     logs_dir,
@@ -4642,6 +5327,8 @@ def main() -> int:
                     current_stage = "program_jtag"
                     run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
                     build_id = parse_build_id(BUILD_ID_FILE)
+                    if not (args.bridge_audit or args.bridge_audit_steps or args.bridge_audit_step2_only):
+                        clear_serial_after_jtag(ser)
                     current_stage = "uart_load_and_capture"
                     if args.bridge_audit_step2_only:
                         uart_result = capture_step2_only_stream(
@@ -4676,6 +5363,7 @@ def main() -> int:
                         current_stage = "program_jtag"
                         run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
                         build_id = parse_build_id(BUILD_ID_FILE)
+                        clear_serial_after_jtag(ser)
                         current_stage = "uart_load_and_capture_early_audit"
                         uart_result = run_uart_loader_early_audit_capture(
                             None,
@@ -4695,15 +5383,21 @@ def main() -> int:
                         )
                         capture_file = UART_EARLY_AUDIT_CAPTURE_FILE
                 else:
-                    current_stage = "program_jtag"
-                    run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
-                    build_id = parse_build_id(BUILD_ID_FILE)
+                    if args.transport_only:
+                        with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                            ser.reset_input_buffer()
+                            ser.reset_output_buffer()
+                            current_stage = "program_jtag"
+                            run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                            build_id = parse_build_id(BUILD_ID_FILE)
+                            current_stage = "uart_load_and_capture"
+                            uart_result = drive_uart_transport_sessions(ser, transport_manifests, args.capture_seconds, capture_file)
+                    else:
+                        current_stage = "program_jtag"
+                        run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag.log", timeout=1800)
+                        build_id = parse_build_id(BUILD_ID_FILE)
                 if args.transport_only:
-                    current_stage = "uart_load_and_capture"
-                    with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
-                        ser.reset_input_buffer()
-                        ser.reset_output_buffer()
-                        uart_result = drive_uart_transport_sessions(ser, transport_manifests, args.capture_seconds, capture_file)
+                    pass
                 elif args.fetch_debug:
                     current_stage = "uart_load_and_capture"
                     uart_result = run_uart_loader_capture(
@@ -4720,16 +5414,25 @@ def main() -> int:
                     pass
                 else:
                     current_stage = "uart_load_and_capture_smoke"
-                    uart_smoke_result = run_uart_loader_capture(
-                        args.port,
-                        smoke_manifest,
-                        args.capture_seconds,
-                        UART_SMOKE_CAPTURE_FILE,
-                        uart_baud=args.uart_baud,
-                        raw_log_path=UART_SMOKE_CAPTURE_RAW_FILE,
-                        loader_decoded_path=UART_SMOKE_CAPTURE_LOADER_DECODED_FILE,
-                        expect_dhrystone=True,
-                    )
+                    with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                        ser.reset_input_buffer()
+                        ser.reset_output_buffer()
+                        current_stage = "program_jtag_smoke"
+                        run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "10_program_jtag_smoke.log", timeout=1800)
+                        build_id = parse_build_id(BUILD_ID_FILE)
+                        clear_serial_after_jtag(ser)
+                        current_stage = "uart_load_and_capture_smoke"
+                        uart_smoke_result = run_uart_loader_capture(
+                            None,
+                            smoke_manifest,
+                            args.capture_seconds,
+                            UART_SMOKE_CAPTURE_FILE,
+                            uart_baud=args.uart_baud,
+                            raw_log_path=UART_SMOKE_CAPTURE_RAW_FILE,
+                            loader_decoded_path=UART_SMOKE_CAPTURE_LOADER_DECODED_FILE,
+                            expect_dhrystone=True,
+                            ser=ser,
+                        )
                     if uart_smoke_result.get("loader_bad_seen"):
                         raise RuntimeError(f"Smoke loader beacon reported failure ({uart_smoke_result.get('bad_reason', 'unknown')}); see {UART_SMOKE_CAPTURE_FILE}")
                     if not uart_smoke_result.get("loader_summary_seen"):
@@ -4744,20 +5447,25 @@ def main() -> int:
                         uart_result = dict(uart_smoke_result)
                         capture_file = UART_SMOKE_CAPTURE_FILE
                     else:
-                        current_stage = "program_jtag_baseline"
-                        run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "11_program_jtag_baseline.log", timeout=1800)
-                        build_id = parse_build_id(BUILD_ID_FILE)
-                        current_stage = "uart_load_and_capture_baseline"
-                        uart_result = run_uart_loader_capture(
-                            args.port,
-                            baseline_manifest,
-                            args.capture_seconds,
-                            UART_CAPTURE_FILE,
-                            uart_baud=args.uart_baud,
-                            raw_log_path=UART_CAPTURE_RAW_FILE,
-                            loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
-                            expect_dhrystone=True,
-                        )
+                        with serial.Serial(args.port, args.uart_baud, timeout=0.05) as ser:
+                            ser.reset_input_buffer()
+                            ser.reset_output_buffer()
+                            current_stage = "program_jtag_baseline"
+                            run_logged([vivado, "-mode", "batch", "-source", str(REPO_ROOT / "fpga" / "program_ax7203_jtag.tcl")], cwd=REPO_ROOT, env=env, log_path=logs_dir / "11_program_jtag_baseline.log", timeout=1800)
+                            build_id = parse_build_id(BUILD_ID_FILE)
+                            clear_serial_after_jtag(ser)
+                            current_stage = "uart_load_and_capture_baseline"
+                            uart_result = run_uart_loader_capture(
+                                None,
+                                baseline_manifest,
+                                args.capture_seconds,
+                                UART_CAPTURE_FILE,
+                                uart_baud=args.uart_baud,
+                                raw_log_path=UART_CAPTURE_RAW_FILE,
+                                loader_decoded_path=UART_CAPTURE_LOADER_DECODED_FILE,
+                                expect_dhrystone=True,
+                                ser=ser,
+                            )
                         capture_file = UART_CAPTURE_FILE
             if args.bridge_audit_step2_only:
                 if uart_result.get("saw_bad") or uart_result.get("saw_trap") or uart_result.get("saw_cal_fail"):
@@ -4857,11 +5565,18 @@ def main() -> int:
                         raise RuntimeError(f"UART missing DHRYSTONE START; see {capture_file}")
                     if not uart_result.get("saw_done"):
                         raise RuntimeError(f"UART missing DHRYSTONE DONE; see {capture_file}")
+    except FlowComplete:
+        pass
     except Exception as exc:  # noqa: BLE001
         failed_stage = current_stage
         failure_detail = str(exc)
 
-    timing = parse_timing_summary(TIMING_SUMMARY_AGGR)
+    timing_summary_path = (
+        TIMING_SUMMARY_INCR
+        if actual_fpga_impl_mode == "incremental"
+        else (SYNTH_TIMING_SUMMARY if args.fpga_impl_mode == "synth-only" else TIMING_SUMMARY_AGGR)
+    )
+    timing = parse_timing_summary(timing_summary_path)
     loader_quick_sim_result = (
         analyze_loader_sim_log(read_text(loader_quick_sim_log))
         if loader_quick_sim_log and loader_quick_sim_log.exists()
@@ -4897,6 +5612,8 @@ def main() -> int:
         f"FailedStage: {failed_stage}",
         f"FailureDetail: {failure_detail or 'none'}",
         f"Benchmark: {args.benchmark}",
+        f"FpgaImplMode: {args.fpga_impl_mode}",
+        f"FpgaImplActualMode: {actual_fpga_impl_mode}",
         f"TransportOnly: {args.transport_only}",
         f"BridgeAudit: {args.bridge_audit}",
         f"BridgeAuditSteps: {args.bridge_audit_steps}",
@@ -4908,12 +5625,16 @@ def main() -> int:
         "EnableMemSubsys: 1",
         "EnableDDR3: 1",
         "L2Passthrough: 1",
+        f"DCacheMode: {FPGA_DCACHE_MODE}",
+        f"UartBlockBytes: {UART_BLOCK_CHECKSUM_BYTES}",
         f"FetchDebug: {args.fetch_debug}",
         f"TransportJitterPct: {args.transport_jitter_pct}",
         f"TransportByteGapBits: {args.transport_byte_gap}",
         f"TransportAckMode: {args.transport_ack_mode}",
         f"TransportSeeds: {args.transport_seeds}",
         f"RegisteredUartRxdata: {USE_REGISTERED_UART_RXDATA}",
+        f"LoaderStreamToDdr3: {LOADER_STREAM_TO_DDR3_ENABLED}",
+        f"LoaderWaitDrainPerChunk: {LOADER_WAIT_DRAIN_PER_CHUNK_ENABLED}",
         f"BuildID: {build_id}",
         f"TopSimLog: {sim_log}",
         f"LoaderQuickSimLog: {loader_quick_sim_log}",
@@ -4931,9 +5652,14 @@ def main() -> int:
         f"TransportBoardPayloadCount: {len(transport_manifests)}",
         f"TransportTbCaseCount: {len(transport_tb_results)}",
         f"BridgeTbCaseCount: {len(bridge_tb_results)}",
+        f"TimingSummarySelected: {timing_summary_path}",
         f"TimingSummaryAggressive: {TIMING_SUMMARY_AGGR}",
         f"TimingDetailAggressive: {TIMING_DETAIL_AGGR}",
         f"UtilizationAggressive: {UTILIZATION_AGGR}",
+        f"TimingSummaryIncremental: {TIMING_SUMMARY_INCR}",
+        f"TimingDetailIncremental: {TIMING_DETAIL_INCR}",
+        f"UtilizationIncremental: {UTILIZATION_INCR}",
+        f"SynthTimingSummary: {SYNTH_TIMING_SUMMARY}",
         f"WNS: {timing['wns']}",
         f"WHS: {timing['whs']}",
         f"ConstraintsMet: {timing['constraints_met']}",
@@ -4960,6 +5686,8 @@ def main() -> int:
         f"UartSawJump: {uart_result.get('saw_jump', False)}",
         f"UartBadReason: {uart_result.get('bad_reason', 'none')}",
         f"UartPayloadAckTimeout: {uart_result.get('payload_ack_timeout', False)}",
+        f"UartPayloadChunkAckMissCount: {uart_result.get('payload_chunk_ack_miss_count', 0)}",
+        f"UartPayloadChecksumAckMissCount: {uart_result.get('payload_checksum_ack_miss_count', 0)}",
         f"UartPayloadChunksSent: {uart_result.get('payload_chunks_sent', 0)}",
         f"UartPayloadAckCount: {uart_result.get('payload_ack_count', 0)}",
         f"UartPayloadAckCreditRemaining: {uart_result.get('payload_ack_credit_remaining', 0)}",

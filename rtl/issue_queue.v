@@ -6,6 +6,8 @@
 //   Supports CDB wakeup (2 WB + 2 commit ports), epoch-based flush,
 //   oldest-first selection, and 1-cycle wake-to-issue hold.
 //
+//   Single-thread version (no SMT).
+//
 //   Instantiate once per FU class: INT(8), MEM(16), MUL(4).
 //   For INT: both pipe0 and pipe1 can consume; for MEM/MUL: pipe1 only.
 //   DEALLOC_AT_COMMIT=1 keeps entries until commit (needed for MEM ordering).
@@ -17,7 +19,6 @@ module issue_queue #(
     parameter IQ_DEPTH     = 8,
     parameter IQ_IDX_W     = 3,       // clog2(IQ_DEPTH)
     parameter RS_TAG_W     = 5,
-    parameter NUM_THREAD   = 2,
     parameter WAKE_HOLD    = 1,       // cycles between wakeup and eligible-to-issue
     parameter DEALLOC_AT_COMMIT    = 0, // 0=free at issue, 1=free at commit
     parameter CHECK_LOAD_STORE_ORDER = 0  // 1=loads wait for older stores
@@ -25,14 +26,13 @@ module issue_queue #(
     input  wire        clk,
     input  wire        rstn,
 
-    // ─── Flush ───────────────────────────────────────────────────
+    // --- Flush ---------------------------------------------------------------
     input  wire        flush,
-    input  wire [0:0]  flush_tid,
     input  wire [`METADATA_EPOCH_W-1:0] flush_new_epoch,
     input  wire        flush_order_valid,
     input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
 
-    // ─── Dispatch Port 0 ────────────────────────────────────────
+    // --- Dispatch Port 0 -----------------------------------------------------
     input  wire        disp0_valid,
     input  wire [RS_TAG_W-1:0]              disp0_tag,
     input  wire [31:0]                      disp0_pc,
@@ -54,7 +54,6 @@ module issue_queue #(
     input  wire                             disp0_rs1_used,
     input  wire                             disp0_rs2_used,
     input  wire [2:0]                       disp0_fu,
-    input  wire [0:0]                       disp0_tid,
     input  wire                             disp0_is_mret,
     input  wire                             disp0_side_effect,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_order_id,
@@ -65,7 +64,7 @@ module issue_queue #(
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_src1_order_id,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp0_src2_order_id,
 
-    // ─── Dispatch Port 1 ────────────────────────────────────────
+    // --- Dispatch Port 1 -----------------------------------------------------
     input  wire        disp1_valid,
     input  wire [RS_TAG_W-1:0]              disp1_tag,
     input  wire [31:0]                      disp1_pc,
@@ -87,7 +86,6 @@ module issue_queue #(
     input  wire                             disp1_rs1_used,
     input  wire                             disp1_rs2_used,
     input  wire [2:0]                       disp1_fu,
-    input  wire [0:0]                       disp1_tid,
     input  wire                             disp1_is_mret,
     input  wire                             disp1_side_effect,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_order_id,
@@ -97,11 +95,11 @@ module issue_queue #(
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_src1_order_id,
     input  wire [`METADATA_ORDER_ID_W-1:0]  disp1_src2_order_id,
 
-    // ─── Stall / Capacity ────────────────────────────────────────
+    // --- Stall / Capacity ----------------------------------------------------
     output wire        iq_full,           // cannot accept even 1
     output wire        iq_almost_full,    // cannot accept 2
 
-    // ─── Issue Port (single oldest-ready winner) ─────────────────
+    // --- Issue Port (single oldest-ready winner) -----------------------------
     output reg                              iss_valid,
     output reg  [RS_TAG_W-1:0]             iss_tag,
     output reg  [31:0]                     iss_pc,
@@ -125,65 +123,50 @@ module issue_queue #(
     output reg                             iss_br_addr_mode,
     output reg                             iss_regs_write,
     output reg  [2:0]                      iss_fu,
-    output reg  [0:0]                      iss_tid,
     output reg                             iss_is_mret,
     output reg  [`METADATA_ORDER_ID_W-1:0] iss_order_id,
     output reg  [`METADATA_EPOCH_W-1:0]    iss_epoch,
 
-    // ─── Wakeup / CDB ports ─────────────────────────────────────
+    // --- Wakeup / CDB ports --------------------------------------------------
     input  wire        wb0_valid,
     input  wire [RS_TAG_W-1:0] wb0_tag,
-    input  wire [0:0]  wb0_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] wb0_order_id,
     input  wire        wb0_regs_write,
     input  wire        wb1_valid,
     input  wire [RS_TAG_W-1:0] wb1_tag,
-    input  wire [0:0]  wb1_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] wb1_order_id,
     input  wire        wb1_regs_write,
 
     input  wire        early_wakeup_valid,
     input  wire [RS_TAG_W-1:0] early_wakeup_tag,
 
-    // ─── Commit (deallocation) ───────────────────────────────────
+    // --- Commit (deallocation) -----------------------------------------------
     input  wire        commit0_valid,
     input  wire [RS_TAG_W-1:0] commit0_tag,
-    input  wire [0:0]  commit0_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] commit0_order_id,
     input  wire        commit1_valid,
     input  wire [RS_TAG_W-1:0] commit1_tag,
-    input  wire [0:0]  commit1_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] commit1_order_id,
-    input  wire                             older_store_valid_t0,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  older_store_order_id_t0,
-    input  wire                             older_store_valid_t1,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  older_store_order_id_t1,
+    input  wire                             older_store_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  older_store_order_id,
 
-    // ─── External issue inhibit (e.g. branch_in_flight) ─────────
-    input  wire        issue_inhibit_t0,
-    input  wire        issue_inhibit_t1,
-    input  wire                             issue_after_order_block_valid_t0,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t0,
-    input  wire                             issue_after_order_block_valid_t1,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id_t1,
-    input  wire                             issue_side_effect_block_valid_t0,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_side_effect_block_id_t0,
-    input  wire                             issue_side_effect_block_valid_t1,
-    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_side_effect_block_id_t1,
-    output wire                            oldest_store_valid_t0,
-    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t0,
-    output wire                            oldest_store_valid_t1,
-    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id_t1,
+    // --- External issue inhibit (e.g. branch_in_flight) ----------------------
+    input  wire        issue_inhibit,
+    input  wire                             issue_after_order_block_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_after_order_block_id,
+    input  wire                             issue_side_effect_block_valid,
+    input  wire [`METADATA_ORDER_ID_W-1:0]  issue_side_effect_block_id,
+    output wire                            oldest_store_valid,
+    output wire [`METADATA_ORDER_ID_W-1:0] oldest_store_order_id,
     output wire                            debug_order_blocked_any,
     output reg                             debug_flush_killed_any
 );
 
-    // ═══ Entry Storage ═══
+    // === Entry Storage ===
     reg                              e_valid  [0:IQ_DEPTH-1];
     reg                              e_issued [0:IQ_DEPTH-1];
     reg  [RS_TAG_W-1:0]             e_tag    [0:IQ_DEPTH-1];
     reg  [`METADATA_ORDER_ID_W-1:0] e_seq    [0:IQ_DEPTH-1];
-    reg  [0:0]                       e_tid    [0:IQ_DEPTH-1];
     reg  [`METADATA_EPOCH_W-1:0]    e_epoch  [0:IQ_DEPTH-1];
     reg  [RS_TAG_W-1:0]             e_qj     [0:IQ_DEPTH-1]; // src1 dep
     reg  [RS_TAG_W-1:0]             e_qk     [0:IQ_DEPTH-1]; // src2 dep
@@ -222,38 +205,26 @@ module issue_queue #(
     localparam STORE_PTR_W = (IQ_DEPTH <= 1) ? 1 : $clog2(IQ_DEPTH);
     localparam STORE_COUNT_W = STORE_PTR_W + 1;
 
-    reg [IQ_IDX_W-1:0]             store_slot_t0_r  [0:IQ_DEPTH-1];
-    reg [`METADATA_ORDER_ID_W-1:0] store_order_t0_r [0:IQ_DEPTH-1];
-    reg [IQ_IDX_W-1:0]             store_slot_t1_r  [0:IQ_DEPTH-1];
-    reg [`METADATA_ORDER_ID_W-1:0] store_order_t1_r [0:IQ_DEPTH-1];
+    reg [IQ_IDX_W-1:0]             store_slot_r  [0:IQ_DEPTH-1];
+    reg [`METADATA_ORDER_ID_W-1:0] store_order_r [0:IQ_DEPTH-1];
 
-    reg [IQ_IDX_W-1:0]             store_slot_t0_n  [0:IQ_DEPTH-1];
-    reg [`METADATA_ORDER_ID_W-1:0] store_order_t0_n [0:IQ_DEPTH-1];
-    reg [IQ_IDX_W-1:0]             store_slot_t1_n  [0:IQ_DEPTH-1];
-    reg [`METADATA_ORDER_ID_W-1:0] store_order_t1_n [0:IQ_DEPTH-1];
+    reg [IQ_IDX_W-1:0]             store_slot_n  [0:IQ_DEPTH-1];
+    reg [`METADATA_ORDER_ID_W-1:0] store_order_n [0:IQ_DEPTH-1];
 
-    reg [STORE_PTR_W-1:0]          store_head_ptr_t0_r;
-    reg [STORE_PTR_W-1:0]          store_tail_ptr_t0_r;
-    reg [STORE_COUNT_W-1:0]        store_count_t0_r;
-    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_t0_r;
-    reg [STORE_PTR_W-1:0]          store_head_ptr_t1_r;
-    reg [STORE_PTR_W-1:0]          store_tail_ptr_t1_r;
-    reg [STORE_COUNT_W-1:0]        store_count_t1_r;
-    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_t1_r;
+    reg [STORE_PTR_W-1:0]          store_head_ptr_r;
+    reg [STORE_PTR_W-1:0]          store_tail_ptr_r;
+    reg [STORE_COUNT_W-1:0]        store_count_r;
+    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_r;
 
-    reg [STORE_PTR_W-1:0]          store_head_ptr_t0_n;
-    reg [STORE_PTR_W-1:0]          store_tail_ptr_t0_n;
-    reg [STORE_COUNT_W-1:0]        store_count_t0_n;
-    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_t0_n;
-    reg [STORE_PTR_W-1:0]          store_head_ptr_t1_n;
-    reg [STORE_PTR_W-1:0]          store_tail_ptr_t1_n;
-    reg [STORE_COUNT_W-1:0]        store_count_t1_n;
-    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_t1_n;
+    reg [STORE_PTR_W-1:0]          store_head_ptr_n;
+    reg [STORE_PTR_W-1:0]          store_tail_ptr_n;
+    reg [STORE_COUNT_W-1:0]        store_count_n;
+    reg [`METADATA_ORDER_ID_W-1:0] store_head_order_id_n;
 
     // Sequence counter (for age ordering)
     reg [`METADATA_ORDER_ID_W-1:0] alloc_seq;
 
-    // ═══ Free Slot Finding (combinational) ═══
+    // === Free Slot Finding (combinational) ===
     reg                   free0_found, free1_found;
     reg [IQ_IDX_W-1:0]   free0_idx,   free1_idx;
     integer fi;
@@ -281,14 +252,12 @@ module issue_queue #(
     assign iq_full        = !can_accept_1;
     assign iq_almost_full = !can_accept_2;
 
-    // ═══ Issue Selection: Oldest Ready (combinational) ═══
-    // With load-store ordering: a load cannot issue while an older
-    // store from the same thread is still pending (valid & not issued).
+    // === Issue Selection: Oldest Ready (combinational) ===
 
-    // --- Pre-compute oldest pending store sequence per thread ---
+    // --- Pre-compute oldest pending store sequence ---
     // Tree-based min reduction: O(log2 N) depth instead of O(N) cascading.
 
-    // Shared tree parameters (used by both store min-tree and issue selection tree)
+    // Shared tree parameters
     localparam TREE_N = 1 << $clog2(IQ_DEPTH);
     localparam TREE_LEVELS = $clog2(TREE_N);
 
@@ -312,15 +281,11 @@ module issue_queue #(
         end
     endfunction
 
-    wire                            any_store_t0        = (store_count_t0_r != {STORE_COUNT_W{1'b0}});
-    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_ord_t0 = store_head_order_id_t0_r;
-    wire                            any_store_t1        = (store_count_t1_r != {STORE_COUNT_W{1'b0}});
-    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_ord_t1 = store_head_order_id_t1_r;
+    wire                            any_store        = (store_count_r != {STORE_COUNT_W{1'b0}});
+    wire [`METADATA_ORDER_ID_W-1:0] oldest_store_ord = store_head_order_id_r;
 
-    assign oldest_store_valid_t0    = any_store_t0;
-    assign oldest_store_order_id_t0 = store_head_order_id_t0_r;
-    assign oldest_store_valid_t1    = any_store_t1;
-    assign oldest_store_order_id_t1 = store_head_order_id_t1_r;
+    assign oldest_store_valid    = any_store;
+    assign oldest_store_order_id = store_head_order_id_r;
 
     // --- Binary Tournament Tree: O(log2 N) selection ---
     // Candidate word: {valid(1), seq(ORDER_ID_W), idx(IQ_IDX_W)}
@@ -328,8 +293,8 @@ module issue_queue #(
     localparam ISSUE_BUNDLE_W = (RS_TAG_W * 3) + 32 + 32 + 3 + 1 +
                                 5 + 5 + 5 + 1 + 1 +
                                 1 + 1 + 1 + 3 + 1 + 2 + 2 + 1 + 1 +
-                                3 + 1 + 1 +
-                                `METADATA_ORDER_ID_W + `METADATA_EPOCH_W;
+                                3 + 1 +
+                                `METADATA_ORDER_ID_W;
 
     // pick_older: return the older (lower seq) valid candidate
     function [CAND_W-1:0] pick_older;
@@ -359,38 +324,26 @@ module issue_queue #(
     generate
         for (ci = 0; ci < TREE_N; ci = ci + 1) begin : gen_cand
             if (ci < IQ_DEPTH) begin : real_entry
-                wire inhibited = (e_tid[ci] == 1'b0 && issue_inhibit_t0) ||
-                                 (e_tid[ci] == 1'b1 && issue_inhibit_t1);
-                wire order_blocked = (e_tid[ci] == 1'b0) ?
-                    (issue_after_order_block_valid_t0 &&
-                     (e_order_id[ci] > issue_after_order_block_id_t0)) :
-                    (issue_after_order_block_valid_t1 &&
-                     (e_order_id[ci] > issue_after_order_block_id_t1));
+                wire inhibited = issue_inhibit;
+                wire order_blocked =
+                    issue_after_order_block_valid &&
+                    (e_order_id[ci] > issue_after_order_block_id);
                 wire side_effect_blocked = e_side_effect[ci] &&
-                    ((e_tid[ci] == 1'b0) ?
-                     (issue_side_effect_block_valid_t0 &&
-                      (e_order_id[ci] > issue_side_effect_block_id_t0)) :
-                     (issue_side_effect_block_valid_t1 &&
-                      (e_order_id[ci] > issue_side_effect_block_id_t1)));
+                    issue_side_effect_block_valid &&
+                    (e_order_id[ci] > issue_side_effect_block_id);
                 wire is_load_no_store = CHECK_LOAD_STORE_ORDER &&
                                         e_mem_read[ci] && !e_mem_write[ci];
                 wire is_store_ordered = CHECK_LOAD_STORE_ORDER &&
                                         e_mem_write[ci];
                 wire older_store_blocks =
-                    is_load_no_store && (
-                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_ord_t0 < e_order_id[ci])) :
-                                              (any_store_t1 && (oldest_store_ord_t1 < e_order_id[ci]))
-                    );
+                    is_load_no_store &&
+                    (any_store && (oldest_store_ord < e_order_id[ci]));
                 wire older_store_blocks_store =
-                    is_store_ordered && (
-                        (e_tid[ci] == 1'b0) ? (any_store_t0 && (oldest_store_ord_t0 < e_order_id[ci])) :
-                                              (any_store_t1 && (oldest_store_ord_t1 < e_order_id[ci]))
-                    );
+                    is_store_ordered &&
+                    (any_store && (oldest_store_ord < e_order_id[ci]));
                 wire older_store_blocks_mret =
-                    e_is_mret[ci] && (
-                        (e_tid[ci] == 1'b0) ? (older_store_valid_t0 && (older_store_order_id_t0 < e_order_id[ci])) :
-                                              (older_store_valid_t1 && (older_store_order_id_t1 < e_order_id[ci]))
-                    );
+                    e_is_mret[ci] &&
+                    (older_store_valid && (older_store_order_id < e_order_id[ci]));
                 wire eligible = e_valid[ci] && !e_issued[ci] && e_ready[ci]
                                 && !e_just_woke[ci] && !inhibited
                                 && !order_blocked
@@ -429,9 +382,8 @@ module issue_queue #(
     // Step 3: Extract winner
     wire                            sel_found = tree[0][CAND_W-1];
     wire [IQ_IDX_W-1:0]            sel_idx   = tree[0][IQ_IDX_W-1:0];
-    // winner-level bundle is formed locally to keep the issue boundary simple
 
-    // ═══ Issue Output Drive ═══
+    // === Issue Output Drive ===
     always @(*) begin
         iss_valid = sel_found;
         sel_bundle = {ISSUE_BUNDLE_W{1'b0}};
@@ -441,8 +393,8 @@ module issue_queue #(
                 e_rd[sel_idx], e_rs1[sel_idx], e_rs2[sel_idx], e_rs1_used[sel_idx], e_rs2_used[sel_idx],
                 e_src1_tag[sel_idx], e_src2_tag[sel_idx], e_br[sel_idx], e_mem_read[sel_idx], e_mem2reg[sel_idx],
                 e_alu_op[sel_idx], e_mem_write[sel_idx], e_alu_src1[sel_idx], e_alu_src2[sel_idx],
-                e_br_addr_mode[sel_idx], e_regs_write[sel_idx], e_fu[sel_idx], e_tid[sel_idx],
-                e_is_mret[sel_idx], e_order_id[sel_idx], e_epoch[sel_idx]
+                e_br_addr_mode[sel_idx], e_regs_write[sel_idx], e_fu[sel_idx],
+                e_is_mret[sel_idx], e_order_id[sel_idx]
             };
         end
         {
@@ -468,14 +420,13 @@ module issue_queue #(
             iss_br_addr_mode,
             iss_regs_write,
             iss_fu,
-            iss_tid,
             iss_is_mret,
-            iss_order_id,
-            iss_epoch
+            iss_order_id
         } = sel_found ? sel_bundle : {ISSUE_BUNDLE_W{1'b0}};
+        iss_epoch = {`METADATA_EPOCH_W{1'b0}};
     end
 
-    // ═══ Sequential Logic ═══
+    // === Sequential Logic ===
     integer i;
     reg [RS_TAG_W-1:0] nqj, nqk;
     reg [`METADATA_ORDER_ID_W-1:0] nqj_order, nqk_order;
@@ -495,16 +446,42 @@ module issue_queue #(
                 e_just_woke[i] <= 1'b0;
                 e_wake_hold[i] <= 2'd0;
                 e_side_effect[i] <= 1'b0;
+                e_tag[i]       <= {RS_TAG_W{1'b0}};
+                e_seq[i]       <= {`METADATA_ORDER_ID_W{1'b0}};
+                e_epoch[i]     <= {`METADATA_EPOCH_W{1'b0}};
+                e_pc[i]        <= 32'd0;
+                e_imm[i]       <= 32'd0;
+                e_func3[i]     <= 3'd0;
+                e_func7[i]     <= 1'b0;
+                e_rd[i]        <= 5'd0;
+                e_rs1[i]       <= 5'd0;
+                e_rs2[i]       <= 5'd0;
+                e_rs1_used[i]  <= 1'b0;
+                e_rs2_used[i]  <= 1'b0;
+                e_src1_tag[i]  <= {RS_TAG_W{1'b0}};
+                e_src2_tag[i]  <= {RS_TAG_W{1'b0}};
+                e_br[i]        <= 1'b0;
+                e_mem_read[i]  <= 1'b0;
+                e_mem2reg[i]   <= 1'b0;
+                e_alu_op[i]    <= 3'd0;
+                e_mem_write[i] <= 1'b0;
+                e_alu_src1[i]  <= 2'd0;
+                e_alu_src2[i]  <= 2'd0;
+                e_br_addr_mode[i] <= 1'b0;
+                e_regs_write[i]  <= 1'b0;
+                e_fu[i]       <= 3'd0;
+                e_is_mret[i]  <= 1'b0;
+                e_order_id[i] <= {`METADATA_ORDER_ID_W{1'b0}};
             end
             alloc_seq <= {`METADATA_ORDER_ID_W{1'b0}};
             debug_flush_killed_any <= 1'b0;
         end
         else begin
             debug_flush_killed_any <= 1'b0;
-            // ── Epoch-based flush ──
+            // -- Epoch-based flush --
             if (flush) begin
                 for (i = 0; i < IQ_DEPTH; i = i + 1) begin
-                    if (e_valid[i] && (e_tid[i] == flush_tid)) begin
+                    if (e_valid[i]) begin
                         if (!flush_order_valid) begin
                             e_valid[i] <= 1'b0;
                             debug_flush_killed_any <= 1'b1;
@@ -516,14 +493,14 @@ module issue_queue #(
                 end
             end
 
-            // ── Issue: mark issued ──
+            // -- Issue: mark issued --
             if (sel_found) begin
                 e_issued[sel_idx] <= 1'b1;
                 if (!DEALLOC_AT_COMMIT)
                     e_valid[sel_idx] <= 1'b0;  // free at issue
             end
 
-            // ── Wakeup ──
+            // -- Wakeup --
             for (i = 0; i < IQ_DEPTH; i = i + 1) begin
                 if (e_valid[i] && !e_issued[i]) begin
                     nqj = e_qj[i];
@@ -534,12 +511,12 @@ module issue_queue #(
 
                     // WB port 0
                     if (wb0_valid && wb0_regs_write && (wb0_tag != {RS_TAG_W{1'b0}})) begin
-                        if ((nqj == wb0_tag) && (e_tid[i] == wb0_tid) && (nqj_order == wb0_order_id)) begin
+                        if ((nqj == wb0_tag) && (nqj_order == wb0_order_id)) begin
                             nqj = {RS_TAG_W{1'b0}};
                             nqj_order = {`METADATA_ORDER_ID_W{1'b0}};
                             woke_src = 1'b1;
                         end
-                        if ((nqk == wb0_tag) && (e_tid[i] == wb0_tid) && (nqk_order == wb0_order_id)) begin
+                        if ((nqk == wb0_tag) && (nqk_order == wb0_order_id)) begin
                             nqk = {RS_TAG_W{1'b0}};
                             nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
                             woke_src = 1'b1;
@@ -547,12 +524,12 @@ module issue_queue #(
                     end
                     // WB port 1
                     if (wb1_valid && wb1_regs_write && (wb1_tag != {RS_TAG_W{1'b0}})) begin
-                        if ((nqj == wb1_tag) && (e_tid[i] == wb1_tid) && (nqj_order == wb1_order_id)) begin
+                        if ((nqj == wb1_tag) && (nqj_order == wb1_order_id)) begin
                             nqj = {RS_TAG_W{1'b0}};
                             nqj_order = {`METADATA_ORDER_ID_W{1'b0}};
                             woke_src = 1'b1;
                         end
-                        if ((nqk == wb1_tag) && (e_tid[i] == wb1_tid) && (nqk_order == wb1_order_id)) begin
+                        if ((nqk == wb1_tag) && (nqk_order == wb1_order_id)) begin
                             nqk = {RS_TAG_W{1'b0}};
                             nqk_order = {`METADATA_ORDER_ID_W{1'b0}};
                             woke_src = 1'b1;
@@ -579,8 +556,7 @@ module issue_queue #(
                     e_qk_order[i] <= nqk_order;
                     e_ready[i] <= (nqj == {RS_TAG_W{1'b0}}) && (nqk == {RS_TAG_W{1'b0}});
 
-                    // Clear src tags when dependency resolves — prevents stale
-                    // tagbuf lookups after the producing tag is recycled.
+                    // Clear src tags when dependency resolves
                     if (nqj == {RS_TAG_W{1'b0}}) begin
                         e_src1_tag[i] <= {RS_TAG_W{1'b0}};
                         e_qj_order[i] <= {`METADATA_ORDER_ID_W{1'b0}};
@@ -601,29 +577,29 @@ module issue_queue #(
                 end
             end
 
-            // ── Commit-based deallocation (only when DEALLOC_AT_COMMIT=1) ──
+            // -- Commit-based deallocation (only when DEALLOC_AT_COMMIT=1) --
             if (DEALLOC_AT_COMMIT) begin
                 if (commit0_valid) begin
                     for (i = 0; i < IQ_DEPTH; i = i + 1)
-                        if (e_valid[i] && e_tag[i] == commit0_tag && e_tid[i] == commit0_tid &&
+                        if (e_valid[i] && e_tag[i] == commit0_tag &&
                             e_order_id[i] == commit0_order_id)
                             e_valid[i] <= 1'b0;
                 end
                 if (commit1_valid) begin
                     for (i = 0; i < IQ_DEPTH; i = i + 1)
-                        if (e_valid[i] && e_tag[i] == commit1_tag && e_tid[i] == commit1_tid &&
+                        if (e_valid[i] && e_tag[i] == commit1_tag &&
                             e_order_id[i] == commit1_order_id)
                             e_valid[i] <= 1'b0;
                 end
             end
 
-            // ── Dispatch 0 ──
+            // -- Dispatch 0 --
             if (disp0_valid && free0_found) begin
                 e_valid[free0_idx]     <= 1'b1;
                 e_issued[free0_idx]    <= 1'b0;
                 e_tag[free0_idx]       <= disp0_tag;
-                e_tid[free0_idx]       <= disp0_tid;
-                e_epoch[free0_idx]     <= disp0_epoch;
+                // Epoch is no longer carried through the IQ in the single-thread
+                // FPGA path; order-based flush handles queued entries.
                 e_order_id[free0_idx]  <= disp0_order_id;
                 e_seq[free0_idx]       <= alloc_seq;
                 e_qj[free0_idx]        <= disp0_rs1_used ? disp0_src1_tag : {RS_TAG_W{1'b0}};
@@ -662,13 +638,13 @@ module issue_queue #(
                 e_side_effect[free0_idx] <= disp0_side_effect;
             end
 
-            // ── Dispatch 1 ──
+            // -- Dispatch 1 --
             if (disp1_valid && free1_found) begin
                 e_valid[free1_idx]     <= 1'b1;
                 e_issued[free1_idx]    <= 1'b0;
                 e_tag[free1_idx]       <= disp1_tag;
-                e_tid[free1_idx]       <= disp1_tid;
-                e_epoch[free1_idx]     <= disp1_epoch;
+                // Epoch is no longer carried through the IQ in the single-thread
+                // FPGA path; order-based flush handles queued entries.
                 e_order_id[free1_idx]  <= disp1_order_id;
                 e_seq[free1_idx]       <= alloc_seq + (disp0_valid ? 16'd1 : 16'd0);
                 e_qj[free1_idx]        <= disp1_rs1_used ? disp1_src1_tag : {RS_TAG_W{1'b0}};
@@ -707,7 +683,7 @@ module issue_queue #(
                 e_side_effect[free1_idx] <= disp1_side_effect;
             end
 
-            // ── Update alloc_seq ──
+            // -- Update alloc_seq --
             if (disp0_valid && disp1_valid)
                 alloc_seq <= alloc_seq + 16'd2;
             else if (disp0_valid || disp1_valid)
@@ -721,223 +697,120 @@ module issue_queue #(
 
     always @(*) begin
         for (lsi = 0; lsi < IQ_DEPTH; lsi = lsi + 1) begin
-            store_slot_t0_n[lsi]  = store_slot_t0_r[lsi];
-            store_order_t0_n[lsi] = store_order_t0_r[lsi];
-            store_slot_t1_n[lsi]  = store_slot_t1_r[lsi];
-            store_order_t1_n[lsi] = store_order_t1_r[lsi];
+            store_slot_n[lsi]  = store_slot_r[lsi];
+            store_order_n[lsi] = store_order_r[lsi];
         end
 
-        store_head_ptr_t0_n      = store_head_ptr_t0_r;
-        store_tail_ptr_t0_n      = store_tail_ptr_t0_r;
-        store_count_t0_n         = store_count_t0_r;
-        store_head_order_id_t0_n = store_head_order_id_t0_r;
-        store_head_ptr_t1_n      = store_head_ptr_t1_r;
-        store_tail_ptr_t1_n      = store_tail_ptr_t1_r;
-        store_count_t1_n         = store_count_t1_r;
-        store_head_order_id_t1_n = store_head_order_id_t1_r;
+        store_head_ptr_n      = store_head_ptr_r;
+        store_tail_ptr_n      = store_tail_ptr_r;
+        store_count_n         = store_count_r;
+        store_head_order_id_n = store_head_order_id_r;
 
         if (flush && !flush_order_valid) begin
-            if (flush_tid == 1'b0) begin
-                store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                store_count_t0_n         = {STORE_COUNT_W{1'b0}};
-                store_head_order_id_t0_n = {`METADATA_ORDER_ID_W{1'b0}};
-            end else begin
-                store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                store_count_t1_n         = {STORE_COUNT_W{1'b0}};
-                store_head_order_id_t1_n = {`METADATA_ORDER_ID_W{1'b0}};
-            end
+            store_head_ptr_n      = {STORE_PTR_W{1'b0}};
+            store_tail_ptr_n      = {STORE_PTR_W{1'b0}};
+            store_count_n         = {STORE_COUNT_W{1'b0}};
+            store_head_order_id_n = {`METADATA_ORDER_ID_W{1'b0}};
         end
 
-        if (store_count_t0_n != {STORE_COUNT_W{1'b0}}) begin
-            head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
+        if (store_count_n != {STORE_COUNT_W{1'b0}}) begin
+            head_slot_idx = store_slot_n[store_head_ptr_n];
             if ((!e_valid[head_slot_idx]) || !e_mem_write[head_slot_idx] ||
-                (e_order_id[head_slot_idx] != store_head_order_id_t0_n) ||
-                (flush && flush_order_valid && (flush_tid == 1'b0) &&
-                 (store_head_order_id_t0_n > flush_order_id))) begin
-                if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t0_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t0_n = {`METADATA_ORDER_ID_W{1'b0}};
+                (e_order_id[head_slot_idx] != store_head_order_id_n) ||
+                (flush && flush_order_valid &&
+                 (store_head_order_id_n > flush_order_id))) begin
+                if (store_count_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
+                    store_head_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_tail_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_count_n         = {STORE_COUNT_W{1'b0}};
+                    store_head_order_id_n = {`METADATA_ORDER_ID_W{1'b0}};
                 end else begin
-                    store_head_ptr_t0_n = store_ptr_inc(store_head_ptr_t0_n);
-                    store_count_t0_n    = store_count_t0_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
+                    store_head_ptr_n = store_ptr_inc(store_head_ptr_n);
+                    store_count_n    = store_count_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
                 end
             end
         end
 
-        if (store_count_t1_n != {STORE_COUNT_W{1'b0}}) begin
-            head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
-            if ((!e_valid[head_slot_idx]) || !e_mem_write[head_slot_idx] ||
-                (e_order_id[head_slot_idx] != store_head_order_id_t1_n) ||
-                (flush && flush_order_valid && (flush_tid == 1'b1) &&
-                 (store_head_order_id_t1_n > flush_order_id))) begin
-                if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t1_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t1_n = {`METADATA_ORDER_ID_W{1'b0}};
-                end else begin
-                    store_head_ptr_t1_n = store_ptr_inc(store_head_ptr_t1_n);
-                    store_count_t1_n    = store_count_t1_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-                end
-            end
-        end
-
-        if (commit0_valid && (commit0_tid == 1'b0) && (store_count_t0_n != {STORE_COUNT_W{1'b0}})) begin
-            head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
+        if (commit0_valid && (store_count_n != {STORE_COUNT_W{1'b0}})) begin
+            head_slot_idx = store_slot_n[store_head_ptr_n];
             if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
                 (e_tag[head_slot_idx] == commit0_tag) &&
                 (e_order_id[head_slot_idx] == commit0_order_id)) begin
-                if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t0_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t0_n = {`METADATA_ORDER_ID_W{1'b0}};
+                if (store_count_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
+                    store_head_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_tail_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_count_n         = {STORE_COUNT_W{1'b0}};
+                    store_head_order_id_n = {`METADATA_ORDER_ID_W{1'b0}};
                 end else begin
-                    store_head_ptr_t0_n = store_ptr_inc(store_head_ptr_t0_n);
-                    store_count_t0_n    = store_count_t0_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
+                    store_head_ptr_n = store_ptr_inc(store_head_ptr_n);
+                    store_count_n    = store_count_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
                 end
             end
         end
-        if (commit1_valid && (commit1_tid == 1'b0) && (store_count_t0_n != {STORE_COUNT_W{1'b0}})) begin
-            head_slot_idx = store_slot_t0_n[store_head_ptr_t0_n];
+        if (commit1_valid && (store_count_n != {STORE_COUNT_W{1'b0}})) begin
+            head_slot_idx = store_slot_n[store_head_ptr_n];
             if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
                 (e_tag[head_slot_idx] == commit1_tag) &&
                 (e_order_id[head_slot_idx] == commit1_order_id)) begin
-                if (store_count_t0_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t0_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t0_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t0_n = {`METADATA_ORDER_ID_W{1'b0}};
+                if (store_count_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
+                    store_head_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_tail_ptr_n      = {STORE_PTR_W{1'b0}};
+                    store_count_n         = {STORE_COUNT_W{1'b0}};
+                    store_head_order_id_n = {`METADATA_ORDER_ID_W{1'b0}};
                 end else begin
-                    store_head_ptr_t0_n = store_ptr_inc(store_head_ptr_t0_n);
-                    store_count_t0_n    = store_count_t0_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-                end
-            end
-        end
-
-        if (commit0_valid && (commit0_tid == 1'b1) && (store_count_t1_n != {STORE_COUNT_W{1'b0}})) begin
-            head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
-                (e_tag[head_slot_idx] == commit0_tag) &&
-                (e_order_id[head_slot_idx] == commit0_order_id)) begin
-                if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t1_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t1_n = {`METADATA_ORDER_ID_W{1'b0}};
-                end else begin
-                    store_head_ptr_t1_n = store_ptr_inc(store_head_ptr_t1_n);
-                    store_count_t1_n    = store_count_t1_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-                end
-            end
-        end
-        if (commit1_valid && (commit1_tid == 1'b1) && (store_count_t1_n != {STORE_COUNT_W{1'b0}})) begin
-            head_slot_idx = store_slot_t1_n[store_head_ptr_t1_n];
-            if (e_valid[head_slot_idx] && e_mem_write[head_slot_idx] &&
-                (e_tag[head_slot_idx] == commit1_tag) &&
-                (e_order_id[head_slot_idx] == commit1_order_id)) begin
-                if (store_count_t1_n == {{(STORE_COUNT_W-1){1'b0}}, 1'b1}) begin
-                    store_head_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_tail_ptr_t1_n      = {STORE_PTR_W{1'b0}};
-                    store_count_t1_n         = {STORE_COUNT_W{1'b0}};
-                    store_head_order_id_t1_n = {`METADATA_ORDER_ID_W{1'b0}};
-                end else begin
-                    store_head_ptr_t1_n = store_ptr_inc(store_head_ptr_t1_n);
-                    store_count_t1_n    = store_count_t1_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
+                    store_head_ptr_n = store_ptr_inc(store_head_ptr_n);
+                    store_count_n    = store_count_n - {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
                 end
             end
         end
 
         if (disp0_valid && free0_found && disp0_mem_write) begin
-            if (disp0_tid == 1'b0) begin
-                queue_write_ptr = (store_count_t0_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
-                                                                               : store_ptr_inc(store_tail_ptr_t0_n);
-                store_slot_t0_n[queue_write_ptr]  = free0_idx;
-                store_order_t0_n[queue_write_ptr] = disp0_order_id;
-                if (store_count_t0_n == {STORE_COUNT_W{1'b0}})
-                    store_head_ptr_t0_n = queue_write_ptr;
-                store_tail_ptr_t0_n = queue_write_ptr;
-                store_count_t0_n    = store_count_t0_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-            end else begin
-                queue_write_ptr = (store_count_t1_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
-                                                                               : store_ptr_inc(store_tail_ptr_t1_n);
-                store_slot_t1_n[queue_write_ptr]  = free0_idx;
-                store_order_t1_n[queue_write_ptr] = disp0_order_id;
-                if (store_count_t1_n == {STORE_COUNT_W{1'b0}})
-                    store_head_ptr_t1_n = queue_write_ptr;
-                store_tail_ptr_t1_n = queue_write_ptr;
-                store_count_t1_n    = store_count_t1_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-            end
+            queue_write_ptr = (store_count_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
+                                                                       : store_ptr_inc(store_tail_ptr_n);
+            store_slot_n[queue_write_ptr]  = free0_idx;
+            store_order_n[queue_write_ptr] = disp0_order_id;
+            if (store_count_n == {STORE_COUNT_W{1'b0}})
+                store_head_ptr_n = queue_write_ptr;
+            store_tail_ptr_n = queue_write_ptr;
+            store_count_n    = store_count_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
         end
 
         if (disp1_valid && free1_found && disp1_mem_write) begin
-            if (disp1_tid == 1'b0) begin
-                queue_write_ptr = (store_count_t0_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
-                                                                               : store_ptr_inc(store_tail_ptr_t0_n);
-                store_slot_t0_n[queue_write_ptr]  = free1_idx;
-                store_order_t0_n[queue_write_ptr] = disp1_order_id;
-                if (store_count_t0_n == {STORE_COUNT_W{1'b0}})
-                    store_head_ptr_t0_n = queue_write_ptr;
-                store_tail_ptr_t0_n = queue_write_ptr;
-                store_count_t0_n    = store_count_t0_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-            end else begin
-                queue_write_ptr = (store_count_t1_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
-                                                                               : store_ptr_inc(store_tail_ptr_t1_n);
-                store_slot_t1_n[queue_write_ptr]  = free1_idx;
-                store_order_t1_n[queue_write_ptr] = disp1_order_id;
-                if (store_count_t1_n == {STORE_COUNT_W{1'b0}})
-                    store_head_ptr_t1_n = queue_write_ptr;
-                store_tail_ptr_t1_n = queue_write_ptr;
-                store_count_t1_n    = store_count_t1_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
-            end
+            queue_write_ptr = (store_count_n == {STORE_COUNT_W{1'b0}}) ? {STORE_PTR_W{1'b0}}
+                                                                       : store_ptr_inc(store_tail_ptr_n);
+            store_slot_n[queue_write_ptr]  = free1_idx;
+            store_order_n[queue_write_ptr] = disp1_order_id;
+            if (store_count_n == {STORE_COUNT_W{1'b0}})
+                store_head_ptr_n = queue_write_ptr;
+            store_tail_ptr_n = queue_write_ptr;
+            store_count_n    = store_count_n + {{(STORE_COUNT_W-1){1'b0}}, 1'b1};
         end
 
-        if (store_count_t0_n != {STORE_COUNT_W{1'b0}})
-            store_head_order_id_t0_n = store_order_t0_n[store_head_ptr_t0_n];
+        if (store_count_n != {STORE_COUNT_W{1'b0}})
+            store_head_order_id_n = store_order_n[store_head_ptr_n];
         else
-            store_head_order_id_t0_n = {`METADATA_ORDER_ID_W{1'b0}};
-
-        if (store_count_t1_n != {STORE_COUNT_W{1'b0}})
-            store_head_order_id_t1_n = store_order_t1_n[store_head_ptr_t1_n];
-        else
-            store_head_order_id_t1_n = {`METADATA_ORDER_ID_W{1'b0}};
+            store_head_order_id_n = {`METADATA_ORDER_ID_W{1'b0}};
     end
 
     always @(posedge clk or negedge rstn) begin
         if (!rstn) begin
             for (lsi = 0; lsi < IQ_DEPTH; lsi = lsi + 1) begin
-                store_slot_t0_r[lsi]  <= {IQ_IDX_W{1'b0}};
-                store_order_t0_r[lsi] <= {`METADATA_ORDER_ID_W{1'b0}};
-                store_slot_t1_r[lsi]  <= {IQ_IDX_W{1'b0}};
-                store_order_t1_r[lsi] <= {`METADATA_ORDER_ID_W{1'b0}};
+                store_slot_r[lsi]  <= {IQ_IDX_W{1'b0}};
+                store_order_r[lsi] <= {`METADATA_ORDER_ID_W{1'b0}};
             end
-            store_head_ptr_t0_r      <= {STORE_PTR_W{1'b0}};
-            store_tail_ptr_t0_r      <= {STORE_PTR_W{1'b0}};
-            store_count_t0_r         <= {STORE_COUNT_W{1'b0}};
-            store_head_order_id_t0_r <= {`METADATA_ORDER_ID_W{1'b0}};
-            store_head_ptr_t1_r      <= {STORE_PTR_W{1'b0}};
-            store_tail_ptr_t1_r      <= {STORE_PTR_W{1'b0}};
-            store_count_t1_r         <= {STORE_COUNT_W{1'b0}};
-            store_head_order_id_t1_r <= {`METADATA_ORDER_ID_W{1'b0}};
+            store_head_ptr_r      <= {STORE_PTR_W{1'b0}};
+            store_tail_ptr_r      <= {STORE_PTR_W{1'b0}};
+            store_count_r         <= {STORE_COUNT_W{1'b0}};
+            store_head_order_id_r <= {`METADATA_ORDER_ID_W{1'b0}};
         end else begin
             for (lsi = 0; lsi < IQ_DEPTH; lsi = lsi + 1) begin
-                store_slot_t0_r[lsi]  <= store_slot_t0_n[lsi];
-                store_order_t0_r[lsi] <= store_order_t0_n[lsi];
-                store_slot_t1_r[lsi]  <= store_slot_t1_n[lsi];
-                store_order_t1_r[lsi] <= store_order_t1_n[lsi];
+                store_slot_r[lsi]  <= store_slot_n[lsi];
+                store_order_r[lsi] <= store_order_n[lsi];
             end
-            store_head_ptr_t0_r      <= store_head_ptr_t0_n;
-            store_tail_ptr_t0_r      <= store_tail_ptr_t0_n;
-            store_count_t0_r         <= store_count_t0_n;
-            store_head_order_id_t0_r <= store_head_order_id_t0_n;
-            store_head_ptr_t1_r      <= store_head_ptr_t1_n;
-            store_tail_ptr_t1_r      <= store_tail_ptr_t1_n;
-            store_count_t1_r         <= store_count_t1_n;
-            store_head_order_id_t1_r <= store_head_order_id_t1_n;
+            store_head_ptr_r      <= store_head_ptr_n;
+            store_tail_ptr_r      <= store_tail_ptr_n;
+            store_count_r         <= store_count_n;
+            store_head_order_id_r <= store_head_order_id_n;
         end
     end
 

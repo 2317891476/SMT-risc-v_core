@@ -1,14 +1,14 @@
 // =============================================================================
 // Module : stage_if
-// Description: Upgraded IF stage with BPU integration and fetch buffer output.
-//   - Fetches 1 instruction per cycle from the selected thread (via scheduler)
+// Description: IF stage with BPU integration and fetch buffer output (single-thread).
+//   - Fetches 1 instruction per cycle
 //   - Integrates inst_memory (which now contains ICache with epoch tracking)
 //   - Queries BPU for branch prediction alongside fetch
 //   - Outputs to fetch_buffer for dual-issue decode
-//   - Supports per-thread branch redirect and flush
+//   - Supports branch redirect and flush
 //   - Implements stale response detection using epoch tracking
 //
-//   This module wraps: pc_mt (multi-thread PC), inst_memory (with ICache), bpu_bimodal
+//   This module wraps: pc_mt (single-thread PC), inst_memory (with ICache), bpu_bimodal
 // =============================================================================
 module stage_if #(
     parameter USE_EXTERNAL_REFILL_STATIC = 0,
@@ -20,24 +20,20 @@ module stage_if #(
 
     // ─── Stall / Flush ──────────────────────────────────────────
     input  wire        pc_stall,       // pipeline stall (from scoreboard full)
-    input  wire [1:0]  if_flush,       // [t] = flush thread t
+    input  wire        if_flush,       // single-thread flush
+    input  wire        icache_invalidate,
 
     // ─── Branch redirect from EX stage ──────────────────────────
-    input  wire [31:0] br_addr_t0,     // branch target for thread 0
-    input  wire [31:0] br_addr_t1,     // branch target for thread 1
-    input  wire [1:0]  br_ctrl,        // [t] = branch taken for thread t
+    input  wire [31:0] br_addr,        // branch target
+    input  wire        br_ctrl,        // branch taken
 
     // ─── BPU update from EX stage ───────────────────────────────
     input  wire        bpu_update_valid,
     input  wire [31:0] bpu_update_pc,
-    input  wire [0:0]  bpu_update_tid,
     input  wire        bpu_update_taken,
     input  wire [31:0] bpu_update_target,
     input  wire        bpu_update_is_call,
     input  wire        bpu_update_is_return,
-
-    // ─── Thread scheduler ───────────────────────────────────────
-    input  wire [0:0]  fetch_tid,
 
     // ─── Fetch buffer backpressure ──────────────────────────────
     input  wire        fb_ready,       // fetch buffer can accept
@@ -46,7 +42,6 @@ module stage_if #(
     output wire        if_valid,       // fetched instruction valid
     output wire [31:0] if_inst,        // instruction word
     output wire [31:0] if_pc,          // instruction PC
-    output wire [0:0]  if_tid,         // thread ID
     output wire        if_pred_taken,  // BPU prediction for this instruction
     output wire [31:0] if_pred_target,
 
@@ -79,15 +74,15 @@ module stage_if #(
 
 // ─── PC management ──────────────────────────────────────────────────────────
 wire [31:0] pc_out;
-wire [0:0]  tid_out;
 wire        resp_valid_from_mem;
 wire        req_ready_from_mem;
+wire        bpu_pred_taken;
+wire [31:0] bpu_pred_target;
 
 localparam FETCH_Q_DEPTH = 4;
 localparam FETCH_Q_IDX_W = 2;
 
 reg [31:0] meta_pc          [0:FETCH_Q_DEPTH-1];
-reg [0:0]  meta_tid         [0:FETCH_Q_DEPTH-1];
 reg        meta_pred_taken  [0:FETCH_Q_DEPTH-1];
 reg [31:0] meta_pred_target [0:FETCH_Q_DEPTH-1];
 reg        meta_valid       [0:FETCH_Q_DEPTH-1];
@@ -97,7 +92,6 @@ reg [FETCH_Q_IDX_W:0] meta_count;
 
 reg [31:0] resp_inst        [0:FETCH_Q_DEPTH-1];
 reg [31:0] resp_pc          [0:FETCH_Q_DEPTH-1];
-reg [0:0]  resp_tid         [0:FETCH_Q_DEPTH-1];
 reg        resp_pred_taken  [0:FETCH_Q_DEPTH-1];
 reg [31:0] resp_pred_target [0:FETCH_Q_DEPTH-1];
 reg        resp_valid_q     [0:FETCH_Q_DEPTH-1];
@@ -143,57 +137,41 @@ assign response_credit_available =
     response_buffer_pop || (fetch_resp_done && !response_keep);
 assign pc_stall_combined = pc_stall || !meta_slot_available ||
                            !response_credit_available || !req_ready_from_mem ||
-                           (if_flush != 2'b00);
+                           if_flush || icache_invalidate;
 wire fetch_req_launch = rstn && !pc_stall && meta_slot_available &&
                         response_credit_available && req_ready_from_mem &&
-                        (if_flush == 2'b00);
-wire [1:0] pc_advance = fetch_req_launch ? (tid_out == 1'b0 ? 2'b01 : 2'b10) : 2'b00;
-wire [1:0] pred_ctrl_vec = fetch_req_launch ? (tid_out == 1'b0 ? {1'b0, bpu_pred_taken} :
-                                                                  {bpu_pred_taken, 1'b0}) :
-                                             2'b00;
+                        !if_flush && !icache_invalidate;
+wire pc_advance = fetch_req_launch;
+wire pred_ctrl  = fetch_req_launch ? bpu_pred_taken : 1'b0;
 
-pc_mt #(
-    .N_T             (2             ),
-    .THREAD1_BOOT_PC (32'h00000800  )  // Thread 1 starts at 0x800 for SMT tests
-) u_pc_mt (
+pc_mt u_pc_mt (
     .clk         (clk                 ),
     .rstn        (rstn                ),
     .br_ctrl     (br_ctrl             ),
-    .br_addr_t0  (br_addr_t0          ),
-    .br_addr_t1  (br_addr_t1          ),
-    .pred_ctrl   (pred_ctrl_vec       ),
-    .pred_addr_t0(bpu_pred_target     ),
-    .pred_addr_t1(bpu_pred_target     ),
-    .pc_stall    ({pc_stall_combined, pc_stall_combined}),
-    .flush       (if_flush            ),
+    .br_addr     (br_addr             ),
+    .pred_ctrl   (pred_ctrl           ),
+    .pred_addr   (bpu_pred_target     ),
+    .pc_stall    (pc_stall_combined   ),
     .pc_advance  (pc_advance          ),
-    .fetch_tid   (fetch_tid           ),
-    .if_pc       (pc_out              ),
-    .if_tid      (tid_out             )
+    .if_pc       (pc_out              )
 );
 
-// ─── Epoch tracking per thread ──────────────────────────────────────────────
-// Epoch is incremented on flush per thread to track stale responses
-reg [3:0] epoch_t0, epoch_t1;
-wire [3:0] current_epoch = (fetch_tid == 1'b0) ? epoch_t0 : epoch_t1;
+// ─── Epoch tracking ─────────────────────────────────────────────────────────
+// Epoch is incremented on flush to track stale responses
+reg [3:0] epoch;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        epoch_t0 <= 4'd0;
-        epoch_t1 <= 4'd0;
+        epoch <= 4'd0;
     end else begin
-        // Increment epoch on flush per thread
-        if (if_flush[0])
-            epoch_t0 <= epoch_t0 + 4'd1;
-        if (if_flush[1])
-            epoch_t1 <= epoch_t1 + 4'd1;
+        if (if_flush)
+            epoch <= epoch + 4'd1;
     end
 end
 
 // ─── Instruction memory (now with ICache) ───────────────────────────────────
 // Note: inst_memory is a shared resource, do NOT reset on per-thread flush
 wire [31:0] inst_from_mem;
-wire [0:0]  resp_tid_from_mem;
 wire [3:0]  resp_epoch_from_mem;
 wire [7:0]  ic_high_miss_count_dbg;
 wire [7:0]  ic_mem_req_count_dbg;
@@ -211,15 +189,13 @@ inst_memory #(
     .req_valid      (fetch_req_launch   ),
     .req_ready      (req_ready_from_mem ),
     .inst_addr      (pc_out            ),
-    .req_tid        (tid_out           ),
     .inst_o         (inst_from_mem     ),
-    .resp_tid       (resp_tid_from_mem ),
     .resp_epoch     (resp_epoch_from_mem),
     .resp_valid     (resp_valid_from_mem),
-    .current_epoch  (current_epoch     ),
-    .current_epoch_t0(epoch_t0          ),
-    .current_epoch_t1(epoch_t1          ),
-    .flush          (|if_flush         ),
+    .current_epoch  (epoch             ),
+    .current_epoch_t0(epoch            ),
+    .flush          (if_flush          ),
+    .invalidate     (icache_invalidate ),
 
     // Task 5: External refill interface to mem_subsys M0
     .ext_mem_req_valid  (ext_mem_req_valid),
@@ -240,9 +216,6 @@ inst_memory #(
 );
 
 // ─── Branch prediction ──────────────────────────────────────────────────────
-wire bpu_pred_taken;
-wire [31:0] bpu_pred_target;
-
 bpu_bimodal #(
     .PHT_ENTRIES (BPU_PHT_ENTRIES)
 ) u_bpu (
@@ -250,13 +223,11 @@ bpu_bimodal #(
     .rstn          (rstn              ),
     // Prediction port
     .pred_pc       (pc_out            ),
-    .pred_tid      (tid_out           ),
     .pred_taken    (bpu_pred_taken    ),
     .pred_target   (bpu_pred_target   ),
     // Update port
     .update_valid  (bpu_update_valid  ),
     .update_pc     (bpu_update_pc     ),
-    .update_tid    (bpu_update_tid    ),
     .update_taken  (bpu_update_taken  ),
     .update_target (bpu_update_target ),
     .update_is_call(bpu_update_is_call),
@@ -266,9 +237,8 @@ bpu_bimodal #(
 // Bypass address needs to be delayed by 1 cycle to match mem_subsys RAM read latency
 // When pc_out presents addr_N, mem_subsys reads ram[addr_N] and outputs data on next cycle
 // So bypass_addr should be addr_N when bypass_data is for addr_N
-wire [3:0] expected_epoch = (resp_tid_from_mem == 1'b0) ? epoch_t0 : epoch_t1;
-assign response_stale = resp_valid_from_mem && (resp_epoch_from_mem != expected_epoch);
-assign response_flushed = resp_valid_from_mem && if_flush[resp_tid_from_mem];
+assign response_stale = resp_valid_from_mem && (resp_epoch_from_mem != epoch);
+assign response_flushed = resp_valid_from_mem && if_flush;
 
 integer fetch_q_i;
 
@@ -283,26 +253,35 @@ always @(posedge clk or negedge rstn) begin
         fetch_bypass_addr_r <= 32'd0;
         for (fetch_q_i = 0; fetch_q_i < FETCH_Q_DEPTH; fetch_q_i = fetch_q_i + 1) begin
             meta_pc[fetch_q_i]          <= 32'd0;
-            meta_tid[fetch_q_i]         <= 1'b0;
             meta_pred_taken[fetch_q_i]  <= 1'b0;
             meta_pred_target[fetch_q_i] <= 32'd0;
             meta_valid[fetch_q_i]       <= 1'b0;
             resp_inst[fetch_q_i]        <= 32'd0;
             resp_pc[fetch_q_i]          <= 32'd0;
-            resp_tid[fetch_q_i]         <= 1'b0;
             resp_pred_taken[fetch_q_i]  <= 1'b0;
             resp_pred_target[fetch_q_i] <= 32'd0;
             resp_valid_q[fetch_q_i]     <= 1'b0;
         end
     end
     else begin
-        if (|if_flush) begin
+        if (icache_invalidate) begin
+            meta_head <= {(FETCH_Q_IDX_W+1){1'b0}};
+            meta_tail <= {(FETCH_Q_IDX_W+1){1'b0}};
+            meta_count <= {(FETCH_Q_IDX_W+1){1'b0}};
+            resp_head <= {(FETCH_Q_IDX_W+1){1'b0}};
+            resp_tail <= {(FETCH_Q_IDX_W+1){1'b0}};
+            resp_count <= {(FETCH_Q_IDX_W+1){1'b0}};
+            for (fetch_q_i = 0; fetch_q_i < FETCH_Q_DEPTH; fetch_q_i = fetch_q_i + 1) begin
+                meta_valid[fetch_q_i] <= 1'b0;
+                resp_valid_q[fetch_q_i] <= 1'b0;
+            end
+        end else if (if_flush) begin
             meta_head <= {(FETCH_Q_IDX_W+1){1'b0}};
             meta_tail <= {(FETCH_Q_IDX_W+1){1'b0}};
             meta_count <= {(FETCH_Q_IDX_W+1){1'b0}};
             for (fetch_q_i = 0; fetch_q_i < FETCH_Q_DEPTH; fetch_q_i = fetch_q_i + 1) begin
                 meta_valid[fetch_q_i] <= 1'b0;
-                if (resp_valid_q[fetch_q_i] && if_flush[resp_tid[fetch_q_i]]) begin
+                if (resp_valid_q[fetch_q_i]) begin
                     resp_valid_q[fetch_q_i] <= 1'b0;
                 end
             end
@@ -314,7 +293,6 @@ always @(posedge clk or negedge rstn) begin
 
             if (fetch_req_launch) begin
                 meta_pc[meta_tail_idx]          <= pc_out;
-                meta_tid[meta_tail_idx]         <= tid_out;
                 meta_pred_taken[meta_tail_idx]  <= bpu_pred_taken;
                 meta_pred_target[meta_tail_idx] <= bpu_pred_target;
                 meta_valid[meta_tail_idx]       <= 1'b1;
@@ -327,14 +305,22 @@ always @(posedge clk or negedge rstn) begin
                           {{FETCH_Q_IDX_W{1'b0}}, fetch_resp_done};
 
             if (response_buffer_pop) begin
+`ifdef VERBOSE_SIM_LOGS
+                $display("[SIF_POP] head=%d inst=%h valid=%b @%0t",
+                         resp_head_idx, resp_inst[resp_head_idx], resp_valid_q[resp_head_idx], $time);
+`endif
                 resp_valid_q[resp_head_idx] <= 1'b0;
                 resp_head <= resp_head + {{FETCH_Q_IDX_W{1'b0}}, 1'b1};
             end
 
             if (response_fifo_push) begin
+`ifdef VERBOSE_SIM_LOGS
+                $display("[SIF_PUSH] inst_from_mem=%h resp_done=%b keep=%b stale=%b flushed=%b meta_valid=%b @%0t",
+                         inst_from_mem, fetch_resp_done, response_keep, response_stale, response_flushed,
+                         meta_valid[meta_head_idx], $time);
+`endif
                 resp_inst[resp_tail_idx]        <= inst_from_mem;
                 resp_pc[resp_tail_idx]          <= meta_pc[meta_head_idx];
-                resp_tid[resp_tail_idx]         <= meta_tid[meta_head_idx];
                 resp_pred_taken[resp_tail_idx]  <= meta_pred_taken[meta_head_idx];
                 resp_pred_target[resp_tail_idx] <= meta_pred_target[meta_head_idx];
                 resp_valid_q[resp_tail_idx]     <= 1'b1;
@@ -357,12 +343,9 @@ assign ext_mem_bypass_addr = fetch_bypass_addr_r;
 // All outputs must be delayed by 1 cycle to match RAM output timing.
 //
 // Additionally: Stale response detection
-// - Response includes {tid, epoch} from ICache
+// - Response includes epoch from ICache
 // - Drop response if epoch doesn't match current epoch (stale)
-// Determine if response is stale by comparing epochs
-// Current epoch depends on which thread made the request
 assign if_pc         = resp_pc[resp_head_idx];
-assign if_tid        = resp_tid[resp_head_idx];
 assign if_valid      = if_valid_r;
 assign if_inst       = resp_inst[resp_head_idx];
 assign if_pred_taken = resp_pred_taken[resp_head_idx];

@@ -105,6 +105,7 @@ always @(*) begin
         `Btype : is_fu = `FU_INT0;  // Branch -> Pipe 0 (has branch resolution)
         `ItypeJ: is_fu = `FU_INT0;  // JALR -> Pipe 0
         `Jtype : is_fu = `FU_INT0;  // JAL -> Pipe 0
+        `MISC_MEM: is_fu = `FU_INT0;  // FENCE/FENCE.I -> Pipe 0 serializing NOP
         `SYSTEM: is_fu = `FU_INT0;  // SYSTEM (CSR/MRET) -> Pipe 0 for serialization
         `OPC_CUSTOM0: is_fu = `FU_INT0;  // RoCC -> Pipe 0 for serialization
         default: is_fu = `FU_NOP;

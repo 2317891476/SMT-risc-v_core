@@ -19,6 +19,7 @@ if {$top_module eq "adam_riscv_ax7203_top"} {
     set build_id_file "$project_dir/${project_name}_${top_module}_bitstream_id.txt"
 }
 set bitstream_file [ax7203_env_or_default BITSTREAM_FILE $default_bitstream]
+set build_id_file [ax7203_env_or_default BUILD_ID_FILE $build_id_file]
 set expected_build_id ""
 
 proc ax7203_normalize_hex {value} {

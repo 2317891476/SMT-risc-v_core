@@ -77,7 +77,18 @@ module mem_subsys (
     input  wire        debug_store_buffer_empty,
     input  wire [2:0]  debug_store_buffer_count_t0,
     input  wire [2:0]  debug_store_buffer_count_t1,
-    output wire [127:0] debug_ddr3_m0_bus
+    input  wire [7:0]  debug_core_status_flags,
+    input  wire [15:0] debug_core_last_commit_pc,
+    input  wire [7:0]  debug_core_branch_issue_count,
+    input  wire [7:0]  debug_core_branch_complete_count,
+    input  wire [7:0]  debug_core_branch_state,
+    input  wire [7:0]  debug_core_branch_counts,
+    input  wire [7:0]  debug_core_last_issue_pc_lo,
+    output wire [127:0] debug_ddr3_m0_bus,
+
+    input  wire        dcache_flush_all,
+    output wire        dcache_flush_busy,
+    output wire        dcache_flush_done
 
 `ifdef ENABLE_DDR3
     ,
@@ -152,9 +163,12 @@ wire addr_is_uart_rx_m1 = (m1_req_addr == `UART_RXDATA_ADDR);
 wire addr_is_uart_ctrl_m1 = (m1_req_addr == `UART_CTRL_ADDR);
 wire addr_is_ddr3_status_m1 = (m1_req_addr == `DDR3_STATUS_ADDR);
 wire addr_is_debug_beacon_evt_m1 = (m1_req_addr == `DEBUG_BEACON_EVT_ADDR);
+wire addr_is_uart16550_m1 = (m1_req_addr >= `UART16550_BASE)
+                          && (m1_req_addr <= (`UART16550_BASE + 32'd7));
+wire [2:0] uart16550_addr_off_m1 = m1_req_addr[2:0];
 wire addr_is_uart_m1    = addr_is_uart_tx_m1 || addr_is_uart_status_m1
                         || addr_is_uart_rx_m1 || addr_is_uart_ctrl_m1
-                        || addr_is_debug_beacon_evt_m1;
+                        || addr_is_debug_beacon_evt_m1 || addr_is_uart16550_m1;
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
 wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_plic_m1;
@@ -184,6 +198,8 @@ wire [3:0]  dc_m1_req_wen;
 wire        dc_m1_resp_valid;
 wire [31:0] dc_m1_resp_data;
 wire        dcache_miss_event;
+wire        dcache_flush_busy_w;
+wire        dcache_flush_done_w;
 
 l1_dcache_m1 u_dcache_m1 (
     .clk              (clk),
@@ -205,8 +221,14 @@ l1_dcache_m1 u_dcache_m1 (
     .dn_m1_req_wen    (dc_m1_req_wen),
     .dn_m1_resp_valid (dc_m1_resp_valid),
     .dn_m1_resp_data  (dc_m1_resp_data),
-    .dcache_miss_event(dcache_miss_event)
+    .dcache_miss_event(dcache_miss_event),
+    .flush_all        (dcache_flush_all),
+    .flush_busy       (dcache_flush_busy_w),
+    .flush_done       (dcache_flush_done_w)
 );
+
+assign dcache_flush_busy = dcache_flush_busy_w;
+assign dcache_flush_done = dcache_flush_done_w;
 
 wire        ddr3_calib_done_w = ddr3_init_calib_complete;
 wire        ddr3_bridge_idle_w;
@@ -223,6 +245,8 @@ wire [31:0] m1_ddr3_resp_data = 32'd0;
 wire        m1_ddr3_resp_l1d_hit = 1'b0;
 wire        ddr3_calib_done_w = 1'b0;
 wire        ddr3_bridge_idle_w = 1'b1;
+assign dcache_flush_busy = 1'b0;
+assign dcache_flush_done = dcache_flush_all;
 // synthesis translate_off
 wire m0_ddr3_req     = 1'b0;
 wire m1_ddr3_req     = 1'b0;
@@ -255,21 +279,37 @@ wire        m0_l2_req_ready;
 wire        m0_l2_resp_valid;
 wire [31:0] m0_l2_resp_data;
 wire        m0_l2_resp_last;
+wire        m1_mmio_req = m1_req_valid && addr_is_uncached_m1;
+wire        m1_resp_valid_int;
+wire [31:0] m1_resp_data_int;
+reg         mmio_resp_valid_r;
+reg  [31:0] mmio_resp_data_r;
+reg         uart_pending_valid_r;
+reg         uart_tx_enable_r;
+reg         debug_beacon_req_valid_r;
 
 // M1 ready: MMIO is immediate except for UART TX backpressure and the optional
 // Step2-only beacon event mailbox.
 wire       debug_beacon_evt_ready_w;
+wire       debug_beacon_tx_idle_w;
 reg        m1_mmio_inflight_r;
+reg [15:0] m1_mmio_watchdog_r;
+reg [7:0]  uart16550_lcr_r;
 `ifdef VERILATOR_MAINLINE
 wire       uart_tx_ready_w = uart_tx_enable_r;
 `else
-wire       uart_tx_ready_w = uart_tx_enable_r && !uart_pending_valid_r;
+wire       uart_tx_ready_w = uart_tx_enable_r && !uart_pending_valid_r && debug_beacon_tx_idle_w;
 `endif
-wire m1_mmio_ready_core = addr_is_uart_tx_m1 && m1_req_write
+wire       uart16550_dlab_w = uart16550_lcr_r[7];
+wire       uart16550_thr_write_ready_w = addr_is_uart16550_m1 && m1_req_write
+                                      && (uart16550_addr_off_m1 == 3'd0)
+                                      && !uart16550_dlab_w;
+wire m1_mmio_ready_core = ((addr_is_uart_tx_m1 && m1_req_write) || uart16550_thr_write_ready_w)
                         ? uart_tx_ready_w
                         : (addr_is_debug_beacon_evt_m1 && m1_req_write
                            ? !debug_beacon_req_valid_r
                            : 1'b1);
+wire m1_mmio_watchdog_fire = m1_mmio_inflight_r && (m1_mmio_watchdog_r == 16'hffff);
 `ifdef ENABLE_DDR3
 assign m1_req_ready = addr_is_ddr3_m1    ? m1_ddr3_req_ready
                    : addr_is_uncached_m1 ? (m1_mmio_req && !m1_mmio_inflight_r && m1_mmio_ready_core)
@@ -395,7 +435,6 @@ end
 // ═════════════════════════════════════════════════════════════════════════════
 
 // Detect MMIO requests - these bypass the arbiter/L2 for deterministic access
-wire        m1_mmio_req = m1_req_valid && addr_is_uncached_m1;
 
 // CLINT wires - MMIO bypass (no grant needed)
 wire        clint_req_valid = addr_is_clint_m1 && m1_mmio_req;
@@ -423,6 +462,7 @@ wire [31:0] plic_resp_rdata;
 wire        plic_resp_valid;
 wire [31:0] plic_read_data;
 wire        plic_ext_irq;
+wire        uart16550_irq_w;
 
 plic u_plic (
     .clk         (clk),
@@ -435,6 +475,7 @@ plic u_plic (
     .resp_valid  (plic_resp_valid),
     .read_data   (plic_read_data),
     .ext_irq_src (ext_irq_src),
+    .uart_irq_src(uart16550_irq_w),
     .external_irq(plic_ext_irq)
 );
 
@@ -461,14 +502,17 @@ localparam integer UART_CLK_DIV = 4;
 reg        uart_tx_start_r;
 reg [7:0]  uart_tx_data_r;
 reg        uart_tx_launch_valid_r;
-reg        uart_pending_valid_r;
 reg [7:0]  uart_pending_byte_r;
-reg        uart_tx_enable_r;
 reg        uart_rx_enable_r;
 reg        uart_rx_overrun_r;
 reg        uart_rx_frame_err_r;
-localparam integer UART_RX_FIFO_DEPTH = 8;
-localparam integer UART_RX_FIFO_PTR_W = 3;
+reg [7:0]  uart16550_ier_r;
+reg [7:0]  uart16550_mcr_r;
+reg [7:0]  uart16550_scr_r;
+reg [7:0]  uart16550_dll_r;
+reg [7:0]  uart16550_dlm_r;
+localparam integer UART_RX_FIFO_DEPTH = 128;
+localparam integer UART_RX_FIFO_PTR_W = 7;
 // Keep the RX FIFO in discrete registers. The benchmark loader exercises a
 // sustained push/pop pattern on FPGA, and LUTRAM-style async read inference
 // can introduce board-only read-during-write ambiguity that does not show up
@@ -502,7 +546,6 @@ wire [7:0] debug_beacon_evt_arg_req_w;
 wire       debug_beacon_byte_valid_w;
 wire       debug_beacon_byte_ready_w;
 wire [7:0] debug_beacon_byte_w;
-reg        debug_beacon_req_valid_r;
 reg [7:0]  debug_beacon_req_type_r;
 reg [7:0]  debug_beacon_req_arg_r;
 reg        debug_beacon_evt_pending_r;
@@ -510,6 +553,31 @@ reg [7:0]  debug_beacon_evt_type_r;
 reg [7:0]  debug_beacon_evt_arg_r;
 reg        debug_beacon_resp_valid_r;
 reg [31:0] debug_beacon_resp_data_r;
+`ifdef AX7203_DDR3_LOADER_BEACON_DEBUG
+localparam [23:0] AUTOBEACON_STALL_LIMIT = 24'h3fffff;
+localparam [7:0]  AUTOBEACON_EVT_M1_NOT_READY = 8'hD1;
+localparam [7:0]  AUTOBEACON_EVT_MMIO_WATCHDOG = 8'hD2;
+localparam [7:0]  AUTOBEACON_EVT_SB_STUCK = 8'hD3;
+localparam [7:0]  AUTOBEACON_EVT_RX_STALLED = 8'hD4;
+localparam [7:0]  AUTOBEACON_EVT_RX_ERROR = 8'hD5;
+localparam [7:0]  AUTOBEACON_EVT_CORE_PC_LO = 8'hD6;
+localparam [7:0]  AUTOBEACON_EVT_CORE_PC_HI = 8'hD7;
+localparam [7:0]  AUTOBEACON_EVT_CORE_FLAGS = 8'hD8;
+localparam [7:0]  AUTOBEACON_EVT_CORE_BR_ISSUE = 8'hD9;
+localparam [7:0]  AUTOBEACON_EVT_CORE_BR_COMPLETE = 8'hDA;
+localparam [7:0]  AUTOBEACON_EVT_CORE_BR_STATE = 8'hDB;
+localparam [7:0]  AUTOBEACON_EVT_CORE_BR_COUNTS = 8'hDC;
+localparam [7:0]  AUTOBEACON_EVT_CORE_ISSUE_PC_LO = 8'hDD;
+reg [23:0] autobeacon_m1_wait_ctr_r;
+reg [23:0] autobeacon_sb_wait_ctr_r;
+reg [23:0] autobeacon_rx_wait_ctr_r;
+reg        autobeacon_m1_wait_armed_r;
+reg        autobeacon_sb_wait_armed_r;
+reg        autobeacon_rx_wait_armed_r;
+reg        autobeacon_rx_error_armed_r;
+reg        autobeacon_mmio_pending_r;
+reg [3:0]  autobeacon_core_snapshot_phase_r;
+`endif
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
 reg        uart_rx_mmio_resp_valid_r;
 reg [31:0] uart_rx_mmio_resp_data_r;
@@ -544,6 +612,27 @@ wire [31:0] uart_status_word = {
     uart_status_busy
 };
 wire [31:0] uart_ctrl_word = {29'd0, uart_rx_valid_w, uart_rx_enable_r, uart_tx_enable_r};
+wire        uart16550_thre_w = uart_tx_enable_r && !uart_pending_valid_r;
+wire        uart16550_temt_w = uart16550_thre_w && !uart_busy && !uart_tx_launch_valid_r && !uart_tx_start_r;
+wire        uart16550_line_status_w = uart_rx_overrun_r || uart_rx_frame_err_r;
+wire [7:0]  uart16550_lsr_byte_w = {
+    1'b0,
+    uart16550_temt_w,
+    uart16550_thre_w,
+    1'b0,
+    uart_rx_frame_err_r,
+    1'b0,
+    uart_rx_overrun_r,
+    uart_rx_valid_w
+};
+wire [7:0]  uart16550_iir_byte_w =
+    (uart16550_line_status_w && uart16550_ier_r[2]) ? 8'h06 :
+    (uart_rx_valid_w          && uart16550_ier_r[0]) ? 8'h04 :
+    (uart16550_thre_w         && uart16550_ier_r[1]) ? 8'h02 :
+                                                        8'h01;
+assign uart16550_irq_w = (uart16550_line_status_w && uart16550_ier_r[2])
+                      || (uart_rx_valid_w          && uart16550_ier_r[0])
+                      || (uart16550_thre_w         && uart16550_ier_r[1]);
 
 // UART write byte extraction: pick the first non-zero byte lane
 function [7:0] select_mmio_byte;
@@ -559,24 +648,115 @@ function [7:0] select_mmio_byte;
     end
 endfunction
 
+function [31:0] expand_mmio_byte;
+    input [7:0] byte_value;
+    input [1:0] addr_lsb;
+    begin
+        case (addr_lsb)
+            2'd0: expand_mmio_byte = {24'd0, byte_value};
+            2'd1: expand_mmio_byte = {16'd0, byte_value, 8'd0};
+            2'd2: expand_mmio_byte = {8'd0, byte_value, 16'd0};
+            default: expand_mmio_byte = {byte_value, 24'd0};
+        endcase
+    end
+endfunction
+
+function [31:0] expand_uart16550_byte;
+    input [7:0] byte_value;
+    begin
+        expand_uart16550_byte = {byte_value, byte_value, byte_value, byte_value};
+    end
+endfunction
+
 // UART request decode from M1 MMIO path
-wire uart_tx_write  = m1_mmio_req && addr_is_uart_tx_m1 && m1_req_write;
-wire uart_ctrl_write = m1_mmio_req && addr_is_uart_ctrl_m1 && m1_req_write;
-wire uart_rx_read   = m1_mmio_req && addr_is_uart_rx_m1 && !m1_req_write;
-assign debug_beacon_evt_write = m1_mmio_req && addr_is_debug_beacon_evt_m1 && m1_req_write;
+wire m1_mmio_accept = m1_mmio_req && m1_req_ready;
+assign debug_beacon_evt_write = m1_mmio_accept && addr_is_debug_beacon_evt_m1 && m1_req_write;
 wire [7:0] uart_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 wire [7:0] uart_ctrl_write_byte = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 assign debug_beacon_evt_type_req_w = select_mmio_byte(8'd0, m1_req_wdata, m1_req_wen);
 assign debug_beacon_evt_arg_req_w = m1_req_wdata[15:8];
-wire uart_rx_fifo_clear = uart_ctrl_write && (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4]);
+
+wire uart16550_reg0_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd0);
+wire uart16550_reg1_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd1);
+wire uart16550_reg2_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd2);
+wire uart16550_reg3_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd3);
+wire uart16550_reg4_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd4);
+wire uart16550_reg5_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd5);
+wire uart16550_reg6_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd6);
+wire uart16550_reg7_acc = addr_is_uart16550_m1 && (uart16550_addr_off_m1 == 3'd7);
+
+wire uart16550_rbr_read  = m1_mmio_accept && uart16550_reg0_acc && !m1_req_write && !uart16550_dlab_w;
+wire uart16550_thr_write = m1_mmio_accept && uart16550_reg0_acc &&  m1_req_write && !uart16550_dlab_w;
+wire uart16550_dll_read  = m1_mmio_accept && uart16550_reg0_acc && !m1_req_write &&  uart16550_dlab_w;
+wire uart16550_dll_write = m1_mmio_accept && uart16550_reg0_acc &&  m1_req_write &&  uart16550_dlab_w;
+wire uart16550_ier_read  = m1_mmio_accept && uart16550_reg1_acc && !m1_req_write && !uart16550_dlab_w;
+wire uart16550_ier_write = m1_mmio_accept && uart16550_reg1_acc &&  m1_req_write && !uart16550_dlab_w;
+wire uart16550_dlm_read  = m1_mmio_accept && uart16550_reg1_acc && !m1_req_write &&  uart16550_dlab_w;
+wire uart16550_dlm_write = m1_mmio_accept && uart16550_reg1_acc &&  m1_req_write &&  uart16550_dlab_w;
+wire uart16550_iir_read  = m1_mmio_accept && uart16550_reg2_acc && !m1_req_write;
+wire uart16550_fcr_write = m1_mmio_accept && uart16550_reg2_acc &&  m1_req_write;
+wire uart16550_lcr_read  = m1_mmio_accept && uart16550_reg3_acc && !m1_req_write;
+wire uart16550_lcr_write = m1_mmio_accept && uart16550_reg3_acc &&  m1_req_write;
+wire uart16550_mcr_read  = m1_mmio_accept && uart16550_reg4_acc && !m1_req_write;
+wire uart16550_mcr_write = m1_mmio_accept && uart16550_reg4_acc &&  m1_req_write;
+wire uart16550_lsr_read  = m1_mmio_accept && uart16550_reg5_acc && !m1_req_write;
+wire uart16550_msr_read  = m1_mmio_accept && uart16550_reg6_acc && !m1_req_write;
+wire uart16550_scr_read  = m1_mmio_accept && uart16550_reg7_acc && !m1_req_write;
+wire uart16550_scr_write = m1_mmio_accept && uart16550_reg7_acc &&  m1_req_write;
+
+wire uart_tx_write  = m1_mmio_accept && m1_req_write
+                    && (addr_is_uart_tx_m1 || uart16550_thr_write);
+wire uart_ctrl_write = m1_mmio_accept && addr_is_uart_ctrl_m1 && m1_req_write;
+wire uart_rx_read   = m1_mmio_accept && !m1_req_write
+                    && (addr_is_uart_rx_m1 || uart16550_rbr_read);
+wire uart16550_tx_fifo_clear = uart16550_fcr_write && uart_write_byte[2];
+wire uart_rx_fifo_clear = (uart_ctrl_write && (!uart_ctrl_write_byte[1] || uart_ctrl_write_byte[4]))
+                       || (uart16550_fcr_write && uart_write_byte[1]);
 wire uart_rx_read_fire = uart_rx_read && uart_rx_valid_w;
 wire uart_rx_push_fire = uart_rx_byte_valid && (!uart_rx_fifo_full_w || uart_rx_read_fire);
 wire uart_store_accept = uart_tx_write && uart_tx_ready_w;
 wire debug_beacon_evt_accept_w = debug_beacon_evt_write && m1_req_ready;
+assign debug_beacon_tx_idle_w = !debug_beacon_req_valid_r
+                              && !debug_beacon_evt_pending_r
+                              && !debug_beacon_byte_valid_w;
 assign debug_beacon_byte_ready_w = uart_tx_enable_r && !uart_busy && !uart_pending_valid_r && !uart_tx_launch_valid_r && !uart_store_accept;
 assign uart_stage_pending_byte = uart_pending_valid_r && !uart_busy && !uart_tx_launch_valid_r;
 assign uart_stage_beacon_byte = !uart_stage_pending_byte && debug_beacon_byte_valid_w && debug_beacon_byte_ready_w;
 assign uart_stage_byte_w = uart_stage_pending_byte ? uart_pending_byte_r : debug_beacon_byte_w;
+`ifdef AX7203_DDR3_LOADER_BEACON_DEBUG
+wire       autobeacon_m1_wait_w = m1_req_valid && !m1_req_ready;
+wire       autobeacon_sb_wait_w = !debug_store_buffer_empty && !m1_req_valid;
+wire       autobeacon_rx_wait_w = uart_rx_valid_w && !uart_rx_read_fire;
+wire       autobeacon_m1_wait_fire_w = autobeacon_m1_wait_w
+                                     && autobeacon_m1_wait_armed_r
+                                     && (autobeacon_m1_wait_ctr_r == AUTOBEACON_STALL_LIMIT);
+wire       autobeacon_sb_wait_fire_w = autobeacon_sb_wait_w
+                                     && autobeacon_sb_wait_armed_r
+                                     && (autobeacon_sb_wait_ctr_r == AUTOBEACON_STALL_LIMIT);
+wire       autobeacon_rx_wait_fire_w = autobeacon_rx_wait_w
+                                     && autobeacon_rx_wait_armed_r
+                                     && (autobeacon_rx_wait_ctr_r == AUTOBEACON_STALL_LIMIT);
+wire       autobeacon_rx_error_fire_w = autobeacon_rx_error_armed_r
+                                      && (uart_rx_overrun_r || uart_rx_frame_err_r);
+wire       autobeacon_mmio_fire_w = autobeacon_mmio_pending_r || m1_mmio_watchdog_fire;
+wire       autobeacon_can_emit_w = debug_beacon_tx_idle_w && !debug_beacon_evt_accept_w;
+wire [7:0] autobeacon_m1_flags_w = {
+    !debug_store_buffer_empty,
+    uart_busy,
+    uart_pending_valid_r,
+    m1_mmio_inflight_r,
+    addr_is_uart16550_m1,
+    addr_is_uncached_m1,
+    addr_is_ddr3_m1,
+    m1_req_write
+};
+wire [7:0] autobeacon_rx_flags_w = {
+    uart_rx_overrun_r,
+    uart_rx_frame_err_r,
+    uart_rx_fifo_full_w,
+    uart_rx_count_r[4:0]
+};
+`endif
 wire [7:0] debug_uart_flags = {
     uart_tx_write,
     uart_store_accept,
@@ -609,7 +789,8 @@ uart_tx #(
 );
 
 uart_rx #(
-    .CLK_DIV(UART_CLK_DIV)
+    .CLK_DIV(UART_CLK_DIV),
+    .USE_OVERSAMPLE(0)
 ) u_uart_rx (
     .clk         (clk                ),
     .rst_n       (rstn               ),
@@ -672,10 +853,28 @@ always @(posedge clk or negedge rstn) begin
         uart_rx_enable_r     <= 1'b1;
         uart_rx_overrun_r    <= 1'b0;
         uart_rx_frame_err_r  <= 1'b0;
+        uart16550_ier_r      <= 8'd0;
+        uart16550_lcr_r      <= 8'h03;
+        uart16550_mcr_r      <= 8'd0;
+        uart16550_scr_r      <= 8'd0;
+        uart16550_dll_r      <= 8'd1;
+        uart16550_dlm_r      <= 8'd0;
         uart_rx_head_r       <= {UART_RX_FIFO_PTR_W{1'b0}};
         uart_rx_tail_r       <= {UART_RX_FIFO_PTR_W{1'b0}};
         uart_rx_count_r      <= {(UART_RX_FIFO_PTR_W+1){1'b0}};
         m1_mmio_inflight_r   <= 1'b0;
+        m1_mmio_watchdog_r   <= 16'd0;
+`ifdef AX7203_DDR3_LOADER_BEACON_DEBUG
+        autobeacon_m1_wait_ctr_r <= 24'd0;
+        autobeacon_sb_wait_ctr_r <= 24'd0;
+        autobeacon_rx_wait_ctr_r <= 24'd0;
+        autobeacon_m1_wait_armed_r <= 1'b1;
+        autobeacon_sb_wait_armed_r <= 1'b1;
+        autobeacon_rx_wait_armed_r <= 1'b1;
+        autobeacon_rx_error_armed_r <= 1'b1;
+        autobeacon_mmio_pending_r <= 1'b0;
+        autobeacon_core_snapshot_phase_r <= 4'd0;
+`endif
         debug_beacon_req_valid_r <= 1'b0;
         debug_beacon_req_type_r <= 8'd0;
         debug_beacon_req_arg_r <= 8'd0;
@@ -715,14 +914,20 @@ always @(posedge clk or negedge rstn) begin
 `endif
         if (m1_mmio_inflight_r) begin
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
-            if (mmio_resp_valid_r || debug_beacon_resp_valid_r || uart_rx_mmio_resp_valid_r) begin
+            if (mmio_resp_valid_r || debug_beacon_resp_valid_r || uart_rx_mmio_resp_valid_r || m1_mmio_watchdog_fire) begin
 `else
-            if (mmio_resp_valid_r || debug_beacon_resp_valid_r) begin
+            if (mmio_resp_valid_r || debug_beacon_resp_valid_r || m1_mmio_watchdog_fire) begin
 `endif
                 m1_mmio_inflight_r <= 1'b0;
+                m1_mmio_watchdog_r <= 16'd0;
+            end else if (m1_mmio_watchdog_r != 16'hffff) begin
+                m1_mmio_watchdog_r <= m1_mmio_watchdog_r + 16'd1;
             end
         end else if (m1_mmio_req && m1_mmio_ready_core) begin
             m1_mmio_inflight_r <= 1'b1;
+            m1_mmio_watchdog_r <= 16'd0;
+        end else begin
+            m1_mmio_watchdog_r <= 16'd0;
         end
         if (debug_beacon_req_valid_r && !debug_beacon_evt_pending_r) begin
             debug_beacon_evt_pending_r <= 1'b1;
@@ -740,26 +945,108 @@ always @(posedge clk or negedge rstn) begin
             debug_beacon_req_type_r <= debug_beacon_evt_type_req_w;
             debug_beacon_req_arg_r <= debug_beacon_evt_arg_req_w;
         end
-        // synthesis translate_off
-        if (debug_beacon_evt_accept_w) begin
-            $display("[DBG_EVT_REQ] t=%0t ready=%0d inflight=%0d wen=%h wdata=%08x type=%02x arg=%02x",
-                     $time, m1_req_ready, m1_mmio_inflight_r, m1_req_wen, m1_req_wdata,
-                     debug_beacon_evt_type_req_w, debug_beacon_evt_arg_req_w);
+`ifdef AX7203_DDR3_LOADER_BEACON_DEBUG
+        if (autobeacon_m1_wait_w) begin
+            if (autobeacon_m1_wait_ctr_r != AUTOBEACON_STALL_LIMIT)
+                autobeacon_m1_wait_ctr_r <= autobeacon_m1_wait_ctr_r + 24'd1;
+        end else begin
+            autobeacon_m1_wait_ctr_r <= 24'd0;
+            autobeacon_m1_wait_armed_r <= 1'b1;
         end
-        if (debug_beacon_req_valid_r && !debug_beacon_evt_pending_r) begin
-            $display("[DBG_EVT_STAGE] t=%0t type=%02x arg=%02x",
-                     $time, debug_beacon_req_type_r, debug_beacon_req_arg_r);
-        end
-        if (debug_beacon_evt_pending_r && debug_beacon_evt_ready_w) begin
-            $display("[DBG_EVT_TX] t=%0t type=%02x arg=%02x",
-                     $time, debug_beacon_evt_type_r, debug_beacon_evt_arg_r);
-        end
-        if (debug_beacon_resp_valid_r) begin
-            $display("[DBG_EVT_RESP] t=%0t data=%08x",
-                     $time, debug_beacon_resp_data_r);
-        end
-        // synthesis translate_on
 
+        if (autobeacon_sb_wait_w) begin
+            if (autobeacon_sb_wait_ctr_r != AUTOBEACON_STALL_LIMIT)
+                autobeacon_sb_wait_ctr_r <= autobeacon_sb_wait_ctr_r + 24'd1;
+        end else begin
+            autobeacon_sb_wait_ctr_r <= 24'd0;
+            autobeacon_sb_wait_armed_r <= 1'b1;
+        end
+
+        if (autobeacon_rx_wait_w) begin
+            if (autobeacon_rx_wait_ctr_r != AUTOBEACON_STALL_LIMIT)
+                autobeacon_rx_wait_ctr_r <= autobeacon_rx_wait_ctr_r + 24'd1;
+        end else begin
+            autobeacon_rx_wait_ctr_r <= 24'd0;
+            autobeacon_rx_wait_armed_r <= 1'b1;
+        end
+
+        if (!uart_rx_overrun_r && !uart_rx_frame_err_r)
+            autobeacon_rx_error_armed_r <= 1'b1;
+
+        if (m1_mmio_watchdog_fire)
+            autobeacon_mmio_pending_r <= 1'b1;
+
+        if (autobeacon_can_emit_w) begin
+            if (autobeacon_core_snapshot_phase_r == 4'd1) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_PC_LO;
+                debug_beacon_evt_arg_r <= debug_core_last_commit_pc[7:0];
+                autobeacon_core_snapshot_phase_r <= 4'd2;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd2) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_PC_HI;
+                debug_beacon_evt_arg_r <= debug_core_last_commit_pc[15:8];
+                autobeacon_core_snapshot_phase_r <= 4'd3;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd3) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_FLAGS;
+                debug_beacon_evt_arg_r <= debug_core_status_flags;
+                autobeacon_core_snapshot_phase_r <= 4'd4;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd4) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_BR_ISSUE;
+                debug_beacon_evt_arg_r <= debug_core_branch_issue_count;
+                autobeacon_core_snapshot_phase_r <= 4'd5;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd5) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_BR_COMPLETE;
+                debug_beacon_evt_arg_r <= debug_core_branch_complete_count;
+                autobeacon_core_snapshot_phase_r <= 4'd6;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd6) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_BR_STATE;
+                debug_beacon_evt_arg_r <= debug_core_branch_state;
+                autobeacon_core_snapshot_phase_r <= 4'd7;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd7) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_BR_COUNTS;
+                debug_beacon_evt_arg_r <= debug_core_branch_counts;
+                autobeacon_core_snapshot_phase_r <= 4'd8;
+            end else if (autobeacon_core_snapshot_phase_r == 4'd8) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_CORE_ISSUE_PC_LO;
+                debug_beacon_evt_arg_r <= debug_core_last_issue_pc_lo;
+                autobeacon_core_snapshot_phase_r <= 4'd0;
+            end else if (autobeacon_mmio_fire_w) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_MMIO_WATCHDOG;
+                debug_beacon_evt_arg_r <= autobeacon_m1_flags_w;
+                autobeacon_mmio_pending_r <= 1'b0;
+            end else if (autobeacon_rx_error_fire_w) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_RX_ERROR;
+                debug_beacon_evt_arg_r <= autobeacon_rx_flags_w;
+                autobeacon_rx_error_armed_r <= 1'b0;
+                autobeacon_core_snapshot_phase_r <= 4'd1;
+            end else if (autobeacon_rx_wait_fire_w) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_RX_STALLED;
+                debug_beacon_evt_arg_r <= autobeacon_rx_flags_w;
+                autobeacon_rx_wait_armed_r <= 1'b0;
+                autobeacon_core_snapshot_phase_r <= 4'd1;
+            end else if (autobeacon_m1_wait_fire_w) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_M1_NOT_READY;
+                debug_beacon_evt_arg_r <= autobeacon_m1_flags_w;
+                autobeacon_m1_wait_armed_r <= 1'b0;
+            end else if (autobeacon_sb_wait_fire_w) begin
+                debug_beacon_evt_pending_r <= 1'b1;
+                debug_beacon_evt_type_r <= AUTOBEACON_EVT_SB_STUCK;
+                debug_beacon_evt_arg_r <= {5'd0, debug_store_buffer_count_t0};
+                autobeacon_sb_wait_armed_r <= 1'b0;
+            end
+        end
+`endif
         // TX: accept store into pending register
         if (uart_store_accept) begin
 `ifdef VERILATOR_MAINLINE
@@ -798,6 +1085,24 @@ always @(posedge clk or negedge rstn) begin
             uart_rx_enable_r <= uart_ctrl_write_byte[1];
             if (uart_ctrl_write_byte[2]) uart_rx_overrun_r   <= 1'b0;
             if (uart_ctrl_write_byte[3]) uart_rx_frame_err_r <= 1'b0;
+        end
+
+        if (m1_mmio_req && m1_req_ready) begin
+            if (uart16550_dll_write) uart16550_dll_r <= uart_write_byte;
+            if (uart16550_dlm_write) uart16550_dlm_r <= uart_write_byte;
+            if (uart16550_ier_write) uart16550_ier_r <= {5'd0, uart_write_byte[2:0]};
+            if (uart16550_lcr_write) uart16550_lcr_r <= uart_write_byte;
+            if (uart16550_mcr_write) uart16550_mcr_r <= uart_write_byte;
+            if (uart16550_scr_write) uart16550_scr_r <= uart_write_byte;
+            if (uart16550_lsr_read) begin
+                uart_rx_overrun_r <= 1'b0;
+                uart_rx_frame_err_r <= 1'b0;
+            end
+        end
+
+        if (uart16550_tx_fifo_clear) begin
+            uart_pending_valid_r <= 1'b0;
+            uart_tx_launch_valid_r <= 1'b0;
         end
 
         if (uart_rx_fifo_clear) begin
@@ -852,11 +1157,6 @@ end
 // M1 Response Mux (MMIO bypass takes priority over cached L2 path)
 // ═════════════════════════════════════════════════════════════════════════════
 
-wire        m1_resp_valid_int;
-wire [31:0] m1_resp_data_int;
-reg         mmio_resp_valid_r;
-reg  [31:0] mmio_resp_data_r;
-
 // Handle TUBE + UART MMIO - deterministic bypass
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -865,10 +1165,13 @@ always @(posedge clk or negedge rstn) begin
         mmio_resp_data_r  <= 32'd0;
     end else begin
         mmio_resp_valid_r <= 1'b0;
-        if (addr_is_tube_m1 && m1_mmio_req && m1_req_write) begin
+        if (m1_mmio_accept && addr_is_tube_m1 && m1_req_write) begin
             tube_status <= m1_req_wdata[7:0];
         end
-        if (m1_mmio_req && m1_req_ready) begin
+        if (m1_mmio_watchdog_fire) begin
+            mmio_resp_valid_r <= 1'b1;
+            mmio_resp_data_r <= 32'd0;
+        end else if (m1_mmio_accept) begin
             if (addr_is_tube_m1 && !m1_req_write) begin
                 mmio_resp_valid_r <= 1'b1;
                 mmio_resp_data_r <= {24'd0, tube_status};
@@ -878,13 +1181,58 @@ always @(posedge clk or negedge rstn) begin
             end else if (addr_is_plic_m1) begin
                 mmio_resp_valid_r <= 1'b1;
                 mmio_resp_data_r <= m1_req_write ? 32'd0 : plic_read_data;
+            end else if (uart16550_rbr_read) begin
+`ifdef TRANSPORT_UART_RXDATA_REG_TEST
+                if (uart_rx_valid_w) begin
+                    mmio_resp_valid_r <= 1'b0;
+                    mmio_resp_data_r <= 32'd0;
+                end else begin
+                    mmio_resp_valid_r <= 1'b1;
+                    mmio_resp_data_r <= 32'd0;
+                end
+`else
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart_rx_valid_w ? uart_rx_head_data : 8'd0);
+`endif
+            end else if (uart16550_dll_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_dll_r);
+            end else if (uart16550_ier_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_ier_r);
+            end else if (uart16550_dlm_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_dlm_r);
+            end else if (uart16550_iir_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_iir_byte_w);
+            end else if (uart16550_lcr_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_lcr_r);
+            end else if (uart16550_mcr_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_mcr_r);
+            end else if (uart16550_lsr_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_lsr_byte_w);
+            end else if (uart16550_msr_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= 32'd0;
+            end else if (uart16550_scr_read) begin
+                mmio_resp_valid_r <= 1'b1;
+                mmio_resp_data_r <= expand_uart16550_byte(uart16550_scr_r);
             end else if (addr_is_uart_status_m1 && !m1_req_write) begin
                 mmio_resp_valid_r <= 1'b1;
                 mmio_resp_data_r <= uart_status_word;
             end else if (addr_is_uart_rx_m1 && !m1_req_write) begin
 `ifdef TRANSPORT_UART_RXDATA_REG_TEST
-                mmio_resp_valid_r <= 1'b0;
-                mmio_resp_data_r <= 32'd0;
+                if (uart_rx_valid_w) begin
+                    mmio_resp_valid_r <= 1'b0;
+                    mmio_resp_data_r <= 32'd0;
+                end else begin
+                    mmio_resp_valid_r <= 1'b1;
+                    mmio_resp_data_r <= 32'd0;
+                end
 `else
                 mmio_resp_valid_r <= 1'b1;
                 mmio_resp_data_r <= {24'd0, uart_rx_head_data};

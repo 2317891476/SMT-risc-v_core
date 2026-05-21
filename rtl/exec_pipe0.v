@@ -36,9 +36,7 @@ module exec_pipe0 #(
     input  wire [4:0]         in_rd,
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
-    input  wire [0:0]         in_tid,
     input  wire               flush,
-    input  wire [0:0]         flush_tid,
     input  wire               flush_order_valid,
     input  wire [`METADATA_ORDER_ID_W-1:0] flush_order_id,
 
@@ -55,7 +53,6 @@ module exec_pipe0 #(
     output wire [4:0]         out_rd,
     output wire               out_regs_write,
     output wire [2:0]         out_fu,
-    output wire [0:0]         out_tid,
     output wire [`METADATA_ORDER_ID_W-1:0] out_order_id,
 
     // ─── CSR outputs ────────────────────────────────────────────
@@ -69,7 +66,6 @@ module exec_pipe0 #(
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
     output wire [31:0]        br_addr,       // branch target address
-    output wire [0:0]         br_tid,        // which thread branched
     output wire [`METADATA_ORDER_ID_W-1:0] br_order_id,   // branch order id when redirecting
     output wire               br_complete,   // branch execution complete (taken or not)
     output wire               br_update_valid,
@@ -121,11 +117,11 @@ reg [31:0]        out_result_r;
 reg [4:0]         out_rd_r;
 reg               out_regs_write_r;
 reg [2:0]         out_fu_r;
-reg [0:0]         out_tid_r;
 reg [`METADATA_ORDER_ID_W-1:0] out_order_id_r;
+reg               mret_valid_r;
+reg [`METADATA_ORDER_ID_W-1:0] mret_order_id_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
-reg [0:0]         br_tid_r;
 reg [`METADATA_ORDER_ID_W-1:0] br_order_id_r;
 reg               br_complete_r;   // branch execution complete
 reg               br_update_valid_r;
@@ -140,7 +136,6 @@ reg [31:0]        stored_pc;
 reg [31:0]        stored_imm;
 reg [31:0]        stored_op_a;     // for JALR
 reg [`METADATA_ORDER_ID_W-1:0] stored_order_id;
-reg [0:0]         stored_tid;
 reg               stored_br;
 reg               stored_br_addr_mode;
 reg               stored_pred_taken;
@@ -156,11 +151,12 @@ wire in_is_call = in_br && in_regs_write && in_link_rd;
 wire in_is_return = in_br && (in_br_addr_mode == `J_REG) &&
                     (in_rd == 5'd0) && in_link_rs1;
 wire incoming_flush_kill =
-    flush && (in_tid == flush_tid) &&
+    flush &&
     (!flush_order_valid || (in_order_id > flush_order_id));
 wire stored_flush_kill =
-    flush && (stored_tid == flush_tid) &&
+    flush &&
     (!flush_order_valid || (stored_order_id > flush_order_id));
+wire input_valid = in_valid && !incoming_flush_kill;
 
 wire [31:0] branch_actual_target = (stored_br_addr_mode == `J_REG) ?
                                    (stored_op_a + stored_imm) :
@@ -191,11 +187,11 @@ always @(posedge clk or negedge rstn) begin
         out_rd_r            <= 5'd0;
         out_regs_write_r    <= 1'b0;
         out_fu_r            <= 3'd0;
-        out_tid_r           <= 1'b0;
         out_order_id_r      <= {`METADATA_ORDER_ID_W{1'b0}};
+        mret_valid_r        <= 1'b0;
+        mret_order_id_r     <= {`METADATA_ORDER_ID_W{1'b0}};
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
-        br_tid_r            <= 1'b0;
         br_order_id_r       <= {`METADATA_ORDER_ID_W{1'b0}};
         br_complete_r       <= 1'b0;
         br_update_valid_r   <= 1'b0;
@@ -208,7 +204,6 @@ always @(posedge clk or negedge rstn) begin
         stored_imm          <= 32'd0;
         stored_op_a         <= 32'd0;
         stored_order_id     <= {`METADATA_ORDER_ID_W{1'b0}};
-        stored_tid          <= 1'b0;
         stored_br           <= 1'b0;
         stored_br_addr_mode <= 1'b0;
         stored_pred_taken   <= 1'b0;
@@ -223,7 +218,6 @@ always @(posedge clk or negedge rstn) begin
         stored_imm          <= in_imm;
         stored_op_a         <= op_A_pre;   // for JALR (rs1 value)
         stored_order_id     <= in_order_id;
-        stored_tid          <= in_tid;
         stored_br           <= in_br;
         stored_br_addr_mode <= in_br_addr_mode;
         stored_pred_taken   <= in_pred_taken;
@@ -240,19 +234,19 @@ always @(posedge clk or negedge rstn) begin
         `endif
 
         // Output registers (1 cycle delay)
-        out_valid_r      <= in_valid && !incoming_flush_kill;
-        out_tag_r        <= in_tag;
-        out_result_r     <= in_is_csr ? csr_rdata : alu_out;
-        out_rd_r         <= in_rd;
-        out_regs_write_r <= in_regs_write;
-        out_fu_r         <= in_fu;
-        out_tid_r        <= in_tid;
-        out_order_id_r   <= in_order_id;
+        out_valid_r      <= input_valid;
+        out_tag_r        <= input_valid ? in_tag : {TAG_W{1'b0}};
+        out_result_r     <= input_valid ? (in_is_csr ? csr_rdata : alu_out) : 32'd0;
+        out_rd_r         <= input_valid ? in_rd : 5'd0;
+        out_regs_write_r <= input_valid && in_regs_write;
+        out_fu_r         <= input_valid ? in_fu : 3'd0;
+        out_order_id_r   <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
+        mret_valid_r     <= input_valid && in_is_mret;
+        mret_order_id_r  <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
 
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= redirect_needed && !stored_flush_kill;
         br_addr_r     <= redirect_target;
-        br_tid_r      <= stored_tid;
         br_order_id_r <= stored_order_id;
         br_complete_r <= stored_valid && stored_br && !stored_flush_kill;
         br_update_valid_r  <= bpu_update_needed && !stored_flush_kill;
@@ -270,19 +264,17 @@ assign out_result     = out_result_r;
 assign out_rd         = out_rd_r;
 assign out_regs_write = out_regs_write_r;
 assign out_fu         = out_fu_r;
-assign out_tid        = out_tid_r;
 assign out_order_id   = out_order_id_r;
 
 assign csr_valid  = in_valid && in_is_csr && !incoming_flush_kill;
 assign csr_wdata  = csr_write_data;
 assign csr_op     = in_func3;    // funct3 encodes CSR operation
 assign csr_addr   = in_csr_addr;
-assign mret_valid    = in_valid && in_is_mret && !incoming_flush_kill;
-assign mret_order_id = in_order_id;
+assign mret_valid    = mret_valid_r;
+assign mret_order_id = mret_order_id_r;
 
 assign br_ctrl     = br_ctrl_r;
 assign br_addr     = br_addr_r;
-assign br_tid      = br_tid_r;
 assign br_order_id = br_order_id_r;
 assign br_complete = br_complete_r;
 assign br_update_valid  = br_update_valid_r;

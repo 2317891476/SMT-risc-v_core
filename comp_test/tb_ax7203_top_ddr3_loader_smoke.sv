@@ -41,7 +41,7 @@ module tb_ax7203_top_ddr3_loader_smoke;
     localparam [7:0] LOADER_ACK_BYTE = 8'h06;
     localparam [7:0] LOADER_BLOCK_ACK_BYTE = 8'h17;
     localparam [7:0] LOADER_BLOCK_NACK_BYTE = 8'h15;
-    localparam integer BLOCK_CHECKSUM_BYTES = 64;
+    localparam integer DEFAULT_BLOCK_CHECKSUM_BYTES = 64;
     localparam [7:0] BEACON_SOF = 8'hA5;
     localparam [7:0] EVT_READY = 8'h01;
     localparam [7:0] EVT_LOAD_START = 8'h02;
@@ -101,6 +101,7 @@ module tb_ax7203_top_ddr3_loader_smoke;
     integer payload_size;
     integer payload_checksum;
     integer payload_idx;
+    integer block_checksum_bytes;
     integer sent_header;
     integer sent_payload;
     integer fast_uart_inject;
@@ -342,7 +343,7 @@ module tb_ax7203_top_ddr3_loader_smoke;
         integer prev_block_nack_count;
         begin
             block_start_idx = payload_idx;
-            block_end_idx = payload_idx + BLOCK_CHECKSUM_BYTES;
+            block_end_idx = payload_idx + block_checksum_bytes;
             if (block_end_idx > payload_size)
                 block_end_idx = payload_size;
             block_log_start = block_start_idx;
@@ -486,6 +487,7 @@ module tb_ax7203_top_ddr3_loader_smoke;
     initial begin
         if (!$value$plusargs("PAYLOAD_SIZE=%d", payload_size)) payload_size = 0;
         if (!$value$plusargs("PAYLOAD_CHECKSUM=%d", payload_checksum)) payload_checksum = 0;
+        if (!$value$plusargs("BLOCK_CHECKSUM_BYTES=%d", block_checksum_bytes)) block_checksum_bytes = DEFAULT_BLOCK_CHECKSUM_BYTES;
         if (!$value$plusargs("EXPECT_EXEC_PASS=%d", expect_exec_pass)) expect_exec_pass = 1;
         if (!$value$plusargs("FAST_UART_INJECT=%d", fast_uart_inject)) fast_uart_inject = DEFAULT_FAST_UART_INJECT;
         if (!$value$plusargs("INITIAL_HEADER_WAIT_BITS=%d", initial_header_wait_bits)) initial_header_wait_bits = DEFAULT_INITIAL_HEADER_WAIT_BITS;

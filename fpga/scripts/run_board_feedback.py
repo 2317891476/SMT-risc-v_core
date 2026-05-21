@@ -79,6 +79,20 @@ PROFILES = {
         "uart_expect_text": "Z",
         "uart_send_delay_ms": 800,
     },
+    "uart16550_echo": {
+        "top": "adam_riscv_ax7203_top",
+        "tb": "tb_ax7203_uart_echo_smoke",
+        "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_smoke.sv",
+        "rom": REPO_ROOT / "rom" / "test_fpga_uart16550_echo.s",
+        "expect_token": "[AX7203_UART_ECHO] PASS",
+        "uart_send_text": "Z",
+        "uart_expect_text": "Z",
+        "uart_send_delay_ms": 800,
+        "enable_mem_subsys": True,
+        "enable_ddr3": False,
+        "transport_uart_rxdata_reg_test": True,
+        "rom_defines": ["SIM_BUILD=1"],
+    },
     "uart_echo_raw": {
         "top": "adam_riscv_ax7203_uart_echo_raw_top",
         "tb": "tb_ax7203_uart_echo_raw_smoke",
@@ -154,6 +168,15 @@ def derive_uart_clk_div(core_clk_mhz: float, baud: int = 115200) -> int:
     return max(1, round((core_clk_mhz * 1_000_000.0) / float(baud)))
 
 
+def default_vivado_jobs() -> str:
+    try:
+        cap = int(os.environ.get("AX7203_VIVADO_THREAD_CAP", "8"))
+    except ValueError:
+        cap = 8
+    cap = max(1, cap)
+    return str(max(1, min(os.cpu_count() or cap, cap)))
+
+
 def run_top_sim(
     profile: dict[str, object],
     logs_dir: Path,
@@ -164,17 +187,21 @@ def run_top_sim(
 ) -> Path:
     python_bin = sys.executable
     sim_cwd = REPO_ROOT
+    enable_mem_subsys = bool(profile.get("enable_mem_subsys", False))
+    enable_ddr3 = bool(profile.get("enable_ddr3", False))
+    transport_uart_rxdata_reg_test = bool(profile.get("transport_uart_rxdata_reg_test", False))
     if profile["rom"] is not None:
-        run_logged(
-            [
-                python_bin,
-                str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
-                "--asm",
-                str(profile["rom"]),
-            ],
-            cwd=REPO_ROOT,
-            log_path=logs_dir / "01_build_rom.log",
-        )
+        rom_cmd = [
+            python_bin,
+            str(REPO_ROOT / "fpga" / "scripts" / "build_rom_image.py"),
+            "--asm",
+            str(profile["rom"]),
+        ]
+        if enable_mem_subsys:
+            rom_cmd.append("--merge-mem-subsys")
+        for define in profile.get("rom_defines", []):
+            rom_cmd.extend(["--define", str(define)])
+        run_logged(rom_cmd, cwd=REPO_ROOT, log_path=logs_dir / "01_build_rom.log")
         sim_cwd = REPO_ROOT / "rom"
 
     out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
@@ -187,9 +214,11 @@ def run_top_sim(
         which_required("iverilog"),
         "-g2012",
         "-DFPGA_MODE=1",
-        "-DENABLE_MEM_SUBSYS=0",
+        f"-DENABLE_MEM_SUBSYS={1 if enable_mem_subsys else 0}",
         "-DENABLE_ROCC_ACCEL=0",
         "-DSMT_MODE=0",
+        *(["-DENABLE_DDR3=1"] if enable_ddr3 else []),
+        *(["-DTRANSPORT_UART_RXDATA_REG_TEST=1"] if transport_uart_rxdata_reg_test else []),
         f"-DFPGA_SCOREBOARD_RS_DEPTH={rs_depth}",
         f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(rs_depth)}",
         f"-DFPGA_FETCH_BUFFER_DEPTH={fetch_buffer_depth}",
@@ -365,7 +394,12 @@ def main() -> int:
     )
 
     env = os.environ.copy()
-    env["AX7203_ENABLE_MEM_SUBSYS"] = "0"
+    enable_mem_subsys = bool(profile.get("enable_mem_subsys", False))
+    enable_ddr3 = bool(profile.get("enable_ddr3", False))
+    transport_uart_rxdata_reg_test = bool(profile.get("transport_uart_rxdata_reg_test", False))
+    env["AX7203_ENABLE_MEM_SUBSYS"] = "1" if enable_mem_subsys else "0"
+    env["AX7203_ENABLE_DDR3"] = "1" if enable_ddr3 else "0"
+    env["AX7203_TRANSPORT_UART_RXDATA_REG_TEST"] = "1" if transport_uart_rxdata_reg_test else "0"
     env["AX7203_ENABLE_ROCC"] = "0"
     env["AX7203_SMT_MODE"] = "0"
     env["AX7203_RS_DEPTH"] = str(args.rs_depth)
@@ -373,8 +407,10 @@ def main() -> int:
     env["AX7203_FETCH_BUFFER_DEPTH"] = str(args.fetch_buffer_depth)
     env["AX7203_CORE_CLK_MHZ"] = f"{args.core_clk_mhz:.3f}"
     env["AX7203_UART_CLK_DIV"] = str(derive_uart_clk_div(args.core_clk_mhz))
-    env.setdefault("AX7203_MAX_THREADS", "1")
-    env.setdefault("AX7203_SYNTH_JOBS", "1")
+    jobs = default_vivado_jobs()
+    env.setdefault("AX7203_MAX_THREADS", jobs)
+    env.setdefault("AX7203_SYNTH_JOBS", jobs)
+    env.setdefault("AX7203_IMPL_JOBS", jobs)
     env["AX7203_TOP_MODULE"] = str(profile["top"])
     if profile["rom"] is not None:
         env["AX7203_ROM_ASM"] = str(profile["rom"])
@@ -420,6 +456,7 @@ def main() -> int:
                 f"UartClkDiv: {derive_uart_clk_div(args.core_clk_mhz)}",
                 f"MaxThreads: {env['AX7203_MAX_THREADS']}",
                 f"SynthJobs: {env['AX7203_SYNTH_JOBS']}",
+                f"ImplJobs: {env['AX7203_IMPL_JOBS']}",
                 f"BuildID: {build_id}",
                 f"SimulationLog: {sim_log}",
                 f"ProgramLog: {program_log}",

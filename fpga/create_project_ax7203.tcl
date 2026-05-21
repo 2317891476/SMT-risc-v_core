@@ -27,13 +27,14 @@ set ddr3_bridge_audit [ax7203_env_or_default AX7203_DDR3_BRIDGE_AUDIT 0]
 set step2_beacon_debug [ax7203_env_or_default AX7203_STEP2_BEACON_DEBUG 0]
 set loader_beacon_debug [ax7203_env_or_default AX7203_DDR3_LOADER_BEACON_DEBUG 0]
 set transport_uart_rxdata_reg_test [ax7203_env_or_default AX7203_TRANSPORT_UART_RXDATA_REG_TEST 0]
-set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 1]
+set smt_mode [ax7203_env_or_default AX7203_SMT_MODE 0]
 set rs_depth [expr {[ax7203_env_or_default AX7203_RS_DEPTH 48] + 0}]
 set fetch_buffer_depth [expr {[ax7203_env_or_default AX7203_FETCH_BUFFER_DEPTH 16] + 0}]
 set rs_idx_w [expr {[ax7203_env_or_default AX7203_RS_IDX_W [ax7203_clog2 $rs_depth]] + 0}]
 set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])}]
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
-set build_threads [ax7203_env_or_default AX7203_MAX_THREADS 4]
+set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
+set build_threads [ax7203_vivado_jobs AX7203_MAX_THREADS]
 set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
 
 puts "Creating project: $project_name"
@@ -53,6 +54,7 @@ puts "AX7203_RS_IDX_W: $rs_idx_w"
 puts "AX7203_FETCH_BUFFER_DEPTH: $fetch_buffer_depth"
 puts "AX7203_CORE_CLK_MHZ: $core_clk_mhz"
 puts "AX7203_UART_CLK_DIV: $uart_clk_div"
+puts "AX7203_DCACHE_MODE: $dcache_mode"
 puts "AX7203_MAX_THREADS: $build_threads"
 puts "AX7203_TOP_MODULE: $top_module"
 
@@ -77,7 +79,7 @@ if {$enable_mem_subsys} {
 
 # Create project
 create_project -force $project_name $project_dir -part $target_part
-set_param general.maxThreads $build_threads
+ax7203_apply_vivado_threads $build_threads
 
 # Set project properties
 set_property board_part "" [current_project]
@@ -321,6 +323,7 @@ if {$transport_uart_rxdata_reg_test} {
 } else {
     set transport_uart_rxdata_reg_test_def ""
 }
+set dcache_def [ax7203_dcache_define $dcache_mode]
 set_property verilog_define [list \
     FPGA_MODE=1 \
     ENABLE_ROCC_ACCEL=$enable_rocc \
@@ -337,6 +340,7 @@ set_property verilog_define [list \
     {*}$step2_beacon_debug_def \
     {*}$loader_beacon_debug_def \
     {*}$transport_uart_rxdata_reg_test_def \
+    {*}$dcache_def \
 ] [get_filesets sources_1]
 
 # Keep FPGA bring-up synthesis biased toward runtime so the batch flow can
@@ -364,7 +368,7 @@ file mkdir $project_dir/checkpoints
 puts "Project created successfully!"
 puts "Part: $target_part"
 puts "Top: $top_module"
-puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys ENABLE_DDR3=$enable_ddr3 DDR3_FETCH_DEBUG=$ddr3_fetch_debug DDR3_BRIDGE_AUDIT=$ddr3_bridge_audit AX7203_STEP2_BEACON_DEBUG=$step2_beacon_debug AX7203_DDR3_LOADER_BEACON_DEBUG=$loader_beacon_debug TRANSPORT_UART_RXDATA_REG_TEST=$transport_uart_rxdata_reg_test SMT_MODE=$smt_mode FPGA_SCOREBOARD_RS_DEPTH=$rs_depth FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth"
+puts "Defines: FPGA_MODE=1 ENABLE_ROCC_ACCEL=$enable_rocc ENABLE_MEM_SUBSYS=$enable_mem_subsys ENABLE_DDR3=$enable_ddr3 DDR3_FETCH_DEBUG=$ddr3_fetch_debug DDR3_BRIDGE_AUDIT=$ddr3_bridge_audit AX7203_STEP2_BEACON_DEBUG=$step2_beacon_debug AX7203_DDR3_LOADER_BEACON_DEBUG=$loader_beacon_debug TRANSPORT_UART_RXDATA_REG_TEST=$transport_uart_rxdata_reg_test SMT_MODE=$smt_mode FPGA_SCOREBOARD_RS_DEPTH=$rs_depth FPGA_SCOREBOARD_RS_IDX_W=$rs_idx_w FPGA_FETCH_BUFFER_DEPTH=$fetch_buffer_depth AX7203_DCACHE_MODE=$dcache_mode"
 puts "To build: vivado -mode batch -source fpga/build_ax7203_bitstream.tcl"
 
 # Save evidence

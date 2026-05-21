@@ -81,6 +81,8 @@ BASIC_TEST_IDS = {
     "test_branch_spec_mmio_load_flush": 30,
     "test_mmio_load_rob_head": 31,
     "test_mmio_load_store_order": 32,
+    "test_uart16550_polling": 33,
+    "test_uart16550_plic_irq": 34,
 }
 
 
@@ -300,6 +302,8 @@ class TestRunner:
                 "test_branch_spec_mmio_load_flush.s",
                 "test_mmio_load_rob_head.s",
                 "test_mmio_load_store_order.s",
+                "test_uart16550_polling.s",
+                "test_uart16550_plic_irq.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",

@@ -17,17 +17,15 @@ module inst_memory #(
     input  wire       req_valid,
     output wire       req_ready,
     input  wire [31:0] inst_addr,
-    input  wire [0:0]  req_tid,           // Thread ID for request
     output wire [31:0] inst_o,
-    output wire [0:0]  resp_tid,          // Thread ID for response
     output wire [3:0]  resp_epoch,        // Epoch for response
     output wire        resp_valid,        // Response is valid (not stale)
 
     // Epoch and flush interface from top level
     input  wire [3:0]  current_epoch,     // Current epoch for stale detection
-    input  wire [3:0]  current_epoch_t0,  // Per-thread epochs for async refill completion
-    input  wire [3:0]  current_epoch_t1,
+    input  wire [3:0]  current_epoch_t0,  // Per-thread epoch for async refill completion
     input  wire        flush,             // Flush signal
+    input  wire        invalidate,         // FENCE.I invalidates cached instructions
 
     // ═══════════════════════════════════════════════════════════════════════════
     // EXTERNAL REFILL INTERFACE (Connect to mem_subsys M0)
@@ -57,13 +55,11 @@ module inst_memory #(
 
 // Internal signals
 wire [31:0] icache_resp_data;
-wire [0:0]  icache_resp_tid;
 wire [3:0]  icache_resp_epoch;
 wire        icache_resp_valid;
 wire        icache_req_ready;
 wire [31:0] backing_store_data_raw;
 wire [31:0] backing_store_data;
-reg  [0:0]  legacy_resp_tid_r;
 reg  [3:0]  legacy_resp_epoch_r;
 reg         legacy_resp_valid_r;
 
@@ -98,13 +94,11 @@ wire        mem_resp_last_mux  = use_external_refill ? ext_mem_resp_last  : int_
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        legacy_resp_tid_r   <= 1'b0;
         legacy_resp_epoch_r <= 4'd0;
         legacy_resp_valid_r <= 1'b0;
     end else begin
         legacy_resp_valid_r <= req_valid;
         if (req_valid) begin
-            legacy_resp_tid_r   <= req_tid;
             legacy_resp_epoch_r <= current_epoch;
         end
     end
@@ -116,8 +110,7 @@ icache #(
     .CACHE_SIZE   (ICACHE_SIZE),
     .LINE_SIZE    (32),
     .WAYS         (1),
-    .ADDR_WIDTH   (32),
-    .TID_WIDTH    (1)
+    .ADDR_WIDTH   (32)
 ) u_icache (
     .clk              (clk               ),
     .rstn             (rstn              ),
@@ -126,17 +119,15 @@ icache #(
     .cpu_req_valid    (req_valid         ),
     .cpu_req_ready    (icache_req_ready  ),
     .cpu_req_addr     (inst_addr         ),
-    .cpu_req_tid      (req_tid           ),
     .cpu_resp_data    (icache_resp_data  ),
-    .cpu_resp_tid     (icache_resp_tid   ),
     .cpu_resp_epoch   (icache_resp_epoch ),
     .cpu_resp_valid   (icache_resp_valid ),
 
     // Epoch
     .current_epoch    (current_epoch     ),
     .current_epoch_t0 (current_epoch_t0  ),
-    .current_epoch_t1 (current_epoch_t1  ),
     .flush            (flush             ),
+    .invalidate       (invalidate        ),
 
     // Memory interface for fills
     .mem_req_valid    (icache_mem_req_valid ),
@@ -203,7 +194,13 @@ inst_backing_store #(
 
 // Output assignment
 assign inst_o      = use_external_refill ? icache_resp_data  : backing_store_data;
-assign resp_tid    = use_external_refill ? icache_resp_tid   : legacy_resp_tid_r;
+
+`ifdef VERBOSE_SIM_LOGS
+always @(posedge clk) if (rstn && resp_valid)
+    $display("[IMEM_OUT] inst_o=%h icache_data=%h bs_data=%h use_ext=%b resp_valid=%b @%0t",
+             inst_o, icache_resp_data, backing_store_data, use_external_refill, resp_valid, $time);
+`endif
+
 assign resp_epoch  = use_external_refill ? icache_resp_epoch : legacy_resp_epoch_r;
 assign resp_valid  = use_external_refill ? icache_resp_valid : legacy_resp_valid_r;
 assign req_ready   = use_external_refill ? icache_req_ready  : 1'b1;

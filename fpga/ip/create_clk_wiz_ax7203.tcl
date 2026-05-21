@@ -18,6 +18,11 @@ if {[llength [info commands create_ip]] == 0} {
 }
 
 set clk_script_dir [file dirname [file normalize [info script]]]
+set clk_flow_common [file normalize "$clk_script_dir/../flow_common.tcl"]
+if {[file exists $clk_flow_common]} {
+  source $clk_flow_common
+  ax7203_apply_vivado_threads [ax7203_vivado_jobs AX7203_MAX_THREADS]
+}
 set clk_ip_name "clk_wiz_0"
 set clk_primary_part "xc7a200t-2fbg484i"
 set clk_fallback_parts [list "xc7a200tfbg484-2" "xc7a200tfbg484-2L"]

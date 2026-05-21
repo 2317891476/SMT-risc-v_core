@@ -6,10 +6,12 @@
 .equ STEP1_ITERATIONS,          4
 .equ STEP2_ITERATIONS,          3
 .equ STEP3_ITERATIONS,          2
+.equ STEP4_WORDS,               4
 #else
 .equ STEP1_ITERATIONS,          32
 .equ STEP2_ITERATIONS,          16
 .equ STEP3_ITERATIONS,          16
+.equ STEP4_WORDS,               64
 #endif
 .equ CALIB_TIMEOUT_CYCLES,      25000000
 .equ DRAIN_STATUS_TIMEOUT,      25000000
@@ -71,6 +73,7 @@ calib_done:
     jal ra, run_step3_words
     li x5, 4
     jal ra, run_step3_words
+    jal ra, run_step4_per_word_drain
 
     li x5, 0x04
     sb x5, 0(x28)
@@ -265,6 +268,67 @@ step3_fail:
     mv x5, x19
     j emit_bad_and_halt
 
+run_step4_per_word_drain:
+    addi sp, sp, -4
+    sw ra, 0(sp)
+    li x26, 4
+    li x6, 0x44
+    sb x6, 0(x28)
+    li x5, STEP4_WORDS
+    jal ra, emit_step_start
+    li x21, 0
+step4_write_loop:
+    li x6, STEP4_WORDS
+    beq x21, x6, step4_writes_done
+    slli x7, x21, 2
+    li x20, DDR3_BASE_ADDR
+    add x7, x20, x7
+    li x10, 4
+    li x11, 0
+    mv x12, x21
+    jal ra, make_value
+    mv x23, x7
+    mv x24, x10
+    sw x10, 0(x7)
+    li x5, STEP4_WORDS
+    jal ra, wait_drain_ready
+    li x10, 0x30
+    add x10, x10, x21
+    jal ra, send_char_16550
+    addi x21, x21, 1
+    j step4_write_loop
+
+step4_writes_done:
+    li x7, DDR3_BASE_ADDR
+    lw x0, 0(x7)
+    li x21, 0
+step4_read_loop:
+    li x6, STEP4_WORDS
+    beq x21, x6, step4_done
+    slli x7, x21, 2
+    li x20, DDR3_BASE_ADDR
+    add x7, x20, x7
+    li x10, 4
+    li x11, 0
+    mv x12, x21
+    jal ra, make_value
+    mv x8, x10
+    lw x9, 0(x7)
+    bne x8, x9, step4_fail
+    addi x21, x21, 1
+    j step4_read_loop
+
+step4_done:
+    li x5, STEP4_WORDS
+    jal ra, emit_step_ok
+    lw ra, 0(sp)
+    addi sp, sp, 4
+    jalr x0, 0(ra)
+
+step4_fail:
+    li x5, STEP4_WORDS
+    j emit_bad_and_halt
+
 wait_drain_ready:
     li x25, DRAIN_STATUS_TIMEOUT
 wait_drain_ready_loop:
@@ -401,6 +465,11 @@ send_char_wait:
     andi x6, x6, UART_STATUS_TX_BUSY_MASK
     bne x6, x0, send_char_wait
     sb x10, 0(x31)
+    jalr x0, 0(ra)
+
+send_char_16550:
+    li x6, UART16550_THR_ADDR
+    sb x10, 0(x6)
     jalr x0, 0(ra)
 
 send_string:

@@ -113,6 +113,20 @@ wire [383:0] core_ddr3_fetch_debug_bus;
 wire       core_uart_byte_valid_dbg;
 wire [7:0] core_uart_byte_dbg;
 
+`ifdef ENABLE_DDR3
+// Core <-> DDR3 bridge wires (core clock domain).  Keep these declarations
+// before the core instance so Vivado does not infer 1-bit implicit nets.
+wire        core_ddr3_req_valid;
+wire        core_ddr3_req_ready;
+wire [31:0] core_ddr3_req_addr;
+wire        core_ddr3_req_write;
+wire [31:0] core_ddr3_req_wdata;
+wire [3:0]  core_ddr3_req_wen;
+wire        core_ddr3_resp_valid;
+wire [31:0] core_ddr3_resp_data;
+wire        mig_init_calib_complete;
+`endif
+
 // The core has FPGA_MODE defined internally, which causes it to:
 // 1. Instantiate clk_wiz_0 to convert sys_clk (200MHz) to core clock
 // 2. Instantiate syn_rst for reset synchronization
@@ -267,20 +281,9 @@ wire [7:0] _unused_core_uart_byte_dbg = core_uart_byte_dbg;
 // =============================================================================
 `ifdef ENABLE_DDR3
 
-// ── Core ↔ DDR3 bridge wires (core clock domain) ──
-wire        core_ddr3_req_valid;
-wire        core_ddr3_req_ready;
-wire [31:0] core_ddr3_req_addr;
-wire        core_ddr3_req_write;
-wire [31:0] core_ddr3_req_wdata;
-wire [3:0]  core_ddr3_req_wen;
-wire        core_ddr3_resp_valid;
-wire [31:0] core_ddr3_resp_data;
-
 // ── MIG AXI wires (ui_clk domain, 256-bit data) ──
 wire        mig_ui_clk;
 wire        mig_ui_clk_sync_rst;
-wire        mig_init_calib_complete;
 wire        mig_ui_rstn = ~mig_ui_clk_sync_rst;
 
 wire        mig_s_axi_awvalid;

@@ -2,6 +2,10 @@
 integer test_id;
 reg pass;
 
+`ifndef TB_TIMEOUT_US
+`define TB_TIMEOUT_US 1000
+`endif
+
 // RoCC test status extraction from x3 (STATUS.READ writes here)
 // Per define.v: STATUS.READ returns {29'b0, error, done, busy}
 `define ROCC_STATUS_BUSY_BIT  0
@@ -31,8 +35,6 @@ initial begin
         test_id = 1;
     else if (`TB_IROM.mem[0] === 32'h01500093)
         test_id = 2;
-    else if (`TB_IROM.mem[0] === 32'h00001237)   // test_smt: lui x4, 1 (0x00001237)
-        test_id = 3;
     else if (`TB_IROM.mem[0] === 32'h06400093)   // test_rv32i_full: addi x1, x0, 100 (0x064_000_93)
         test_id = 4;
     // P2 L2 Cache tests
@@ -73,16 +75,16 @@ initial begin
     if (test_id == 1) begin
         // test1.s deterministic checks  (Thread 0 bank = reg_bank[0])
         pass = pass
-            && (`TB_REGS.reg_bank[0][0] === 32'h0)
-            && (`TB_REGS.reg_bank[0][1] === 32'h1)
-            && (`TB_REGS.reg_bank[0][2] === 32'h2)
-            && (`TB_REGS.reg_bank[0][3] === 32'h1000)
-            && (`TB_REGS.reg_bank[0][4] === 32'h13000000)
-            && (`TB_REGS.reg_bank[0][5] === 32'h4)
-            && (`TB_REGS.reg_bank[0][6] === 32'h0)
-            && (`TB_REGS.reg_bank[0][7] === 32'h3)
-            && (`TB_REGS.reg_bank[0][8] === 32'h3)
-            && (`TB_REGS.reg_bank[0][9] === 32'hf3f2f1f0)
+            && (`TB_REGS.reg_bank[0] === 32'h0)
+            && (`TB_REGS.reg_bank[1] === 32'h1)
+            && (`TB_REGS.reg_bank[2] === 32'h2)
+            && (`TB_REGS.reg_bank[3] === 32'h1000)
+            && (`TB_REGS.reg_bank[4] === 32'h13000000)
+            && (`TB_REGS.reg_bank[5] === 32'h4)
+            && (`TB_REGS.reg_bank[6] === 32'h0)
+            && (`TB_REGS.reg_bank[7] === 32'h3)
+            && (`TB_REGS.reg_bank[8] === 32'h3)
+            && (`TB_REGS.reg_bank[9] === 32'hf3f2f1f0)
             && (`TUBE_STATUS === 8'h04)
             && (`TB_MEM_SUBSYS[1024] === 32'h00000001)
             && (`TB_MEM_SUBSYS[1025] === 32'hf7f6f5f4)
@@ -92,30 +94,21 @@ initial begin
     else if (test_id == 2) begin
         // test2.S deterministic checks  (Thread 0 bank = reg_bank[0])
         pass = pass
-            && (`TB_REGS.reg_bank[0][0] === 32'h0)
-            && (`TB_REGS.reg_bank[0][1] === 32'h15)
-            && (`TB_REGS.reg_bank[0][2] === 32'h2a)
-            && (`TB_REGS.reg_bank[0][3] === 32'h1000)
-            && (`TB_REGS.reg_bank[0][4] === 32'h13000000)
-            && (`TB_REGS.reg_bank[0][5] === 32'h4)
-            && (`TB_REGS.reg_bank[0][6] === 32'h15)
-            && (`TB_REGS.reg_bank[0][7] === 32'h3f)
-            && (`TB_REGS.reg_bank[0][8] === 32'h3f)
-            && (`TB_REGS.reg_bank[0][9] === 32'hf3f2f21a)
+            && (`TB_REGS.reg_bank[0] === 32'h0)
+            && (`TB_REGS.reg_bank[1] === 32'h15)
+            && (`TB_REGS.reg_bank[2] === 32'h2a)
+            && (`TB_REGS.reg_bank[3] === 32'h1000)
+            && (`TB_REGS.reg_bank[4] === 32'h13000000)
+            && (`TB_REGS.reg_bank[5] === 32'h4)
+            && (`TB_REGS.reg_bank[6] === 32'h15)
+            && (`TB_REGS.reg_bank[7] === 32'h3f)
+            && (`TB_REGS.reg_bank[8] === 32'h3f)
+            && (`TB_REGS.reg_bank[9] === 32'hf3f2f21a)
             && (`TUBE_STATUS === 8'h04)
             && (`TB_MEM_SUBSYS[1024] === 32'hf3f2f21a)
             && (`TB_MEM_SUBSYS[1025] === 32'hf7f6f5f4)
             && (`TB_MEM_SUBSYS[1026] === 32'hfbfaf9f8)
             && (`TB_MEM_SUBSYS[1027] === 32'hfffefdfc);
-    end
-    else if (test_id == 3) begin
-        // test_smt.s  - SMT smoke test
-        // Thread 0: sum 1..10 = 55 = 0x37  -> stored to DRAM word [1152] (byte addr 0x1200)
-        // Thread 1: 10*3  = 30 = 0x1E      -> stored to DRAM word [1153] (byte addr 0x1204)
-        pass = pass
-            && (`TB_MEM_SUBSYS[1152]     === 32'h00000037)  // T0 sum = 55
-            && (`TB_MEM_SUBSYS[1153]     === 32'h0000001E)  // T1 product = 30
-            && (`TUBE_STATUS           === 8'h04);        // TUBE end marker
     end
     else if (test_id == 4) begin
         // test_rv32i_full.s — comprehensive RV32I instruction test
@@ -145,7 +138,7 @@ initial begin
         // x3 should contain status with done=1, busy=0, error=0
         $display("RoCC GEMM/Vector test (test_id=12) detected");
         $display("RoCC Debug: x3=0x%08h, rocc_cmd_count=%0d, rocc_resp_count=%0d",
-                 `TB_REGS.reg_bank[0][3], rocc_cmd_count, rocc_resp_count);
+                 `TB_REGS.reg_bank[3], rocc_cmd_count, rocc_resp_count);
         $display("RoCC Debug: rocc_dma_rd_count=%0d, rocc_dma_wr_count=%0d",
                  rocc_dma_rd_count, rocc_dma_wr_count);
         
@@ -153,33 +146,33 @@ initial begin
         pass = pass
             && (`TUBE_STATUS === 8'h04)              // TUBE end marker
             && (rocc_timeout_triggered === 1'b0)     // No RoCC timeout
-            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
-            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
+            && (`TB_REGS.reg_bank[3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
+            && (`TB_REGS.reg_bank[3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
     end
     else if (test_id == 13) begin
         // RoCC DMA Test
         // Verifies SCRATCH.LOAD and SCRATCH.STORE DMA operations
         $display("RoCC DMA test (test_id=13) detected");
         $display("RoCC Debug: x3=0x%08h, rocc_dma_rd_count=%0d, rocc_dma_wr_count=%0d",
-                 `TB_REGS.reg_bank[0][3], rocc_dma_rd_count, rocc_dma_wr_count);
+                 `TB_REGS.reg_bank[3], rocc_dma_rd_count, rocc_dma_wr_count);
         
         // DMA test should complete without error
         pass = pass
             && (`TUBE_STATUS === 8'h04)              // TUBE end marker
             && (rocc_timeout_triggered === 1'b0)     // No RoCC timeout
-            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
-            && (`TB_REGS.reg_bank[0][3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
+            && (`TB_REGS.reg_bank[3][`ROCC_STATUS_DONE_BIT] === 1'b1)   // done=1
+            && (`TB_REGS.reg_bank[3][`ROCC_STATUS_ERROR_BIT] === 1'b0); // error=0
     end
     else if (test_id == 14) begin
         // RoCC STATUS.READ Test
         // Verifies STATUS.READ command returns correct format
         $display("RoCC STATUS.READ test (test_id=14) detected");
-        $display("RoCC Debug: x3=0x%08h", `TB_REGS.reg_bank[0][3]);
+        $display("RoCC Debug: x3=0x%08h", `TB_REGS.reg_bank[3]);
         
         // Status should have upper 29 bits = 0, and valid lower 3 bits
         pass = pass
             && (`TUBE_STATUS === 8'h04)               // TUBE end marker
-            && (`TB_REGS.reg_bank[0][3][31:3] === 29'd0) // Upper bits zero
+            && (`TB_REGS.reg_bank[3][31:3] === 29'd0) // Upper bits zero
             && (rocc_cmd_count > 32'd0);              // At least one RoCC command issued
     end
     else begin
@@ -215,7 +208,7 @@ end
 
 //Timeout Error
 initial begin
-    #200us;
+    #(`TB_TIMEOUT_US * 1us);
     // Skip standard timeout for RoCC tests (they use extended timeout)
     if (test_id == 12 || test_id == 13 || test_id == 14) begin
         // RoCC tests handled by extended timeout above

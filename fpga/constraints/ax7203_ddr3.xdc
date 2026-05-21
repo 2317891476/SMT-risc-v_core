@@ -24,8 +24,9 @@ set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/
 # constant until ack toggles back), so mark them as false paths too.
 set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_addr_r_reg*}]  \
                -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_addr_reg*}]
-set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_write_r_reg*}] \
-               -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_write_reg*}]
+set_false_path -quiet \
+               -from [get_cells -quiet -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_write_r_reg*}] \
+               -to   [get_cells -quiet -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_write_reg*}]
 set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_wdata_r_reg*}] \
                -to   [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/ui_wdata_reg*}]
 set_false_path -from [get_cells -hierarchical -filter {NAME =~ *u_ddr3_mem_port/req_wen_r_reg*}]   \

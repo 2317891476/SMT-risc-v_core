@@ -8,7 +8,7 @@
 //   - Async handshake CDC (core_clk ↔ ui_clk)
 //   - 32-bit word ↔ 256-bit AXI data width conversion
 //   - Single-beat AXI transfers (ARLEN=0, AWLEN=0)
-//   - Word-level read/write with proper byte lane steering
+//   - 32B line reads/writes with proper byte-lane steering
 //
 //   Address mapping:
 //   - Input addr[29:0] → DDR3 byte address (upper bits stripped by mem_subsys)
@@ -106,7 +106,6 @@ assign m_axi_awcache = 4'b0011;          // Normal non-cacheable bufferable
 assign m_axi_awprot  = 3'b000;
 assign m_axi_awqos   = 4'b0000;
 assign m_axi_wlast   = 1'b1;             // Always last (single beat)
-assign m_axi_bready  = 1'b1;             // Always accept write responses
 
 assign m_axi_arid    = {AXI_ID_W{1'b0}};
 assign m_axi_arlen   = 8'd0;             // Single beat
@@ -116,7 +115,6 @@ assign m_axi_arlock  = 1'b0;
 assign m_axi_arcache = 4'b0011;
 assign m_axi_arprot  = 3'b000;
 assign m_axi_arqos   = 4'b0000;
-assign m_axi_rready  = 1'b1;             // Always accept read data
 
 // ═════════════════════════════════════════════════════════════════════════════
 // CDC: Core domain → UI domain (request handshake)
@@ -161,6 +159,8 @@ localparam UI_WR_RESP   = 3'd5;
 localparam UI_DONE      = 3'd6;
 
 reg [2:0] ui_state;
+assign m_axi_bready  = (ui_state == UI_WR_RESP);
+assign m_axi_rready  = (ui_state == UI_RD_DATA);
 
 // Synchronize response flag to core domain
 reg         resp_flag_ui;      // Toggle flag in UI domain

@@ -25,7 +25,6 @@ module mul_unit #(
     input  wire [4:0]         in_rd,
     input  wire               in_regs_write,
     input  wire [2:0]         in_fu,
-    input  wire [0:0]         in_tid,
     input  wire [`METADATA_ORDER_ID_W-1:0] in_order_id,
 
     // ─── Output (to WB) ────────────────────────────────────────
@@ -35,7 +34,6 @@ module mul_unit #(
     output wire [4:0]         out_rd,
     output wire               out_regs_write,
     output wire [2:0]         out_fu,
-    output wire [0:0]         out_tid,
     output wire [`METADATA_ORDER_ID_W-1:0] out_order_id
 );
 
@@ -47,7 +45,6 @@ reg [2:0]         s1_func3;
 reg [4:0]         s1_rd;
 reg               s1_regs_write;
 reg [2:0]         s1_fu;
-reg [0:0]         s1_tid;
 reg [`METADATA_ORDER_ID_W-1:0] s1_order_id;
 
 // ─── Stage 2→3 pipeline registers ──────────────────────────────────────────
@@ -58,7 +55,6 @@ reg [2:0]         s2_func3;
 reg [4:0]         s2_rd;
 reg               s2_regs_write;
 reg [2:0]         s2_fu;
-reg [0:0]         s2_tid;
 reg [`METADATA_ORDER_ID_W-1:0] s2_order_id;
 
 // ─── Stage 3 output registers ──────────────────────────────────────────────
@@ -68,7 +64,6 @@ reg [31:0]        s3_result;
 reg [4:0]         s3_rd;
 reg               s3_regs_write;
 reg [2:0]         s3_fu;
-reg [0:0]         s3_tid;
 reg [`METADATA_ORDER_ID_W-1:0] s3_order_id;
 
 // ─── Stage 1: Multiplication (operand conditioning + multiply) ──────────────
@@ -93,7 +88,6 @@ always @(posedge clk or negedge rstn) begin
         s1_rd         <= 5'd0;
         s1_regs_write <= 1'b0;
         s1_fu         <= 3'd0;
-        s1_tid        <= 1'b0;
         s1_order_id   <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         s1_valid      <= in_valid;
@@ -103,7 +97,6 @@ always @(posedge clk or negedge rstn) begin
         s1_rd         <= in_rd;
         s1_regs_write <= in_regs_write;
         s1_fu         <= in_fu;
-        s1_tid        <= in_tid;
         s1_order_id   <= in_order_id;
     end
 end
@@ -118,7 +111,6 @@ always @(posedge clk or negedge rstn) begin
         s2_rd         <= 5'd0;
         s2_regs_write <= 1'b0;
         s2_fu         <= 3'd0;
-        s2_tid        <= 1'b0;
         s2_order_id   <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         s2_valid      <= s1_valid;
@@ -128,7 +120,6 @@ always @(posedge clk or negedge rstn) begin
         s2_rd         <= s1_rd;
         s2_regs_write <= s1_regs_write;
         s2_fu         <= s1_fu;
-        s2_tid        <= s1_tid;
         s2_order_id   <= s1_order_id;
     end
 end
@@ -145,7 +136,6 @@ always @(posedge clk or negedge rstn) begin
         s3_rd         <= 5'd0;
         s3_regs_write <= 1'b0;
         s3_fu         <= 3'd0;
-        s3_tid        <= 1'b0;
         s3_order_id   <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         s3_valid      <= s2_valid;
@@ -154,7 +144,6 @@ always @(posedge clk or negedge rstn) begin
         s3_rd         <= s2_rd;
         s3_regs_write <= s2_regs_write;
         s3_fu         <= s2_fu;
-        s3_tid        <= s2_tid;
         s3_order_id   <= s2_order_id;
     end
 end
@@ -166,7 +155,6 @@ assign out_result     = s3_result;
 assign out_rd         = s3_rd;
 assign out_regs_write = s3_regs_write;
 assign out_fu         = s3_fu;
-assign out_tid        = s3_tid;
 assign out_order_id   = s3_order_id;
 
 endmodule

@@ -19,7 +19,6 @@ module bypass_network #(
     input  wire [4:0]          ro_rs2_addr,
     input  wire [DATA_W-1:0]   ro_rs1_regdata,   // data from register file
     input  wire [DATA_W-1:0]   ro_rs2_regdata,
-    input  wire [0:0]          ro_tid,           // requesting thread ID
     input  wire                tagbuf_rs1_valid,
     input  wire [DATA_W-1:0]   tagbuf_rs1_data,
     input  wire                tagbuf_rs2_valid,
@@ -30,21 +29,18 @@ module bypass_network #(
     input  wire [4:0]          pipe0_rd,
     input  wire                pipe0_rd_wen,
     input  wire [DATA_W-1:0]   pipe0_data,
-    input  wire [0:0]          pipe0_tid,
 
     // ─── Pipe 1 result (EX stage, ALU / MUL / AGU) ──────────────
     input  wire                pipe1_valid,
     input  wire [4:0]          pipe1_rd,
     input  wire                pipe1_rd_wen,
     input  wire [DATA_W-1:0]   pipe1_data,
-    input  wire [0:0]          pipe1_tid,
 
     // ─── MEM stage result (load writeback, 1 cycle later) ───────
     input  wire                mem_valid,
     input  wire [4:0]          mem_rd,
     input  wire                mem_rd_wen,
     input  wire [DATA_W-1:0]   mem_data,
-    input  wire [0:0]          mem_tid,
 
     // ─── Bypassed operands ──────────────────────────────────────
     output wire [DATA_W-1:0]   op_a,
