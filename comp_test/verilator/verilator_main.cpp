@@ -30,7 +30,10 @@ struct Config {
     uint32_t payload_base = 0x80000000u;
     uint64_t max_cycles = 2'000'000ULL;
     uint32_t header_gap_cycles = 16;
+    uint32_t payload_start_gap_cycles = 2;
     uint32_t payload_gap_cycles = 2;
+    uint32_t payload_chunk_gap_cycles = 2;
+    uint32_t loader_prefix_blocks = 0;
     uint64_t stuck_pc_threshold = 256ULL;
     uint64_t stall_cycle_threshold = 200'000ULL;
     uint64_t danger_window_instret_threshold = 1024ULL;
@@ -54,6 +57,8 @@ struct Summary {
     bool benchmark_done_seen = false;
     bool preload_benchmark_pass = false;
     bool loader_semantic_pass = false;
+    bool loader_prefix_pass = false;
+    uint32_t loader_blocks_acked = 0;
     bool trap_seen = false;
     uint32_t trap_cause = 0;
     uint64_t cycles = 0;
@@ -463,6 +468,8 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BenchmarkDoneSeen\": " << (summary.benchmark_done_seen ? "true" : "false") << ",\n";
     ofs << "  \"PreloadBenchmarkPass\": " << (summary.preload_benchmark_pass ? "true" : "false") << ",\n";
     ofs << "  \"LoaderSemanticPass\": " << (summary.loader_semantic_pass ? "true" : "false") << ",\n";
+    ofs << "  \"LoaderPrefixPass\": " << (summary.loader_prefix_pass ? "true" : "false") << ",\n";
+    ofs << "  \"LoaderBlocksAcked\": " << summary.loader_blocks_acked << ",\n";
     ofs << "  \"TrapSeen\": " << (summary.trap_seen ? "true" : "false") << ",\n";
     ofs << "  \"TrapCause\": " << summary.trap_cause << ",\n";
     ofs << "  \"Cycles\": " << summary.cycles << ",\n";
@@ -902,9 +909,18 @@ bool parse_args(int argc, char** argv, Config& cfg) {
         } else if (arg == "--header-gap-cycles") {
             const char* value = require_value(arg);
             if (!value || !parse_u32(value, cfg.header_gap_cycles)) return false;
+        } else if (arg == "--payload-start-gap-cycles") {
+            const char* value = require_value(arg);
+            if (!value || !parse_u32(value, cfg.payload_start_gap_cycles)) return false;
         } else if (arg == "--payload-gap-cycles") {
             const char* value = require_value(arg);
             if (!value || !parse_u32(value, cfg.payload_gap_cycles)) return false;
+        } else if (arg == "--payload-chunk-gap-cycles") {
+            const char* value = require_value(arg);
+            if (!value || !parse_u32(value, cfg.payload_chunk_gap_cycles)) return false;
+        } else if (arg == "--loader-prefix-blocks") {
+            const char* value = require_value(arg);
+            if (!value || !parse_u32(value, cfg.loader_prefix_blocks)) return false;
         } else if (arg == "--stuck-pc-threshold") {
             const char* value = require_value(arg);
             if (!value || !parse_u64(value, cfg.stuck_pc_threshold)) return false;
@@ -965,6 +981,7 @@ struct LoaderHost {
     enum class Phase {
         Idle,
         Header,
+        WaitLoadStart,
         PayloadChunk,
         WaitChunkAck,
         BlockChecksum,
@@ -978,7 +995,9 @@ struct LoaderHost {
           payload_base(cfg.payload_base),
           entry_pc(cfg.entry_pc),
           header_gap_cycles(cfg.header_gap_cycles),
-          payload_gap_cycles(cfg.payload_gap_cycles) {
+          payload_start_gap_cycles(cfg.payload_start_gap_cycles),
+          payload_gap_cycles(cfg.payload_gap_cycles),
+          payload_chunk_gap_cycles(cfg.payload_chunk_gap_cycles) {
         header.reserve(20);
         push_u32_le(header, 0x314B4D42u);
         push_u32_le(header, payload_base);
@@ -1004,6 +1023,7 @@ struct LoaderHost {
     bool done() const { return phase == Phase::Done; }
     bool jump_ready() const { return phase == Phase::Done; }
     uint64_t bytes_injected() const { return bytes_sent_total; }
+    uint32_t blocks_acked() const { return static_cast<uint32_t>(current_block); }
 
     void start() {
         if (phase == Phase::Idle) {
@@ -1012,10 +1032,20 @@ struct LoaderHost {
         }
     }
 
+    void allow_payload_start() {
+        if (phase == Phase::WaitLoadStart) {
+            phase = Phase::PayloadChunk;
+            block_start = 0;
+            payload_idx = 0;
+            chunk_bytes_sent = 0;
+            gap_countdown = payload_start_gap_cycles;
+        }
+    }
+
     void observe_tx_byte(uint8_t byte) {
         if (phase == Phase::WaitChunkAck && byte == 0x06u) {
             phase = Phase::PayloadChunk;
-            gap_countdown = payload_gap_cycles;
+            gap_countdown = payload_chunk_gap_cycles;
         } else if (phase == Phase::WaitChecksumAck && byte == 0x06u) {
             phase = Phase::WaitBlockReply;
         } else if (phase == Phase::WaitBlockReply && byte == 0x17u) {
@@ -1024,13 +1054,13 @@ struct LoaderHost {
             payload_idx = block_start;
             checksum_idx = 0;
             phase = (current_block >= block_count_total) ? Phase::Done : Phase::PayloadChunk;
-            gap_countdown = payload_gap_cycles;
+            gap_countdown = payload_chunk_gap_cycles;
         } else if (phase == Phase::WaitBlockReply && byte == 0x15u) {
             payload_idx = block_start;
             chunk_bytes_sent = 0;
             checksum_idx = 0;
             phase = Phase::PayloadChunk;
-            gap_countdown = payload_gap_cycles;
+            gap_countdown = payload_chunk_gap_cycles;
         }
     }
 
@@ -1045,6 +1075,7 @@ struct LoaderHost {
 
         switch (phase) {
         case Phase::Idle:
+        case Phase::WaitLoadStart:
         case Phase::WaitChunkAck:
         case Phase::WaitChecksumAck:
         case Phase::WaitBlockReply:
@@ -1059,11 +1090,7 @@ struct LoaderHost {
                 gap_countdown = header_gap_cycles;
             }
             if (header_idx >= header.size()) {
-                phase = Phase::PayloadChunk;
-                block_start = 0;
-                payload_idx = 0;
-                chunk_bytes_sent = 0;
-                gap_countdown = payload_gap_cycles;
+                phase = Phase::WaitLoadStart;
             }
             return;
 
@@ -1114,7 +1141,9 @@ struct LoaderHost {
     uint32_t payload_base = 0;
     uint32_t entry_pc = 0;
     uint32_t header_gap_cycles = 16;
+    uint32_t payload_start_gap_cycles = 2;
     uint32_t payload_gap_cycles = 2;
+    uint32_t payload_chunk_gap_cycles = 2;
     Phase phase = Phase::Idle;
     size_t header_idx = 0;
     size_t payload_idx = 0;
@@ -1255,6 +1284,9 @@ int main(int argc, char** argv) {
             if (top->tube_status == 0x22u) {
                 loader_host->start();
             }
+            if (top->tube_status == 0x23u) {
+                loader_host->allow_payload_start();
+            }
             if (!held_fast_uart_rx_valid) {
                 loader_host->drive(inject_valid, inject_byte);
                 if (inject_valid) {
@@ -1380,6 +1412,7 @@ int main(int argc, char** argv) {
             }
             if (loader_host) {
                 loader_host->observe_tx_byte(byte);
+                summary.loader_blocks_acked = loader_host->blocks_acked();
             }
         }
 
@@ -1662,7 +1695,7 @@ int main(int argc, char** argv) {
             summary.benchmark_start_seen = true;
         }
         if (!summary.benchmark_try_seen &&
-            uart_ascii.find("Trying 10 runs through Dhrystone:") != std::string::npos) {
+            uart_ascii.find(" runs through Dhrystone:") != std::string::npos) {
             summary.benchmark_try_seen = true;
         }
         if (!summary.benchmark_result_seen && uart_ascii.find("BENCH CYCLES") != std::string::npos) {
@@ -2005,6 +2038,12 @@ int main(int argc, char** argv) {
             summary.exit_reason = "done";
             break;
         }
+        if (loader_host && cfg.loader_prefix_blocks != 0 &&
+            loader_host->blocks_acked() >= cfg.loader_prefix_blocks) {
+            summary.loader_prefix_pass = true;
+            summary.exit_reason = "done";
+            break;
+        }
         if (summary.trap_seen) {
             summary.exit_reason = "trap";
             break;
@@ -2021,7 +2060,15 @@ int main(int argc, char** argv) {
 
     if (loader_host) {
         summary.loader_bytes_injected = loader_host->bytes_injected();
-        summary.loader_semantic_pass = summary.entry_reached;
+        summary.loader_blocks_acked = loader_host->blocks_acked();
+        summary.loader_prefix_pass =
+            cfg.loader_prefix_blocks != 0 &&
+            summary.loader_blocks_acked >= cfg.loader_prefix_blocks &&
+            !summary.trap_seen &&
+            summary.spec_mmio_load_violation_count == 0;
+        summary.loader_semantic_pass =
+            summary.entry_reached ||
+            summary.loader_prefix_pass;
     }
 
     if (summary.danger_window_seen) {

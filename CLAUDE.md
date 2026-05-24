@@ -23,12 +23,14 @@ Wiki sync triggers:
 - Update `wiki/INDEX.md` when project status, quick commands, environment assumptions, or current blockers change.
 - Update the relevant `wiki/concepts/*.md` page when an architectural, timing, memory, simulation, or tool-flow lesson changes.
 - Append to the current `wiki/devlog/YYYY-MM.md` entry in reverse chronological order. Devlogs are append-only: do not rewrite old entries except to fix typos that do not change meaning.
+- Treat wiki and documentation updates as GitHub submission material. Whenever `wiki/`, `AGENTS.md`, `CLAUDE.md`, `README*`, `docs/`, or other project documentation changes, include those files in the same Git/GitHub commit or PR as the related RTL/script/debug change. If commits or pushes are not authorized in the current turn, explicitly report the documentation files that must be included in the next GitHub submission.
 
 R1 anti-patterns:
 
 - Do not say "sync later", "document later", or leave wiki updates for another agent.
 - Do not record only generated log paths without the conclusion they support.
 - Do not claim board or benchmark status from stale files; include timestamps/build IDs when the distinction matters.
+- Do not update wiki/docs locally and then omit them from the GitHub commit/PR for the same change.
 - Do not use Vivado 2024.2 for this AX7203 flow unless the user explicitly changes the rule. This repo is to be implemented with Vivado 2023.2 for consistency.
 - Do not hide failed hypotheses. Mark them as ruled out with the evidence that ruled them out.
 
@@ -38,10 +40,28 @@ If a source change truly does not affect the wiki, state that explicitly in the 
 
 - Use Vivado 2023.2 for AX7203 synthesis, implementation, bitstream generation, and JTAG. The machine also has Vivado 2024.2 installed, but this project must stay on 2023.2 unless the user explicitly says otherwise.
 - Prefer the explicit binary path `E:\Xilinx\Vivado\2023.2\bin\vivado.bat` when running Vivado from automation or shell commands.
-- Recent Vivado 2023.2 implementation attempts have failed at the process level with `The system cannot find the path specified` during place/route or incremental reuse database creation. Treat that as an environment/tool-flow failure until a current Tcl log proves an RTL/DRC/timing failure.
+- Earlier Vivado 2023.2 implementation attempts failed at the process level with `The system cannot find the path specified` during place/route or incremental reuse database creation. Treat that exact signature as an environment/tool-flow failure until a current Tcl log proves an RTL/DRC/timing failure.
+- The latest Vivado 2023.2 incremental Dhrystone attempt passed reuse DB creation and failed in placement with `failed to commit all instances`; treat that as an incremental placement/congestion failure, not as a Dhrystone RTL functional failure.
 - When retrying Vivado implementation, use explicit `-log`/`-journal` paths and a short local `TEMP`/`TMP` such as `build\vivado_tmp` to avoid overwritten logs and path-related failures.
-- Verilator is not installed in the current local environment. Use Icarus, Vivado sim/synth, and board scripts unless Verilator is installed later.
+- Verilator mainline is a WSL flow. Use `python fpga/scripts/run_verilator_mainline.py`; it calls `wsl.exe` and checks WSL-side `verilator`, `make`, and `g++`. Do not invent a Windows-native Verilator flow. On 2026-05-24, `wsl.exe -l -v` shows `Ubuntu-22.04 Running`, and the wrapper finds Verilator 5.046 at `/usr/local/bin/verilator`, `/usr/bin/make`, and `/usr/bin/g++`.
 - COM5 is the expected CP210x UART for AX7203 board work. Only one process can own COM5; close terminals and stale Python scripts before board automation.
+
+## Dhrystone Debug Loop
+
+The current short-term target is Dhrystone. This loop overrides generic FPGA bring-up habits:
+
+1. Run WSL Verilator Dhrystone first:
+
+   ```powershell
+   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
+   python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 2000000000 --require-board-config-match
+   ```
+
+2. Board-equivalent Verilator Dhrystone gates must report `BoardConfigMatch: True` in `summary.txt`/`summary.json`. The checked baseline is `SMT_MODE=0`, DDR3/mem_subsys enabled, RS depth 48, fetch buffer depth 16, 25 MHz core clock, 115200 UART, `AX7203_DCACHE_MODE=read-only`, `LOADER_ROM_PROFILE=board`, `BENCHMARK_RUNTIME_PROFILE=board`, `DHRYSTONE_RUNS=5000`, and loader-semantic host pacing `payload_start_gap=2500`, `payload_gap=2500`, `payload_chunk_gap=40000`. Do not treat `SIM_FAST_STORE_DRAIN`, `--loader-rom-profile sim-fast`, `--benchmark-runtime-profile verilator-fast`, short Dhrystone runs, or fast loader host pacing as board-equivalent evidence. The config summary should be written before WSL-side tool checks so a missing WSL environment cannot hide a board-profile mismatch.
+3. Only after both Verilator gates pass, run Vivado 2023.2 incremental implementation.
+4. `--fpga-impl-mode incremental` must fail closed; do not automatically fall back to aggressive implementation.
+5. If incremental implementation fails twice in a row, stop retrying Vivado and return to the Verilator boundary matrix in `wiki/concepts/simulation.md`.
+6. Bitstream download to AX7203 must use Vivado JTAG, normally through `fpga/program_ax7203_jtag.tcl` or a board script that calls it.
 
 ## Current Repository State
 
@@ -86,13 +106,13 @@ build/fpga_mainline_validation/
 ### Vivado FPGA flow
 
 ```bash
-vivado.bat -mode batch -source fpga/create_project_ax7203.tcl
-vivado.bat -mode batch -source fpga/run_ax7203_synth.tcl
-vivado.bat -mode batch -source fpga/impl_aggressive.tcl
-vivado.bat -mode batch -source fpga/program_ax7203_jtag.tcl
+& 'E:\Xilinx\Vivado\2023.2\bin\vivado.bat' -mode batch -source fpga/create_project_ax7203.tcl
+& 'E:\Xilinx\Vivado\2023.2\bin\vivado.bat' -mode batch -source fpga/run_ax7203_synth.tcl
+& 'E:\Xilinx\Vivado\2023.2\bin\vivado.bat' -mode batch -source fpga/impl_incremental.tcl
+& 'E:\Xilinx\Vivado\2023.2\bin\vivado.bat' -mode batch -source fpga/program_ax7203_jtag.tcl
 ```
 
-`impl_aggressive.tcl` is the preferred implementation flow for the AX7203 timing-signoff builds.
+`impl_incremental.tcl` is the current Dhrystone debug implementation flow after Verilator passes. `impl_aggressive.tcl` is reserved for explicit signoff or when the documented fallback loop allows it.
 
 ### Verilator simulation (WSL)
 

@@ -86,6 +86,12 @@
 .section .text
 .globl _start
 
+.macro poll_dep_nops
+    .rept 8
+    addi x0, x0, 0
+    .endr
+.endm
+
 _start:
     li sp, LOADER_STACK_TOP
     li x31, UART16550_THR_ADDR
@@ -173,11 +179,6 @@ payload_size_ok:
     mv x3, x0                # block index
 
 load_block_begin:
-#ifndef SIM_FAST_STORE_DRAIN
-    li x5, UART16550_FCR_ADDR
-    li x7, 0x02              # clear RX FIFO between host-paced blocks
-    sb x7, 0(x5)
-#endif
     beq x24, x22, load_done
     sub x12, x22, x24
     li x15, BLOCK_CHECKSUM_BYTES
@@ -210,21 +211,17 @@ load_block_recv_no_chunk_evt:
 load_block_recv_byte_poll:
     fence iorw, iorw
     lbu x6, 0(x30)
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     andi x5, x6, UART16550_LSR_OE_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     bne x5, x0, rx_overrun_fail
     addi x0, x0, 0
     andi x5, x6, UART16550_LSR_FE_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     bne x5, x0, rx_frame_err_fail
     addi x0, x0, 0
     andi x6, x6, UART16550_LSR_DR_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     bne x6, x0, load_block_recv_byte_ready
     addi x7, x7, -1
     bne x7, x0, load_block_recv_byte_poll
@@ -634,21 +631,17 @@ recv_byte_no_poll_evt:
     addi x28, x28, -1
 recv_byte_no_lsr_evt:
 #endif
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     andi x5, x6, UART16550_LSR_OE_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     bne x5, x0, rx_overrun_fail
     addi x0, x0, 0
     andi x5, x6, UART16550_LSR_FE_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     bne x5, x0, rx_frame_err_fail
     addi x0, x0, 0
     andi x6, x6, UART16550_LSR_DR_MASK
-    addi x0, x0, 0
-    addi x0, x0, 0
+    poll_dep_nops
     beq x6, x0, recv_byte_wait
     fence iorw, iorw
     lbu x10, 0(x29)

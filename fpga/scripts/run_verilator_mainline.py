@@ -26,6 +26,112 @@ PRELOAD_ROM = REPO_ROOT / "rom" / "test_verilator_ddr3_preload.s"
 LOADER_ROM = REPO_ROOT / "rom" / "test_fpga_ddr3_loader.s"
 RTL_FILELIST = COMP_TEST_DIR / "rtl_files.txt"
 
+BOARD_RS_DEPTH = int(os.environ.get("AX7203_RS_DEPTH", "48"))
+BOARD_FETCH_BUFFER_DEPTH = int(os.environ.get("AX7203_FETCH_BUFFER_DEPTH", "16"))
+BOARD_CORE_CLK_MHZ = float(os.environ.get("AX7203_CORE_CLK_MHZ", "25.0"))
+BOARD_UART_BAUD = int(os.environ.get("AX7203_UART_BAUD", "115200"))
+BOARD_SMT_MODE = int(os.environ.get("AX7203_SMT_MODE", "0"))
+BOARD_DCACHE_MODE = os.environ.get("AX7203_DCACHE_MODE", "read-only").strip().lower()
+BOARD_LOADER_ROM_PROFILE = os.environ.get("AX7203_LOADER_ROM_PROFILE", "board").strip().lower()
+BOARD_HEADER_GAP_CYCLES = int(os.environ.get("AX7203_VERILATOR_HEADER_GAP_CYCLES", "16"))
+BOARD_PAYLOAD_START_GAP_CYCLES = int(os.environ.get("AX7203_VERILATOR_PAYLOAD_START_GAP_CYCLES", "2500"))
+BOARD_PAYLOAD_GAP_CYCLES = int(os.environ.get("AX7203_VERILATOR_PAYLOAD_GAP_CYCLES", "2500"))
+BOARD_PAYLOAD_CHUNK_GAP_CYCLES = int(os.environ.get("AX7203_VERILATOR_PAYLOAD_CHUNK_GAP_CYCLES", "40000"))
+BOARD_LOADER_PREFIX_BLOCKS = int(os.environ.get("AX7203_VERILATOR_LOADER_PREFIX_BLOCKS", "0"))
+BOARD_DHRYSTONE_RUNS = int(os.environ.get("AX7203_DHRYSTONE_RUNS", "5000"))
+BOARD_BENCHMARK_RUNTIME_PROFILE = os.environ.get("AX7203_BENCHMARK_RUNTIME_PROFILE", "board").strip().lower()
+
+
+def derive_idx_width(depth: int) -> int:
+    return 1 if depth <= 1 else (depth - 1).bit_length()
+
+
+def derive_clk_wiz_half_div(core_clk_mhz: float) -> int:
+    return max(1, round(100.0 / core_clk_mhz))
+
+
+def derive_uart_clk_div(core_clk_mhz: float, baud: int = 115200) -> int:
+    return max(1, round((core_clk_mhz * 1_000_000.0) / float(baud)))
+
+
+def board_config_for_args(args: argparse.Namespace) -> dict[str, object]:
+    actual_core_clk_mhz = float(args.cpu_hz) / 1_000_000.0
+    actual = {
+        "FPGA_MODE": 1,
+        "ENABLE_MEM_SUBSYS": 1,
+        "ENABLE_DDR3": 1,
+        "L2_PASSTHROUGH": 1,
+        "SMT_MODE": int(args.smt_mode),
+        "ENABLE_ROCC_ACCEL": 0,
+        "RS_DEPTH": int(args.rs_depth),
+        "RS_IDX_W": derive_idx_width(int(args.rs_depth)),
+        "FETCH_BUFFER_DEPTH": int(args.fetch_buffer_depth),
+        "CORE_CLK_MHZ": actual_core_clk_mhz,
+        "CPU_HZ": int(args.cpu_hz),
+        "UART_BAUD": int(args.uart_baud),
+        "UART_CLK_DIV": derive_uart_clk_div(actual_core_clk_mhz, int(args.uart_baud)),
+        "CLK_WIZ_HALF_DIV": derive_clk_wiz_half_div(actual_core_clk_mhz),
+        "DCACHE_MODE": str(args.dcache_mode),
+        "LOADER_ROM_PROFILE": str(args.loader_rom_profile),
+        "DHRYSTONE_RUNS": int(args.runs),
+        "BENCHMARK_RUNTIME_PROFILE": str(args.benchmark_runtime_profile),
+        "VERILATOR_FAST_UART": 1,
+    }
+    expected = {
+        "FPGA_MODE": 1,
+        "ENABLE_MEM_SUBSYS": 1,
+        "ENABLE_DDR3": 1,
+        "L2_PASSTHROUGH": 1,
+        "SMT_MODE": BOARD_SMT_MODE,
+        "ENABLE_ROCC_ACCEL": 0,
+        "RS_DEPTH": BOARD_RS_DEPTH,
+        "RS_IDX_W": derive_idx_width(BOARD_RS_DEPTH),
+        "FETCH_BUFFER_DEPTH": BOARD_FETCH_BUFFER_DEPTH,
+        "CORE_CLK_MHZ": BOARD_CORE_CLK_MHZ,
+        "CPU_HZ": int(round(BOARD_CORE_CLK_MHZ * 1_000_000.0)),
+        "UART_BAUD": BOARD_UART_BAUD,
+        "UART_CLK_DIV": derive_uart_clk_div(BOARD_CORE_CLK_MHZ, BOARD_UART_BAUD),
+        "CLK_WIZ_HALF_DIV": derive_clk_wiz_half_div(BOARD_CORE_CLK_MHZ),
+        "DCACHE_MODE": BOARD_DCACHE_MODE,
+        "LOADER_ROM_PROFILE": BOARD_LOADER_ROM_PROFILE,
+        "DHRYSTONE_RUNS": BOARD_DHRYSTONE_RUNS,
+        "BENCHMARK_RUNTIME_PROFILE": BOARD_BENCHMARK_RUNTIME_PROFILE,
+        "VERILATOR_FAST_UART": 1,
+    }
+    if str(args.mode) == "loader-semantic":
+        actual.update(
+            {
+                "HEADER_GAP_CYCLES": int(args.header_gap_cycles),
+                "PAYLOAD_START_GAP_CYCLES": int(args.payload_start_gap_cycles),
+                "PAYLOAD_GAP_CYCLES": int(args.payload_gap_cycles),
+                "PAYLOAD_CHUNK_GAP_CYCLES": int(args.payload_chunk_gap_cycles),
+                "LOADER_PREFIX_BLOCKS": int(args.loader_prefix_blocks),
+            }
+        )
+        expected.update(
+            {
+                "HEADER_GAP_CYCLES": BOARD_HEADER_GAP_CYCLES,
+                "PAYLOAD_START_GAP_CYCLES": BOARD_PAYLOAD_START_GAP_CYCLES,
+                "PAYLOAD_GAP_CYCLES": BOARD_PAYLOAD_GAP_CYCLES,
+                "PAYLOAD_CHUNK_GAP_CYCLES": BOARD_PAYLOAD_CHUNK_GAP_CYCLES,
+                "LOADER_PREFIX_BLOCKS": BOARD_LOADER_PREFIX_BLOCKS,
+            }
+        )
+    mismatches: list[str] = []
+    for key, expected_value in expected.items():
+        actual_value = actual[key]
+        if isinstance(expected_value, float):
+            if abs(float(actual_value) - expected_value) > 1.0e-6:
+                mismatches.append(f"{key}: expected {expected_value}, actual {actual_value}")
+        elif actual_value != expected_value:
+            mismatches.append(f"{key}: expected {expected_value}, actual {actual_value}")
+    return {
+        "BoardConfigExpected": expected,
+        "BoardConfigActual": actual,
+        "BoardConfigMismatches": mismatches,
+        "BoardConfigMatch": not mismatches,
+    }
+
 
 def which_required(name: str) -> str:
     resolved = shutil.which(name)
@@ -68,6 +174,22 @@ def quote_wsl(path: str) -> str:
     return shlex.quote(path)
 
 
+def decode_wsl_output(data: bytes) -> str:
+    if not data:
+        return ""
+    if data.count(b"\x00") > max(4, len(data) // 8):
+        try:
+            return data.decode("utf-16le", errors="replace")
+        except UnicodeDecodeError:
+            pass
+    for encoding in ("utf-8", "gbk"):
+        try:
+            return data.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
 def run_wsl(
     command: str,
     *,
@@ -82,17 +204,24 @@ def run_wsl(
     proc = subprocess.run(
         ["wsl.exe", "bash", "-lc", f"cd {quote_wsl(wsl_cwd)} && {env_prefix}{command}"],
         capture_output=True,
-        text=True,
         timeout=timeout,
         check=False,
     )
-    return proc
+    return subprocess.CompletedProcess(
+        proc.args,
+        proc.returncode,
+        stdout=decode_wsl_output(proc.stdout),
+        stderr=decode_wsl_output(proc.stderr),
+    )
 
 
 def which_required_wsl(*names: str) -> None:
     for name in names:
         proc = run_wsl(f"command -v {shlex.quote(name)}", cwd=REPO_ROOT, timeout=30)
         if proc.returncode != 0:
+            detail = "\n".join(part.strip() for part in (proc.stdout, proc.stderr) if part.strip())
+            if detail:
+                raise SystemExit(f"Missing required WSL executable: {name}\nWSL output:\n{detail}")
             raise SystemExit(f"Missing required WSL executable: {name}")
 
 
@@ -140,7 +269,14 @@ def write_preload_hex(binary_path: Path, output_path: Path) -> None:
     output_path.write_text("\n".join(words) + ("\n" if words else ""), encoding="ascii")
 
 
-def build_benchmark_image(benchmark: str, runs: int, cpu_hz: int, out_dir: Path) -> dict[str, object]:
+def build_benchmark_image(
+    benchmark: str,
+    runs: int,
+    cpu_hz: int,
+    out_dir: Path,
+    *,
+    runtime_profile: str,
+) -> dict[str, object]:
     cmd = [
         sys.executable,
         str(REPO_ROOT / "fpga" / "scripts" / "build_benchmark_image.py"),
@@ -151,10 +287,14 @@ def build_benchmark_image(benchmark: str, runs: int, cpu_hz: int, out_dir: Path)
         "--ddr3-xip",
         "--emit-bin",
         "--manifest",
-        "--verilator-mainline",
     ]
+    if runtime_profile == "verilator-fast":
+        cmd.append("--verilator-mainline")
+    elif runtime_profile != "board":
+        raise SystemExit(f"Unsupported benchmark runtime profile: {runtime_profile}")
     if benchmark == "dhrystone":
         cmd.extend(["--dhrystone-runs", str(runs)])
+        cmd.extend(["--fixed-dhrystone-runs", str(runs)])
     else:
         raise SystemExit(f"Unsupported benchmark for first-pass Verilator flow: {benchmark}")
     run_checked(cmd, cwd=REPO_ROOT, timeout=600)
@@ -172,7 +312,7 @@ def build_benchmark_image(benchmark: str, runs: int, cpu_hz: int, out_dir: Path)
     return cloned
 
 
-def build_rom_image(mode: str) -> None:
+def build_rom_image(mode: str, loader_rom_profile: str) -> None:
     asm = PRELOAD_ROM if mode == "preload" else LOADER_ROM
     cmd = [
         sys.executable,
@@ -184,7 +324,11 @@ def build_rom_image(mode: str) -> None:
     if mode == "preload":
         cmd.extend(["--march", "rv32i_zicsr"])
     else:
-        cmd.extend(["--define", "SIM_FAST_STORE_DRAIN"])
+        cmd.extend(["--define", "BOARD_BUILD=1"])
+        if loader_rom_profile == "sim-fast":
+            cmd.extend(["--define", "SIM_FAST_STORE_DRAIN"])
+        elif loader_rom_profile != "board":
+            raise SystemExit(f"Unsupported loader ROM profile: {loader_rom_profile}")
     run_checked(cmd, cwd=REPO_ROOT, timeout=300)
 
 
@@ -196,10 +340,16 @@ def build_verilator_command(
     top_sv: Path,
     mock_sv: Path,
     dcache_mode: str,
+    rs_depth: int,
+    fetch_buffer_depth: int,
+    cpu_hz: int,
+    uart_baud: int,
+    smt_mode: int,
     preload_direct_boot: bool,
     enable_trace: bool,
 ) -> str:
     rtl_sources = load_rtl_sources()
+    core_clk_mhz = float(cpu_hz) / 1_000_000.0
     source_list = [
         *rtl_sources,
         LIB_RAM_BFM,
@@ -233,8 +383,13 @@ def build_verilator_command(
         "-DENABLE_MEM_SUBSYS=1",
         "-DENABLE_DDR3=1",
         "-DL2_PASSTHROUGH=1",
-        "-DSMT_MODE=0",
+        f"-DSMT_MODE={int(smt_mode)}",
         "-DENABLE_ROCC_ACCEL=0",
+        f"-DFPGA_SCOREBOARD_RS_DEPTH={int(rs_depth)}",
+        f"-DFPGA_SCOREBOARD_RS_IDX_W={derive_idx_width(int(rs_depth))}",
+        f"-DFPGA_FETCH_BUFFER_DEPTH={int(fetch_buffer_depth)}",
+        f"-DFPGA_CLK_WIZ_HALF_DIV={derive_clk_wiz_half_div(core_clk_mhz)}",
+        f"-DFPGA_UART_CLK_DIV={derive_uart_clk_div(core_clk_mhz, int(uart_baud))}",
     ]
     if dcache_mode == "passthrough":
         parts.append("-DDCACHE_PASSTHROUGH=1")
@@ -345,10 +500,53 @@ def format_summary(
         if mode == "preload"
         else f"LoaderSemanticPass: {summary.get('LoaderSemanticPass', False)}"
     )
+    board_expected = summary.get("BoardConfigExpected", {})
+    board_actual = summary.get("BoardConfigActual", {})
+    board_mismatches = summary.get("BoardConfigMismatches", [])
+    if not isinstance(board_expected, dict):
+        board_expected = {}
+    if not isinstance(board_actual, dict):
+        board_actual = {}
+    if not isinstance(board_mismatches, list):
+        board_mismatches = [str(board_mismatches)]
+
+    def board_config_line(label: str, data: dict[str, object]) -> str:
+        keys = (
+            "RS_DEPTH",
+            "RS_IDX_W",
+            "FETCH_BUFFER_DEPTH",
+            "CORE_CLK_MHZ",
+            "UART_BAUD",
+            "UART_CLK_DIV",
+            "CLK_WIZ_HALF_DIV",
+            "SMT_MODE",
+            "DCACHE_MODE",
+            "LOADER_ROM_PROFILE",
+            "DHRYSTONE_RUNS",
+            "BENCHMARK_RUNTIME_PROFILE",
+            "HEADER_GAP_CYCLES",
+            "PAYLOAD_START_GAP_CYCLES",
+            "PAYLOAD_GAP_CYCLES",
+            "PAYLOAD_CHUNK_GAP_CYCLES",
+            "LOADER_PREFIX_BLOCKS",
+        )
+        return f"{label}: " + ", ".join(f"{key}={data.get(key, 'N/A')}" for key in keys)
+
     lines = [
         f"Mode: {mode}",
         f"DCacheMode: {summary.get('DCacheMode', 'full')}",
         f"MockLatency: {summary.get('MockLatency', 1)}",
+        f"HeaderGapCycles: {summary.get('HeaderGapCycles', 16)}",
+        f"PayloadStartGapCycles: {summary.get('PayloadStartGapCycles', summary.get('PayloadGapCycles', 2))}",
+        f"PayloadGapCycles: {summary.get('PayloadGapCycles', 2)}",
+        f"PayloadChunkGapCycles: {summary.get('PayloadChunkGapCycles', summary.get('PayloadGapCycles', 2))}",
+        f"LoaderPrefixBlocks: {summary.get('LoaderPrefixBlocks', 0)}",
+        f"LoaderRomProfile: {summary.get('LoaderRomProfile', 'board')}",
+        f"BenchmarkRuntimeProfile: {summary.get('BenchmarkRuntimeProfile', 'board')}",
+        f"BoardConfigMatch: {summary.get('BoardConfigMatch', False)}",
+        "BoardConfigMismatches: " + ("; ".join(str(item) for item in board_mismatches) if board_mismatches else "none"),
+        board_config_line("BoardConfigExpected", board_expected),
+        board_config_line("BoardConfigActual", board_actual),
         f"Benchmark: {benchmark}",
         f"Runs: {runs}",
         f"ConfiguredRuns: {summary.get('ConfiguredRuns', runs)}",
@@ -359,6 +557,8 @@ def format_summary(
         f"BenchmarkStartSeen: {summary.get('BenchmarkStartSeen', False)}",
         f"BenchmarkDoneSeen: {summary.get('BenchmarkDoneSeen', False)}",
         mode_pass_line,
+        f"LoaderPrefixPass: {summary.get('LoaderPrefixPass', False)}",
+        f"LoaderBlocksAcked: {summary.get('LoaderBlocksAcked', 0)}",
         f"TrapSeen: {summary.get('TrapSeen', False)}",
         f"TrapCause: {summary.get('TrapCause', 0)}",
         f"Cycles: {summary.get('Cycles', 0)}",
@@ -583,16 +783,51 @@ def main() -> int:
     parser.add_argument("--mode", choices=("preload", "loader-semantic"), default="preload")
     parser.add_argument("--benchmark", choices=("dhrystone",), default="dhrystone")
     parser.add_argument("--runs", type=int, default=1)
-    parser.add_argument("--cpu-hz", type=int, default=25_000_000)
+    parser.add_argument("--cpu-hz", type=int, default=None)
+    parser.add_argument("--core-clk-mhz", type=float, default=None)
+    parser.add_argument("--rs-depth", type=int, default=BOARD_RS_DEPTH)
+    parser.add_argument("--fetch-buffer-depth", type=int, default=BOARD_FETCH_BUFFER_DEPTH)
+    parser.add_argument("--uart-baud", type=int, default=BOARD_UART_BAUD)
+    parser.add_argument("--smt-mode", type=int, default=BOARD_SMT_MODE)
     parser.add_argument("--mock-latency", type=int, default=1)
     parser.add_argument(
         "--dcache-mode",
         choices=("full", "passthrough", "registered-pt", "read-only"),
         default="full",
     )
+    parser.add_argument(
+        "--loader-rom-profile",
+        choices=("board", "sim-fast"),
+        default=BOARD_LOADER_ROM_PROFILE,
+        help="Loader ROM build profile. Board-equivalent Dhrystone gates must use board.",
+    )
+    parser.add_argument(
+        "--benchmark-runtime-profile",
+        choices=("board", "verilator-fast"),
+        default=BOARD_BENCHMARK_RUNTIME_PROFILE,
+        help="Benchmark C runtime profile. Board-equivalent Dhrystone gates must use board.",
+    )
     parser.add_argument("--max-cycles", type=int, default=20_000_000)
     parser.add_argument("--header-gap-cycles", type=int, default=16)
+    parser.add_argument(
+        "--payload-start-gap-cycles",
+        type=int,
+        default=None,
+        help="Fast-UART cycles to wait after the loader header before sending the first payload byte.",
+    )
     parser.add_argument("--payload-gap-cycles", type=int, default=2)
+    parser.add_argument(
+        "--payload-chunk-gap-cycles",
+        type=int,
+        default=None,
+        help="Fast-UART cycles to wait after a 4-byte payload chunk ACK before sending the next chunk.",
+    )
+    parser.add_argument(
+        "--loader-prefix-blocks",
+        type=int,
+        default=0,
+        help="In loader-semantic mode, pass after this many payload block ACKs instead of running the benchmark.",
+    )
     parser.add_argument("--stuck-pc-threshold", type=int, default=256)
     parser.add_argument("--stall-cycle-threshold", type=int, default=200_000)
     parser.add_argument("--danger-window-instret-threshold", type=int, default=1024)
@@ -603,24 +838,103 @@ def main() -> int:
     parser.add_argument("--trace-after-stuck-cycles", type=int, default=4096)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--print-wsl-cmd", action="store_true")
+    parser.add_argument(
+        "--require-board-config-match",
+        action="store_true",
+        help="Fail before build if Verilator parameters do not match the AX7203 board-test baseline.",
+    )
     args = parser.parse_args()
 
-    which_required("wsl")
-    which_required_wsl("verilator", "make", "g++")
+    if args.core_clk_mhz is not None:
+        core_cpu_hz = int(round(args.core_clk_mhz * 1_000_000.0))
+        if args.cpu_hz is not None and int(args.cpu_hz) != core_cpu_hz:
+            raise SystemExit("--cpu-hz and --core-clk-mhz disagree")
+        args.cpu_hz = core_cpu_hz
+    if args.cpu_hz is None:
+        args.cpu_hz = int(round(BOARD_CORE_CLK_MHZ * 1_000_000.0))
+    if args.payload_start_gap_cycles is None:
+        args.payload_start_gap_cycles = args.payload_gap_cycles
+    if args.payload_chunk_gap_cycles is None:
+        args.payload_chunk_gap_cycles = args.payload_gap_cycles
 
-    run_dir = BUILD_ROOT / args.mode / f"{args.benchmark}_runs{args.runs}_lat{args.mock_latency}_{args.dcache_mode}"
+    board_config = board_config_for_args(args)
+
+    gap_suffix = ""
+    if (
+        args.header_gap_cycles != 16
+        or args.payload_start_gap_cycles != 2
+        or args.payload_gap_cycles != 2
+        or args.payload_chunk_gap_cycles != 2
+        or args.loader_prefix_blocks != 0
+        or args.loader_rom_profile != "board"
+    ):
+        gap_suffix = (
+            f"_hg{args.header_gap_cycles}"
+            f"_psg{args.payload_start_gap_cycles}"
+            f"_pg{args.payload_gap_cycles}"
+            f"_pcg{args.payload_chunk_gap_cycles}"
+            f"_lp{args.loader_prefix_blocks}"
+            f"_rom{args.loader_rom_profile}"
+        )
+    run_dir = BUILD_ROOT / args.mode / (
+        f"{args.benchmark}_runs{args.runs}_lat{args.mock_latency}_{args.dcache_mode}{gap_suffix}"
+    )
     obj_dir = run_dir / ("obj_dir_trace" if (args.trace or args.trace_on_stuck) else "obj_dir")
     logs_dir = run_dir / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-
-    manifest = build_benchmark_image(args.benchmark, args.runs, args.cpu_hz, run_dir)
-    build_rom_image(args.mode)
 
     summary_json = run_dir / "summary.json"
     summary_txt = run_dir / "summary.txt"
     uart_log = run_dir / "uart.log"
     preload_hex = run_dir / "payload_preload.hex"
     trace_path = run_dir / ("trace.fst" if (args.trace or args.trace_on_stuck) else "trace.fst")
+
+    if args.require_board_config_match and not bool(board_config["BoardConfigMatch"]):
+        summary: dict[str, object] = {
+            **board_config,
+            "DCacheMode": args.dcache_mode,
+            "MockLatency": args.mock_latency,
+            "HeaderGapCycles": args.header_gap_cycles,
+            "PayloadStartGapCycles": args.payload_start_gap_cycles,
+            "PayloadGapCycles": args.payload_gap_cycles,
+            "PayloadChunkGapCycles": args.payload_chunk_gap_cycles,
+            "LoaderPrefixBlocks": args.loader_prefix_blocks,
+            "LoaderRomProfile": args.loader_rom_profile,
+            "BenchmarkRuntimeProfile": args.benchmark_runtime_profile,
+            "ConfiguredRuns": args.runs,
+            "EffectiveRuns": args.runs,
+            "VerilatorFixedRuns": args.benchmark == "dhrystone",
+        }
+        summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        summary_txt.write_text(
+            format_summary(
+                summary,
+                benchmark=args.benchmark,
+                mode=args.mode,
+                runs=args.runs,
+                budget_cycles=args.max_cycles,
+            ),
+            encoding="utf-8",
+        )
+        sys.stderr.write(
+            "Verilator board config mismatch; see "
+            f"{summary_txt}\n"
+        )
+        print(summary_txt)
+        return 2
+
+    which_required("wsl")
+    which_required_wsl("verilator", "make", "g++")
+
+    manifest = build_benchmark_image(
+        args.benchmark,
+        args.runs,
+        args.cpu_hz,
+        run_dir,
+        runtime_profile=args.benchmark_runtime_profile,
+    )
+    build_rom_image(args.mode, args.loader_rom_profile)
+
     if (args.trace or args.trace_on_stuck) and trace_path.exists():
         trace_path.unlink()
 
@@ -642,6 +956,11 @@ def main() -> int:
         top_sv=top_sv,
         mock_sv=mock_sv,
         dcache_mode=args.dcache_mode,
+        rs_depth=args.rs_depth,
+        fetch_buffer_depth=args.fetch_buffer_depth,
+        cpu_hz=args.cpu_hz,
+        uart_baud=args.uart_baud,
+        smt_mode=args.smt_mode,
         preload_direct_boot=(args.mode == "preload"),
         enable_trace=(args.trace or args.trace_on_stuck),
     )
@@ -655,7 +974,33 @@ def main() -> int:
         return build_proc.returncode
 
     if args.build_only:
-        summary_txt.write_text("BuildOnly: true\n", encoding="utf-8")
+        summary: dict[str, object] = {
+            **board_config,
+            "BuildOnly": True,
+            "DCacheMode": args.dcache_mode,
+            "MockLatency": args.mock_latency,
+            "HeaderGapCycles": args.header_gap_cycles,
+            "PayloadStartGapCycles": args.payload_start_gap_cycles,
+            "PayloadGapCycles": args.payload_gap_cycles,
+            "PayloadChunkGapCycles": args.payload_chunk_gap_cycles,
+            "LoaderPrefixBlocks": args.loader_prefix_blocks,
+            "LoaderRomProfile": args.loader_rom_profile,
+            "BenchmarkRuntimeProfile": args.benchmark_runtime_profile,
+            "ConfiguredRuns": args.runs,
+            "EffectiveRuns": args.runs,
+            "VerilatorFixedRuns": args.benchmark == "dhrystone",
+        }
+        summary_json.write_text(json.dumps(summary, indent=2), encoding="utf-8")
+        summary_txt.write_text(
+            format_summary(
+                summary,
+                benchmark=args.benchmark,
+                mode=args.mode,
+                runs=args.runs,
+                budget_cycles=args.max_cycles,
+            ),
+            encoding="utf-8",
+        )
         print(summary_txt)
         return 0
 
@@ -681,8 +1026,14 @@ def main() -> int:
         shlex.quote(str(args.max_cycles)),
         "--header-gap-cycles",
         shlex.quote(str(args.header_gap_cycles)),
+        "--payload-start-gap-cycles",
+        shlex.quote(str(args.payload_start_gap_cycles)),
         "--payload-gap-cycles",
         shlex.quote(str(args.payload_gap_cycles)),
+        "--payload-chunk-gap-cycles",
+        shlex.quote(str(args.payload_chunk_gap_cycles)),
+        "--loader-prefix-blocks",
+        shlex.quote(str(args.loader_prefix_blocks)),
         "--stuck-pc-threshold",
         shlex.quote(str(args.stuck_pc_threshold)),
         "--stall-cycle-threshold",
@@ -722,18 +1073,21 @@ def main() -> int:
         return sim_proc.returncode
 
     summary = parse_summary_json(summary_json)
-    effective_runs = args.runs
-    verilator_fixed_runs = False
-    if args.benchmark == "dhrystone":
-        effective_runs = 10
-        verilator_fixed_runs = True
     summary["ConfiguredRuns"] = args.runs
-    summary["EffectiveRuns"] = effective_runs
-    summary["VerilatorFixedRuns"] = verilator_fixed_runs
+    summary["EffectiveRuns"] = args.runs
+    summary["VerilatorFixedRuns"] = args.benchmark == "dhrystone"
     summary["DCacheMode"] = args.dcache_mode
     summary["MockLatency"] = args.mock_latency
+    summary["HeaderGapCycles"] = args.header_gap_cycles
+    summary["PayloadStartGapCycles"] = args.payload_start_gap_cycles
+    summary["PayloadGapCycles"] = args.payload_gap_cycles
+    summary["PayloadChunkGapCycles"] = args.payload_chunk_gap_cycles
+    summary["LoaderPrefixBlocks"] = args.loader_prefix_blocks
+    summary["LoaderRomProfile"] = args.loader_rom_profile
+    summary["BenchmarkRuntimeProfile"] = args.benchmark_runtime_profile
     summary["TraceStartCycle"] = int(args.trace_start_cycle or 0)
     summary["TraceStopCycle"] = int(args.trace_stop_cycle or 0)
+    summary.update(board_config)
     summary.update(
         maybe_decode_pc_window(
             summary=summary,

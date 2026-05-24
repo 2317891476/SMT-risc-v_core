@@ -5283,17 +5283,15 @@ def main() -> int:
                 except Exception as incr_exc:  # noqa: BLE001
                     fallback_log = logs_dir / "09_impl_incremental_fallback.log"
                     fallback_log.write_text(
-                        "Incremental implementation failed; falling back to aggressive implementation.\n"
+                        "Incremental implementation failed; not falling back to aggressive implementation automatically.\n"
                         f"Reason: {incr_exc}\n"
                         f"Incremental log: {incr_log}\n",
                         encoding="utf-8",
                     )
-                    current_stage = "impl_aggressive_fallback"
-                    actual_fpga_impl_mode = "aggressive-fallback"
-                    impl_script = REPO_ROOT / "fpga" / "impl_aggressive.tcl"
-                    impl_log = logs_dir / "09_impl_aggressive_fallback.log"
-                    run_logged([vivado, "-mode", "batch", "-source", str(impl_script)], cwd=REPO_ROOT, env=env, log_path=impl_log, timeout=18000)
-                    timing_report = TIMING_SUMMARY_AGGR
+                    raise RuntimeError(
+                        f"incremental implementation failed; see {incr_log}. "
+                        "Run --fpga-impl-mode aggressive explicitly only after the Verilator-first debug loop allows it."
+                    ) from incr_exc
             else:
                 current_stage = "impl_aggressive"
                 impl_script = REPO_ROOT / "fpga" / "impl_aggressive.tcl"

@@ -583,9 +583,9 @@ wire br_push0_t1 = d0_go && disp0_br && (disp0_tid == 1'b1);
 wire br_push1_t0 = d1_go && disp1_br && (disp1_tid == 1'b0);
 wire br_push1_t1 = d1_go && disp1_br && (disp1_tid == 1'b1);
 wire br_push0_blocks_dispatch = disp0_br &&
-                                ((disp0_br_addr_mode == `J_REG) || disp0_regs_write);
+                                 ((disp0_br_addr_mode == `J_REG) || disp0_regs_write);
 wire br_push1_blocks_dispatch = disp1_br &&
-                                ((disp1_br_addr_mode == `J_REG) || disp1_regs_write);
+                                 ((disp1_br_addr_mode == `J_REG) || disp1_regs_write);
 
 // Branch tracking sequential logic
 always @(posedge clk or negedge rstn) begin
@@ -754,17 +754,21 @@ wire iq_mem_full, iq_mem_almost_full;
 wire iq_mul_full, iq_mul_almost_full;
 wire iq_div_full, iq_div_almost_full;
 
-// Branch state is tracked for diagnostics, MEM issue ordering, and the
-// conservative dispatch safety boundary.  Full branch-after dispatch exposed a
-// PRF isolation hole around JALR fallthrough speculation, so younger dispatch
-// remains blocked until the oldest unresolved branch completes.
+// Branch state is tracked for diagnostics, side-effect ordering, and dispatch
+// backpressure.  JAL/JALR/link branches remain hard dispatch boundaries; plain
+// conditional branches are allowed to overlap, but only up to this small cap.
+// While a branch is unresolved, younger INT dispatch also stops before the INT
+// IQ reaches full, which keeps slow MMIO polling loops from deadlocking on a
+// full queue of instructions that are order-blocked behind the branch.
+localparam [5:0] BR_DISPATCH_LIMIT = 6'd1;
 wire d0_pending_branch = (disp0_tid == 1'b0) ? dispatch_block_pending_t0 : dispatch_block_pending_t1;
-wire d1_pending_branch = (disp1_tid == 1'b0) ? dispatch_block_pending_t0 : dispatch_block_pending_t1;
+wire d0_any_branch_pending = (disp0_tid == 1'b0) ? pending_branch_t0 : pending_branch_t1;
 wire d0_after_branch = d0_pending_branch;
-wire d1_after_branch = d1_pending_branch ||
-                       (d0_go && disp0_br && (disp0_tid == disp1_tid));
-wire d0_branch_safe = !d0_after_branch;
-wire d1_branch_safe = !d1_after_branch;
+wire d0_branch_limit_hit = disp0_br &&
+                           (((disp0_tid == 1'b0) ? br_pending_cnt_t0 :
+                                                     br_pending_cnt_t1) >= BR_DISPATCH_LIMIT);
+wire d0_branch_iq_pressure = d0_is_int && d0_any_branch_pending && iq_int_almost_full;
+wire d0_branch_safe = !d0_after_branch && !d0_branch_limit_hit && !d0_branch_iq_pressure;
 
 // d0: target IQ has capacity?
 wire d0_cap_ok = d0_branch_safe &&
@@ -780,6 +784,21 @@ wire d0_tag_ok = can_accept_1;
 assign disp_stall = disp0_valid && (!d0_cap_ok || !d0_tag_ok);
 
 wire d0_go = disp0_valid && !disp_stall;
+
+wire [5:0] d1_br_pending_cnt_t0 =
+    br_pending_cnt_t0 + ((d0_go && disp0_br && (disp0_tid == 1'b0)) ? 6'd1 : 6'd0);
+wire [5:0] d1_br_pending_cnt_t1 =
+    br_pending_cnt_t1 + ((d0_go && disp0_br && (disp0_tid == 1'b1)) ? 6'd1 : 6'd0);
+wire d1_pending_branch = (disp1_tid == 1'b0) ? dispatch_block_pending_t0 : dispatch_block_pending_t1;
+wire d1_any_branch_pending = (disp1_tid == 1'b0) ? (d1_br_pending_cnt_t0 != 6'd0) :
+                                                   (d1_br_pending_cnt_t1 != 6'd0);
+wire d1_after_branch = d1_pending_branch ||
+                       (d0_go && br_push0_blocks_dispatch && (disp0_tid == disp1_tid));
+wire d1_branch_limit_hit = disp1_br &&
+                           (((disp1_tid == 1'b0) ? d1_br_pending_cnt_t0 :
+                                                     d1_br_pending_cnt_t1) >= BR_DISPATCH_LIMIT);
+wire d1_branch_iq_pressure = d1_is_int && d1_any_branch_pending && iq_int_almost_full;
+wire d1_branch_safe = !d1_after_branch && !d1_branch_limit_hit && !d1_branch_iq_pressure;
 
 // d1: target IQ has capacity (after d0 may have taken a slot)?
 wire d1_int_ok = !d1_is_int || ((d0_is_int && d0_go) ? !iq_int_almost_full : !iq_int_full);

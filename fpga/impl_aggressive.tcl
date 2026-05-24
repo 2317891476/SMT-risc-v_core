@@ -217,4 +217,7 @@ ax7203_write_evidence $evidence_file [list \
 ]
 
 catch {close_design}
+if {$impl_status ne "SUCCESS"} {
+    exit 1
+}
 exit 0

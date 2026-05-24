@@ -57,6 +57,10 @@ set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_
 set min_reuse_pct [expr {double([ax7203_env_or_default AX7203_INCREMENTAL_MIN_CELL_REUSE_PCT 80.0])}]
 set update_reference_checkpoint [expr {[ax7203_env_or_default AX7203_INCREMENTAL_UPDATE_REFERENCE 0] ? 1 : 0}]
 set skip_post_route_physopt [expr {[ax7203_env_or_default AX7203_INCREMENTAL_SKIP_POST_ROUTE_PHYSOPT 0] ? 1 : 0}]
+set incremental_directive [ax7203_env_or_default AX7203_INCREMENTAL_DIRECTIVE "RuntimeOptimized"]
+set place_directive [ax7203_env_or_default AX7203_INCREMENTAL_PLACE_DIRECTIVE "Quick"]
+set physopt_directive [ax7203_env_or_default AX7203_INCREMENTAL_PHYSOPT_DIRECTIVE "Explore"]
+set route_directive [ax7203_env_or_default AX7203_INCREMENTAL_ROUTE_DIRECTIVE "Quick"]
 
 set report_dir "$project_dir/reports"
 set checkpoint_dir "$project_dir/checkpoints"
@@ -104,6 +108,10 @@ puts "Update reference checkpoint on success: $update_reference_checkpoint"
 puts "Skip post-route phys_opt_design: $skip_post_route_physopt"
 puts "Implementation jobs: $impl_jobs"
 puts "Minimum parsed reuse threshold: ${min_reuse_pct}%"
+puts "Incremental directive: $incremental_directive"
+puts "Place directive: $place_directive"
+puts "Physopt directive: $physopt_directive"
+puts "Route directive: $route_directive"
 puts "ENABLE_MEM_SUBSYS: $enable_mem_subsys"
 puts "ENABLE_DDR3: $enable_ddr3"
 puts "SMT_MODE: $smt_mode"
@@ -130,24 +138,24 @@ set_property BITSTREAM.CONFIG.USR_ACCESS "0x$build_id" [current_design]
 puts "Phase 1: opt_design -directive Explore"
 opt_design -directive Explore
 
-puts "Phase 2: read_checkpoint -incremental"
-read_checkpoint -incremental $reference_checkpoint
+puts "Phase 2: read_checkpoint -directive $incremental_directive -incremental"
+read_checkpoint -directive $incremental_directive -incremental $reference_checkpoint
 
 set incremental_reuse_preplace "$report_dir/incremental_reuse_preplace.rpt"
 catch {report_incremental_reuse -file $incremental_reuse_preplace}
 set preplace_cell_reuse_pct [ax7203_parse_incremental_cell_reuse_pct $incremental_reuse_preplace]
 if {$preplace_cell_reuse_pct >= 0 && $preplace_cell_reuse_pct < $min_reuse_pct} {
     puts "ERROR: Incremental cell reuse ${preplace_cell_reuse_pct}% is below threshold ${min_reuse_pct}% before placement."
-    puts "Fallback: vivado.bat -mode batch -source fpga/impl_aggressive.tcl"
+    puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
     catch {close_design}
     exit 1
 }
 
 set incremental_reuse_place "$report_dir/incremental_reuse_place.rpt"
-puts "Phase 3: place_design -directive Quick"
-if {[catch {place_design -directive Quick} place_err]} {
+puts "Phase 3: place_design -directive $place_directive"
+if {[catch {place_design -directive $place_directive} place_err]} {
     puts "ERROR: Incremental place_design failed: $place_err"
-    puts "Fallback: vivado.bat -mode batch -source fpga/impl_aggressive.tcl"
+    puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
     catch {report_incremental_reuse -file $incremental_reuse_place}
     catch {write_checkpoint -force "$checkpoint_dir/${project_name}_incremental_place_failed.dcp"}
     catch {close_design}
@@ -155,14 +163,14 @@ if {[catch {place_design -directive Quick} place_err]} {
 }
 catch {report_incremental_reuse -file $incremental_reuse_place}
 
-puts "Phase 4: phys_opt_design -directive Explore"
-phys_opt_design -directive Explore
+puts "Phase 4: phys_opt_design -directive $physopt_directive"
+phys_opt_design -directive $physopt_directive
 
 set incremental_reuse_route "$report_dir/incremental_reuse_route.rpt"
-puts "Phase 5: route_design -directive Quick"
-if {[catch {route_design -directive Quick} route_err]} {
+puts "Phase 5: route_design -directive $route_directive"
+if {[catch {route_design -directive $route_directive} route_err]} {
     puts "ERROR: Incremental route_design failed: $route_err"
-    puts "Fallback: vivado.bat -mode batch -source fpga/impl_aggressive.tcl"
+    puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
     catch {report_incremental_reuse -file $incremental_reuse_route}
     catch {write_checkpoint -force "$checkpoint_dir/${project_name}_incremental_route_failed.dcp"}
     catch {close_design}
@@ -190,7 +198,7 @@ if {$reuse_pct < 0} {
 }
 if {$reuse_pct >= 0 && $reuse_pct < $min_reuse_pct} {
     puts "ERROR: Incremental reuse ${reuse_pct}% is below threshold ${min_reuse_pct}%."
-    puts "Fallback: vivado.bat -mode batch -source fpga/impl_aggressive.tcl"
+    puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
     write_checkpoint -force $incremental_route_checkpoint
     exit 1
 }
@@ -242,7 +250,7 @@ if {[llength $final_unrouted_nets] > 0} {
     puts "Build completed successfully!"
 } else {
     puts "TIMING NOT MET. WNS=$wns. Saving checkpoint for analysis."
-    puts "Fallback: vivado.bat -mode batch -source fpga/impl_aggressive.tcl"
+    puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
     write_checkpoint -force $incremental_route_checkpoint
 }
 
@@ -265,6 +273,10 @@ ax7203_write_evidence $evidence_file [list \
     "IncrementalRouteCheckpoint: $incremental_route_checkpoint" \
     "UpdateReferenceCheckpoint: $update_reference_checkpoint" \
     "SkipPostRoutePhysOpt: $skip_post_route_physopt" \
+    "IncrementalDirective: $incremental_directive" \
+    "PlaceDirective: $place_directive" \
+    "PhysOptDirective: $physopt_directive" \
+    "RouteDirective: $route_directive" \
     "ParsedReusePct: $reuse_pct" \
     "MinimumReusePct: $min_reuse_pct" \
     "WNS: $wns" \

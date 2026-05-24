@@ -30,9 +30,13 @@ For RTL-affecting work, use this order unless the user explicitly narrows the ta
 2. Verilator mainline second. Run it through the repository Python wrapper, not a hand-written Windows-native command. The wrapper uses WSL:
 
    ```powershell
-   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 1 --dcache-mode read-only --mock-latency 1
-   python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 1 --dcache-mode read-only --mock-latency 1
+   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
+   python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 2000000000 --require-board-config-match
    ```
+
+   The loader-semantic gate needs explicit host pacing and a large cycle budget because the board-profile loader intentionally waits through block ACK pacing, final store-drain delays, and board-runtime UART delays before and after the benchmark loop.
+
+   Dhrystone Verilator runs must report whether their configuration matches the current AX7203 board-test baseline: `SMT_MODE=0`, `ENABLE_MEM_SUBSYS=1`, `ENABLE_DDR3=1`, `L2_PASSTHROUGH=1`, `RS_DEPTH=48`, `FETCH_BUFFER_DEPTH=16`, 25 MHz core clock, 115200 UART, `AX7203_DCACHE_MODE=read-only`, `LOADER_ROM_PROFILE=board`, `BENCHMARK_RUNTIME_PROFILE=board`, `DHRYSTONE_RUNS=5000`, and loader-semantic host pacing `payload_start_gap=2500`, `payload_gap=2500`, `payload_chunk_gap=40000`. Use `--loader-rom-profile board`, `--benchmark-runtime-profile board`, and `--require-board-config-match` for board-equivalent gates; this forbids treating a `SIM_FAST_STORE_DRAIN` loader image, C runtime fast path, short Dhrystone run, or fast host pacing as board-ready evidence. The wrapper must write the board-config summary before checking WSL-side tools, so configuration mistakes remain visible even when Verilator itself is unavailable. Boundary runs that intentionally vary a parameter, such as `--dcache-mode full`, `--loader-rom-profile sim-fast`, `--benchmark-runtime-profile verilator-fast`, short Dhrystone run count, or fast loader pacing, must leave the mismatch visible in `summary.txt`/`summary.json` rather than pretending to be board-equivalent.
 
    If WSL Verilator is unavailable, report that as an environment blocker instead of silently skipping this step.
 
@@ -55,9 +59,40 @@ vvp out_iverilog\bin\tb_test1.out
 
 Run `vvp` from `comp_test\` when using ROM files generated under `rom\`, otherwise relative ROM loads can fail.
 
+## Dhrystone Debug Loop
+
+The current short-term target is Dhrystone. For Dhrystone work, this loop overrides the generic debug order above:
+
+1. Run WSL Verilator Dhrystone first. Both preload and loader-semantic modes must pass before attempting FPGA implementation:
+
+   ```powershell
+   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
+   python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 2000000000 --require-board-config-match
+   ```
+
+2. If Verilator fails, rerun the failing command with `--trace-on-stuck`, inspect `build/verilator/mainline/.../summary.txt` and `summary.json`, fix the RTL/root cause, then run the relevant Icarus directed/basic/`--fpga-config` tests before retrying Verilator.
+3. Only after the Verilator gates pass, enter Vivado 2023.2 incremental implementation:
+
+   ```powershell
+   python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5 --rs-depth 48 --fetch-buffer-depth 16 --core-clk-mhz 25.0 --fpga-impl-mode incremental --capture-seconds 240
+   ```
+
+4. If incremental implementation fails once, inspect the current logs and make the smallest environment or RTL fix justified by evidence, then retry once. `--fpga-impl-mode incremental` must fail closed; do not auto-fallback to aggressive implementation from the benchmark script.
+5. If incremental implementation fails twice in a row, stop retrying Vivado and fall back to the Verilator boundary matrix:
+
+   ```powershell
+   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 7 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 1200000000 --require-board-config-match
+   python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode full --mock-latency 1 --benchmark-runtime-profile board --max-cycles 600000000
+   python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 7 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 3000000000 --require-board-config-match
+   ```
+
+   All boundary runs must pass before returning to incremental implementation. Reset the consecutive incremental failure count only after this Verilator matrix passes. The `full` dcache row is a deliberate non-board-equivalent stress run; its summary must show the dcache mismatch.
+
 ## Commit & Pull Request Guidelines
 
 Recent history uses short imperative summaries, sometimes with subsystem context, such as `Enhance ROB and IF stages`. Keep commits focused and state the behavioral change. Pull requests should describe touched RTL/test areas, list exact commands run and results, note FPGA board status when relevant, and link issues or waveform/log excerpts for bugs.
+
+Wiki and documentation updates are part of the deliverable. Whenever `wiki/`, `AGENTS.md`, `CLAUDE.md`, `README*`, `docs/`, or other project documentation is changed, include those files in the same Git/GitHub submission as the related RTL/script/debug change. If the user has authorized staging, committing, pushing, or PR creation, stage and submit the documentation together with the related change. If commits or pushes are not authorized in the current turn, explicitly report the documentation files that must be included in the next GitHub commit/PR; do not silently leave wiki/docs as local-only changes.
 
 ## Agent-Specific Instructions
 
@@ -74,12 +109,14 @@ Wiki sync triggers:
 - Update `wiki/INDEX.md` when project status, quick commands, environment assumptions, or current blockers change.
 - Update the relevant `wiki/concepts/*.md` page when an architectural, timing, memory, simulation, or tool-flow lesson changes.
 - Append to the current `wiki/devlog/YYYY-MM.md` entry in reverse chronological order. Devlogs are append-only: do not rewrite old entries except to fix typos that do not change meaning.
+- Treat wiki and documentation changes as GitHub submission material. They must travel with the same commit/PR as the code or debug conclusion they document, or be called out explicitly as pending documentation files when the user has not authorized a commit/push.
 
 R1 anti-patterns:
 
 - Do not say "sync later", "document later", or leave wiki updates for another agent.
 - Do not record only generated log paths without the conclusion they support.
 - Do not claim board or benchmark status from stale files; include timestamps/build IDs when the distinction matters.
+- Do not update wiki/docs locally and then omit them from the GitHub commit/PR for the same change.
 - Do not use Vivado 2024.2 for this AX7203 flow unless the user explicitly changes the rule. This repo is to be implemented with Vivado 2023.2 for consistency.
 - Do not hide failed hypotheses. Mark them as ruled out with the evidence that ruled them out.
 
@@ -92,5 +129,5 @@ If a source change truly does not affect the wiki, state that explicitly in the 
 - AX7203 bitstream download must use Vivado JTAG mode, normally through `fpga/program_ax7203_jtag.tcl` or the board automation scripts that call it.
 - Recent Vivado 2023.2 implementation attempts have failed at the process level with `The system cannot find the path specified` during place/route or incremental reuse database creation. Treat that as an environment/tool-flow failure until a current Tcl log proves an RTL/DRC/timing failure.
 - When retrying Vivado implementation, use explicit `-log`/`-journal` paths and a short local `TEMP`/`TMP` such as `build\vivado_tmp` to avoid overwritten logs and path-related failures.
-- Verilator mainline is a WSL flow. Use `python fpga/scripts/run_verilator_mainline.py`; it calls `wsl.exe` and checks for WSL-side `verilator`, `make`, and `g++`. Do not invent a Windows-native Verilator flow.
+- Verilator mainline is a WSL flow. Use `python fpga/scripts/run_verilator_mainline.py`; it calls `wsl.exe` and checks for WSL-side `verilator`, `make`, and `g++`. Do not invent a Windows-native Verilator flow. On 2026-05-24, `wsl.exe -l -v` shows `Ubuntu-22.04 Running`, and the wrapper finds Verilator 5.046 at `/usr/local/bin/verilator`, `/usr/bin/make`, and `/usr/bin/g++`.
 - COM5 is the expected CP210x UART for AX7203 board work. Only one process can own COM5; close terminals and stale Python scripts before board automation.
