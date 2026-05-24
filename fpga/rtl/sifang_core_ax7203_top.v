@@ -1,6 +1,6 @@
 // =============================================================================
-// Module : adam_riscv_ax7203_top
-// Description: AX7203 FPGA Top-Level Wrapper for AdamRISC-V Processor
+// Module : sifang_core_ax7203_top
+// Description: AX7203 FPGA Top-Level Wrapper for SifangCore Processor
 //   Target Board: ALINX AX7203 (XC7A200T-2FBG484I)
 //   Clock: 200MHz differential (SiT9102-200.00MHz)
 //
@@ -11,14 +11,14 @@
 //   - Exposes UART TX/RX for CP2102 USB-UART bridge
 //   - Routes the core's MMIO UART TX to the CP2102 bridge
 //   - Stretches UART TX edges onto LED[4] for visible board debug
-//   - Instantiates adam_riscv core with FPGA_MODE enabled
+//   - Instantiates sifang_core core with FPGA_MODE enabled
 // =============================================================================
 
 `ifndef FPGA_MODE
     `define FPGA_MODE 1
 `endif
 
-module adam_riscv_ax7203_top (
+module sifang_core_ax7203_top (
     input  wire sys_clk_p,      // 200MHz differential P (Pin R4, Bank 34)
     input  wire sys_clk_n,      // 200MHz differential N (Pin T4, Bank 34)
     input  wire sys_rst_n,      // Active-low reset (Pin T6)
@@ -64,7 +64,7 @@ IBUFGDS clk_ibufgds (
     .IB (sys_clk_n   )
 );
 
-// Note: clk_wiz_0 is instantiated inside adam_riscv when FPGA_MODE is defined
+// Note: clk_wiz_0 is instantiated inside sifang_core when FPGA_MODE is defined
 // We use sys_clk_200m directly; the core handles clock generation internally
 
 // =============================================================================
@@ -132,7 +132,7 @@ wire        mig_init_calib_complete;
 // 2. Instantiate syn_rst for reset synchronization
 // We pass the raw 200MHz clock and external reset to the core.
 (* DONT_TOUCH = "TRUE", KEEP_HIERARCHY = "TRUE" *)
-adam_riscv u_adam_riscv (
+sifang_core u_sifang_core (
     .sys_clk   (sys_clk_200m),  // 200MHz from IBUFGDS (core has clk_wiz_0 inside)
     .sys_rstn  (core_rst_n  ),  // POR-gated active-low reset into the core
     .uart_rx   (uart_rx     ),
@@ -329,7 +329,7 @@ wire [1:0]  mig_s_axi_rresp;
 wire        mig_s_axi_rlast;
 
 // ── CDC + AXI Bridge: core clock → MIG ui_clk ──
-// The bridge converts the simple req/resp protocol from adam_riscv (core_clk
+// The bridge converts the simple req/resp protocol from sifang_core (core_clk
 // domain, ~10 MHz) to AXI4-256 bit transactions on the MIG ui_clk (~100 MHz).
 // It handles async handshake CDC and 32-bit ↔ 256-bit lane steering.
 ddr3_mem_port #(
@@ -338,8 +338,8 @@ ddr3_mem_port #(
     .AXI_ID_W   (4)
 ) u_ddr3_mem_port (
     // Core clock domain
-    .core_clk           (core_clk_dbg),       // Core clock from adam_riscv debug output
-    .core_rstn          (core_ready),          // Core reset from adam_riscv debug output
+    .core_clk           (core_clk_dbg),       // Core clock from sifang_core debug output
+    .core_rstn          (core_ready),          // Core reset from sifang_core debug output
 
     .req_valid          (core_ddr3_req_valid),
     .req_ready          (core_ddr3_req_ready),
@@ -486,8 +486,8 @@ mig_7series_0 u_mig (
 );
 
 `else
-// When DDR3 is not enabled, declare the wires so the adam_riscv instantiation
-// above compiles cleanly (the ifdef in adam_riscv ports removes them anyway).
+// When DDR3 is not enabled, declare the wires so the sifang_core instantiation
+// above compiles cleanly (the ifdef in sifang_core ports removes them anyway).
 wire        core_ddr3_req_valid;
 wire        core_ddr3_req_ready  = 1'b0;
 wire [31:0] core_ddr3_req_addr;

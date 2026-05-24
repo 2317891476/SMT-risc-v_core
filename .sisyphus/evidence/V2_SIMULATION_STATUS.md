@@ -17,7 +17,7 @@ V2 simulation infrastructure has been fixed to correctly fetch instructions thro
 - Fixed resp_valid_r to be valid on first cycle of miss (when state == S_IDLE && !hit)
 - Ensures bypass_data is accepted on the first miss
 
-### 4. rtl/adam_riscv_v2.v
+### 4. rtl/sifang_core_v2.v
 - Changed USE_MEM_SUBSYS from 0 to 1 to enable mem_subsys for TUBE write detection
 
 ### 5. comp_test/tb_v2.sv

@@ -53,9 +53,9 @@
   "only_v12": [],
   "common": [
     {
-      "file": "adam_riscv.v",
-      "rtl_path": "E:\\SMT-risc-v_core\\rtl\\adam_riscv.v",
-      "v12_path": "E:\\SMT-risc-v_core\\module\\core\\RTL_V1_2\\adam_riscv.v",
+      "file": "sifang_core.v",
+      "rtl_path": "E:\\SMT-risc-v_core\\rtl\\sifang_core.v",
+      "v12_path": "E:\\SMT-risc-v_core\\module\\core\\RTL_V1_2\\sifang_core.v",
       "rtl_size": 28298,
       "v12_size": 28298,
       "rtl_mtime": "2026-03-25 04:39:27",
@@ -66,9 +66,9 @@
       "update_side": "same"
     },
     {
-      "file": "adam_riscv_v2.v",
-      "rtl_path": "E:\\SMT-risc-v_core\\rtl\\adam_riscv_v2.v",
-      "v12_path": "E:\\SMT-risc-v_core\\module\\core\\RTL_V1_2\\adam_riscv_v2.v",
+      "file": "sifang_core_v2.v",
+      "rtl_path": "E:\\SMT-risc-v_core\\rtl\\sifang_core_v2.v",
+      "v12_path": "E:\\SMT-risc-v_core\\module\\core\\RTL_V1_2\\sifang_core_v2.v",
       "rtl_size": 47274,
       "v12_size": 35014,
       "rtl_mtime": "2026-03-25 12:07:09",
@@ -78,7 +78,7 @@
       "identical": false,
       "diff_added_in_v12": 102,
       "diff_removed_from_rtl": 388,
-      "diff_sample": "--- rtl/adam_riscv_v2.v\n\n+++ RTL_V1_2/adam_riscv_v2.v\n\n@@ -10,4 +10,2 @@\n\n //   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+AGU) → MEM → WB\n-\n-`include \"define_v2.v\"\n //\n@@ -86,34 +84,2 @@\n\n );\n-\n-// ════════════════════════════════════════════════════════════════════════════\n-// Per-Thread Metadata Counters (order_id and epoch)\n-// ════════════════════════════════════════════════════════════════════════════\n-// Epoch counters: increment on flush per thread, 8-bit wide",
+      "diff_sample": "--- rtl/sifang_core_v2.v\n\n+++ RTL_V1_2/sifang_core_v2.v\n\n@@ -10,4 +10,2 @@\n\n //   ExecPipe0 (INT+Branch) / ExecPipe1 (INT+MUL+AGU) → MEM → WB\n-\n-`include \"define_v2.v\"\n //\n@@ -86,34 +84,2 @@\n\n );\n-\n-// ════════════════════════════════════════════════════════════════════════════\n-// Per-Thread Metadata Counters (order_id and epoch)\n-// ════════════════════════════════════════════════════════════════════════════\n-// Epoch counters: increment on flush per thread, 8-bit wide",
       "update_side": "rtl_newer"
     },
     {
@@ -687,7 +687,7 @@
   ],
   "summary": {
     "rtl_newer": [
-      "adam_riscv_v2.v",
+      "sifang_core_v2.v",
       "define_v2.v",
       "exec_pipe1.v",
       "inst_memory.v",
@@ -697,7 +697,7 @@
     ],
     "v12_newer": [],
     "identical": [
-      "adam_riscv.v",
+      "sifang_core.v",
       "alu.v",
       "alu_control.v",
       "bpu_bimodal.v",

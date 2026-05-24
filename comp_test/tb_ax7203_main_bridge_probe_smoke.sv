@@ -18,7 +18,7 @@ module tb_ax7203_main_bridge_probe_smoke;
     reg uart_tx_q;
     localparam integer TB_TIMEOUT_NS = 20_000_000;
 
-    adam_riscv_ax7203_main_bridge_probe_top dut (
+    sifang_core_ax7203_main_bridge_probe_top dut (
         .sys_clk_p(sys_clk_p),
         .sys_clk_n(sys_clk_n),
         .sys_rst_n(sys_rst_n),

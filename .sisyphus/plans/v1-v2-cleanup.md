@@ -139,7 +139,7 @@ Max Concurrent: 6 (Wave 3)
 - [ ] **Task 1: 删除V1核心RTL文件**
 
   **What to do**:
-  - 删除V1顶层模块：`rtl/adam_riscv.v`
+  - 删除V1顶层模块：`rtl/sifang_core.v`
   - 删除V1记分牌：`rtl/scoreboard.v`
   - 删除V1取指级：`rtl/stage_if.v`
   - 删除V1指令存储器：`rtl/inst_memory.v`
@@ -149,7 +149,7 @@ Max Concurrent: 6 (Wave 3)
 
   **Must NOT do**:
   - 不要删除共用模块（syn_rst.v, thread_scheduler.v等）
-  - 不要删除V2文件（adam_riscv_v2.v等）
+  - 不要删除V2文件（sifang_core_v2.v等）
   - 不要删除.git目录或修改历史
 
   **Recommended Agent Profile**:
@@ -164,12 +164,12 @@ Max Concurrent: 6 (Wave 3)
   - **Blocked By**: None（可立即开始）
 
   **References**:
-  - `rtl/adam_riscv.v` - V1顶层，有序单发射架构
-  - `rtl/adam_riscv_v2.v` - V2顶层（保留）
+  - `rtl/sifang_core.v` - V1顶层，有序单发射架构
+  - `rtl/sifang_core_v2.v` - V2顶层（保留）
   - Draft文件中的"V1专属文件"清单
 
   **Acceptance Criteria**:
-  - [ ] `ls rtl/adam_riscv.v` 返回文件不存在
+  - [ ] `ls rtl/sifang_core.v` 返回文件不存在
   - [ ] `ls rtl/scoreboard.v` 返回文件不存在
   - [ ] `ls rtl/stage_if.v` 返回文件不存在
   - [ ] `ls rtl/inst_memory.v` 返回文件不存在
@@ -183,7 +183,7 @@ Max Concurrent: 6 (Wave 3)
   Scenario: 确认V1核心文件已删除
     Tool: Bash
     Steps:
-      1. ls rtl/adam_riscv.v 2>&1 | grep "No such file"
+      1. ls rtl/sifang_core.v 2>&1 | grep "No such file"
       2. ls rtl/scoreboard.v 2>&1 | grep "No such file"
       3. ls rtl/stage_if.v 2>&1 | grep "No such file"
     Expected Result: 所有命令都返回"No such file or directory"
@@ -344,7 +344,7 @@ Max Concurrent: 6 (Wave 3)
 - [ ] **Task 5: 重命名V2核心RTL文件**
 
   **What to do**:
-  - 重命名：`rtl/adam_riscv_v2.v` → `rtl/adam_riscv.v`
+  - 重命名：`rtl/sifang_core_v2.v` → `rtl/sifang_core.v`
   - 重命名：`rtl/stage_if_v2.v` → `rtl/stage_if.v`
   - 重命名：`rtl/inst_memory_v2.v` → `rtl/inst_memory.v`
   - 重命名：`rtl/scoreboard_v2.v` → `rtl/scoreboard.v`
@@ -365,14 +365,14 @@ Max Concurrent: 6 (Wave 3)
   - **Blocked By**: Wave 1（V1文件删除完成）
 
   **References**:
-  - `rtl/adam_riscv_v2.v` - V2顶层模块
+  - `rtl/sifang_core_v2.v` - V2顶层模块
   - `rtl/stage_if_v2.v` - V2取指级
   - `rtl/inst_memory_v2.v` - V2指令存储器
   - `rtl/scoreboard_v2.v` - V2记分牌
 
   **Acceptance Criteria**:
-  - [ ] `ls rtl/adam_riscv.v` 存在
-  - [ ] `ls rtl/adam_riscv_v2.v` 不存在
+  - [ ] `ls rtl/sifang_core.v` 存在
+  - [ ] `ls rtl/sifang_core_v2.v` 不存在
   - [ ] `ls rtl/stage_if.v` 存在
   - [ ] `ls rtl/inst_memory.v` 存在
   - [ ] `ls rtl/scoreboard.v` 存在
@@ -383,8 +383,8 @@ Max Concurrent: 6 (Wave 3)
   Scenario: 确认核心RTL文件已重命名
     Tool: Bash
     Steps:
-      1. ls rtl/adam_riscv.v && echo "NEW EXISTS"
-      2. ls rtl/adam_riscv_v2.v 2>&1 | grep "No such file"
+      1. ls rtl/sifang_core.v && echo "NEW EXISTS"
+      2. ls rtl/sifang_core_v2.v 2>&1 | grep "No such file"
       3. git status --short | grep "renamed" | wc -l
     Expected Result: 新文件存在，旧文件不存在，git显示rename状态
     Evidence: .sisyphus/evidence/task-5-rtl-renamed.txt
@@ -398,8 +398,8 @@ Max Concurrent: 6 (Wave 3)
   **What to do**:
   对于每个重命名的文件，更新内部的module声明和实例化引用：
   
-  1. **adam_riscv_v2.v → adam_riscv.v**:
-     - 修改：`module adam_riscv_v2` → `module adam_riscv`
+  1. **sifang_core_v2.v → sifang_core.v**:
+     - 修改：`module sifang_core_v2` → `module sifang_core`
      - 修改：所有内部实例化的模块名（如有_self引用）
   
   2. **stage_if_v2.v → stage_if.v**:
@@ -426,14 +426,14 @@ Max Concurrent: 6 (Wave 3)
   - **Blocked By**: Task 5（文件重命名）
 
   **References**:
-  - `rtl/adam_riscv_v2.v` 第20行左右: `module adam_riscv_v2`
+  - `rtl/sifang_core_v2.v` 第20行左右: `module sifang_core_v2`
   - `rtl/stage_if_v2.v` - module声明
   - `rtl/inst_memory_v2.v` - module声明
   - `rtl/scoreboard_v2.v` - module声明
 
   **Acceptance Criteria**:
-  - [ ] `grep "module adam_riscv_v2" rtl/adam_riscv.v` 返回空
-  - [ ] `grep "module adam_riscv" rtl/adam_riscv.v` 返回匹配
+  - [ ] `grep "module sifang_core_v2" rtl/sifang_core.v` 返回空
+  - [ ] `grep "module sifang_core" rtl/sifang_core.v` 返回匹配
   - [ ] 同理检查其他3个文件
 
   **QA Scenarios**:
@@ -441,8 +441,8 @@ Max Concurrent: 6 (Wave 3)
   Scenario: 确认模块名已更新
     Tool: Bash (grep)
     Steps:
-      1. grep "^module adam_riscv_v2" rtl/adam_riscv.v || echo "OLD NAME NOT FOUND - GOOD"
-      2. grep "^module adam_riscv[^_]" rtl/adam_riscv.v && echo "NEW NAME FOUND - GOOD"
+      1. grep "^module sifang_core_v2" rtl/sifang_core.v || echo "OLD NAME NOT FOUND - GOOD"
+      2. grep "^module sifang_core[^_]" rtl/sifang_core.v && echo "NEW NAME FOUND - GOOD"
       3. grep "^module stage_if_v2" rtl/stage_if.v || echo "NOT FOUND"
       4. grep "^module scoreboard_v2" rtl/scoreboard.v || echo "NOT FOUND"
     Expected Result: 旧模块名不存在，新模块名存在
@@ -480,7 +480,7 @@ Max Concurrent: 6 (Wave 3)
   **References**:
   - `rtl/define.v` - 基础宏定义
   - `rtl/define_v2.v` - V2扩展定义（包含define.v）
-  - `rtl/adam_riscv_v2.v` - 引用define_v2.v
+  - `rtl/sifang_core_v2.v` - 引用define_v2.v
 
   **Acceptance Criteria**:
   - [ ] define_v2.v中的V2特有宏已转移到define.v
@@ -507,7 +507,7 @@ Max Concurrent: 6 (Wave 3)
   **What to do**:
   1. 读取`comp_test/module_list_v2`
   2. 更新所有`_v2`后缀的引用：
-     - `adam_riscv_v2.v` → `adam_riscv.v`
+     - `sifang_core_v2.v` → `sifang_core.v`
      - `stage_if_v2.v` → `stage_if.v`
      - `inst_memory_v2.v` → `inst_memory.v`
      - `scoreboard_v2.v` → `scoreboard.v`
@@ -529,7 +529,7 @@ Max Concurrent: 6 (Wave 3)
   - **Blocked By**: Task 5-7（RTL文件和define处理完成）
 
   **References**:
-  - `comp_test/module_list_v2` - 第5行: `../rtl/adam_riscv_v2.v`
+  - `comp_test/module_list_v2` - 第5行: `../rtl/sifang_core_v2.v`
   - `comp_test/module_list` - 原V1模块列表（已删除）
 
   **Acceptance Criteria**:
@@ -546,7 +546,7 @@ Max Concurrent: 6 (Wave 3)
       1. ls comp_test/module_list | grep "module_list$"
       2. ls comp_test/module_list_v2 2>&1 | grep "No such file"
       3. grep "_v2\.v" comp_test/module_list | wc -l
-      4. grep "adam_riscv\.v" comp_test/module_list &>/dev/null && echo "OK"
+      4. grep "sifang_core\.v" comp_test/module_list &>/dev/null && echo "OK"
     Expected Result: module_list存在，module_list_v2不存在，无_v2引用，有标准名称
     Evidence: .sisyphus/evidence/task-8-module-list-updated.txt
   ```
@@ -606,9 +606,9 @@ Max Concurrent: 6 (Wave 3)
   **What to do**:
   1. **tb.sv**（原tb_v2.sv）：
      - 修改：`module tb_v2` → `module tb`
-     - 修改：`adam_riscv_v2 u_adam_riscv_v2` → `adam_riscv u_adam_riscv`
+     - 修改：`sifang_core_v2 u_sifang_core_v2` → `sifang_core u_sifang_core`
      - 修改：`$dumpfile("tb_v2.vcd")` → `$dumpfile("tb.vcd")`
-     - 修改：`define TB_IROM tb_v2.u_adam_riscv_v2` → `define TB_IROM tb.u_adam_riscv`
+     - 修改：`define TB_IROM tb_v2.u_sifang_core_v2` → `define TB_IROM tb.u_sifang_core`
   
   2. **tb_debug.sv**（原tb_v2_debug.sv）：
      - 类似修改：模块名、实例化名、VCD文件名
@@ -628,12 +628,12 @@ Max Concurrent: 6 (Wave 3)
 
   **References**:
   - `comp_test/tb_v2.sv` 第28行: `module tb_v2`
-  - `comp_test/tb_v2.sv` 第40行: `adam_riscv_v2 u_adam_riscv_v2`
+  - `comp_test/tb_v2.sv` 第40行: `sifang_core_v2 u_sifang_core_v2`
   - `comp_test/tb_v2.sv` 第49行: `$dumpfile("tb_v2.vcd")`
 
   **Acceptance Criteria**:
   - [ ] tb.sv中无`tb_v2`字符串
-  - [ ] tb.sv中无`adam_riscv_v2`字符串
+  - [ ] tb.sv中无`sifang_core_v2`字符串
   - [ ] tb.sv中无`tb_v2.vcd`字符串
   - [ ] tb_debug.sv同样检查通过
 
@@ -642,7 +642,7 @@ Max Concurrent: 6 (Wave 3)
   Scenario: 确认测试文件内部引用已更新
     Tool: Bash (grep)
     Steps:
-      1. grep "tb_v2\|adam_riscv_v2" comp_test/tb.sv | wc -l
+      1. grep "tb_v2\|sifang_core_v2" comp_test/tb.sv | wc -l
       2. grep "^module tb[^_]" comp_test/tb.sv &>/dev/null && echo "Module name OK"
       3. grep "tb\.vcd" comp_test/tb.sv &>/dev/null && echo "VCD name OK"
     Expected Result: grep计数为0，模块名和VCD名已更新
@@ -763,7 +763,7 @@ Max Concurrent: 6 (Wave 3)
      - `vvp out_iverilog/bin/tb_v2_test.out` → `vvp out_iverilog/bin/tb_test.out`
   
   2. **verification/run_riscv_tests.py**（多处）：
-     - 第3行：注释 `"AdamRiscv V2"` → `"AdamRiscv"`
+     - 第3行：注释 `"SifangCore V2"` → `"SifangCore"`
      - 第271行：`"Run the V2 simulation"` → `"Run the simulation"`
      - 第273-275行：编译命令中的`tb_v2`和`tb_v2_riscv_test.out`
      - 第283行：vvp命令中的`tb_v2_riscv_test.out`
@@ -786,7 +786,7 @@ Max Concurrent: 6 (Wave 3)
 
   **Acceptance Criteria**:
   - [ ] 两个脚本中无`tb_v2`引用
-  - [ ] 两个脚本中无`AdamRiscv V2`字符串（除了历史记录）
+  - [ ] 两个脚本中无`SifangCore V2`字符串（除了历史记录）
   - [ ] Python语法正确
 
   **QA Scenarios**:
@@ -810,15 +810,15 @@ Max Concurrent: 6 (Wave 3)
   修改FPGA相关TCL脚本：
   
   1. **fpga/create_project_ax7203.tcl**（第180行）：
-     - `set_property top adam_riscv_v2_ax7203_top` → `adam_riscv_ax7203_top`
+     - `set_property top sifang_core_v2_ax7203_top` → `sifang_core_ax7203_top`
      - 第157行注释更新（如有V2提及）
   
   2. **fpga/program_ax7203_jtag.tcl**（第15行）：
-     - `adam_riscv_v2_ax7203_top.bit` → `adam_riscv_ax7203_top.bit`
+     - `sifang_core_v2_ax7203_top.bit` → `sifang_core_ax7203_top.bit`
   
   3. **检查**：`fpga/build_ax7203_bitstream.tcl` 是否需要修改
   
-  4. **重命名**：`fpga/rtl/adam_riscv_v2_ax7203_top.v` → `adam_riscv_ax7203_top.v`
+  4. **重命名**：`fpga/rtl/sifang_core_v2_ax7203_top.v` → `sifang_core_ax7203_top.v`
      - 更新文件内部的module名
 
   **Must NOT do**:
@@ -837,21 +837,21 @@ Max Concurrent: 6 (Wave 3)
   **References**:
   - `fpga/create_project_ax7203.tcl`
   - `fpga/program_ax7203_jtag.tcl`
-  - `fpga/rtl/adam_riscv_v2_ax7203_top.v`
+  - `fpga/rtl/sifang_core_v2_ax7203_top.v`
 
   **Acceptance Criteria**:
   - [ ] FPGA顶层文件已重命名
   - [ ] TCL脚本中的模块名和文件名已更新
-  - [ ] 无`adam_riscv_v2`引用
+  - [ ] 无`sifang_core_v2`引用
 
   **QA Scenarios**:
   ```
   Scenario: 确认FPGA脚本已更新
     Tool: Bash (grep + ls)
     Steps:
-      1. ls fpga/rtl/adam_riscv_ax7203_top.v && echo "File renamed"
-      2. grep "adam_riscv_v2" fpga/*.tcl | wc -l
-      3. grep "adam_riscv_ax7203_top" fpga/create_project_ax7203.tcl | wc -l
+      1. ls fpga/rtl/sifang_core_ax7203_top.v && echo "File renamed"
+      2. grep "sifang_core_v2" fpga/*.tcl | wc -l
+      3. grep "sifang_core_ax7203_top" fpga/create_project_ax7203.tcl | wc -l
     Expected Result: 文件存在，tcl脚本无v2引用，有新模块名
     Evidence: .sisyphus/evidence/task-14-fpga-scripts-updated.txt
   ```
@@ -871,7 +871,7 @@ Max Concurrent: 6 (Wave 3)
      - 保留当前架构的描述
   
   2. **更新文件列表**（第94-122行）：
-     - `adam_riscv_v2.v` → `adam_riscv.v`
+     - `sifang_core_v2.v` → `sifang_core.v`
      - 删除所有`# ★ V2`等标签
      - 统一描述为当前架构
   
@@ -924,7 +924,7 @@ Max Concurrent: 6 (Wave 3)
     Steps:
       1. grep -i "v1 vs v2\|v1 和 v2\|V1 and V2" README.md | wc -l
       2. grep "# ★ V2" README.md | wc -l
-      3. grep "adam_riscv_v2\.v" README.md | wc -l
+      3. grep "sifang_core_v2\.v" README.md | wc -l
       4. grep "scoreboard_v2" README.md | wc -l
     Expected Result: 所有计数为0
     Evidence: .sisyphus/evidence/task-15-readme-updated.txt
@@ -1129,11 +1129,11 @@ Max Concurrent: 6 (Wave 3)
 ### Verification Commands
 ```bash
 # 1. 验证V1文件已删除
-git ls-files | grep -E "(adam_riscv\.v|scoreboard\.v|stage_if\.v|inst_memory\.v|stage_id\.v|stage_ro\.v|stage_ex\.v)$"
+git ls-files | grep -E "(sifang_core\.v|scoreboard\.v|stage_if\.v|inst_memory\.v|stage_id\.v|stage_ro\.v|stage_ex\.v)$"
 # Expected: 无输出（V1核心文件不存在）
 
 # 2. 验证V2文件已重命名
-ls rtl/adam_riscv.v rtl/stage_if.v rtl/inst_memory.v rtl/scoreboard.v 2>/dev/null
+ls rtl/sifang_core.v rtl/stage_if.v rtl/inst_memory.v rtl/scoreboard.v 2>/dev/null
 # Expected: 所有文件存在
 
 # 3. 验证仿真编译

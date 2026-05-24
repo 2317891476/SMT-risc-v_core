@@ -45,7 +45,7 @@ This document specifies the observability interfaces required for AX7203 FPGA br
 Minimum required output on boot:
 ```
 ================================
-AdamRiscv AX7203 Boot
+SifangCore AX7203 Boot
 ================================
 SYS_CLK: 200MHz
 DDR: SKIP (BRAM mode)

@@ -79,7 +79,7 @@
 ### Output Formats
 1. Smoke Test Banner:
    ```
-   AdamRiscv AX7203 Boot
+   SifangCore AX7203 Boot
    SYS_CLK: 200MHz
    Status: OK
    ```

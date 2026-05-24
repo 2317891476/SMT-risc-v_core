@@ -6,12 +6,12 @@ set script_dir [file dirname [info script]]
 source "$script_dir/flow_common.tcl"
 
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
-set project_name "adam_riscv_ax7203"
-set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
+set project_name "sifang_core_ax7203"
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "sifang_core_ax7203_top"]
 
 # Parse arguments
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
-if {$top_module eq "adam_riscv_ax7203_top"} {
+if {$top_module eq "sifang_core_ax7203_top"} {
     set default_bitstream "$project_dir/${project_name}_${target_part}.bit"
     set build_id_file "$project_dir/${project_name}_bitstream_id.txt"
 } else {

@@ -24,7 +24,7 @@ module tb_ax7203_top_smoke;
     wire [7:0] ext_uart_byte;
     localparam integer TB_TIMEOUT_NS = 20_000_000;
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p (sys_clk_p),
         .sys_clk_n (sys_clk_n),
         .sys_rst_n (sys_rst_n),

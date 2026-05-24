@@ -63,7 +63,7 @@ module tb_ax7203_top_ddr3_fetch_probe_smoke;
     wire board_uart_byte_valid;
     wire [7:0] board_uart_byte;
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p   (sys_clk_p),
         .sys_clk_n   (sys_clk_n),
         .sys_rst_n   (sys_rst_n),

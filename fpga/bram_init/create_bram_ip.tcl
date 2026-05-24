@@ -15,7 +15,7 @@ if {[file exists $bram_flow_common]} {
     ax7203_apply_vivado_threads [ax7203_vivado_jobs AX7203_MAX_THREADS]
 }
 
-set bram_project_name "adam_riscv_ax7203_bram_ip"
+set bram_project_name "sifang_core_ax7203_bram_ip"
 set bram_project_dir [file normalize [file join $bram_repo_root "build" "ax7203_bram_ip"]]
 
 set bram_target_part "xc7a200t-2fbg484i"

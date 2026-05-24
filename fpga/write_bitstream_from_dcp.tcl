@@ -6,10 +6,10 @@ source "$script_dir/flow_common.tcl"
 
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
-set default_dcp "$project_dir/checkpoints/adam_riscv_ax7203_incremental_route.dcp"
+set default_dcp "$project_dir/checkpoints/sifang_core_ax7203_incremental_route.dcp"
 set routed_dcp [file normalize [ax7203_env_or_default ROUTED_DCP $default_dcp]]
-set bitstream_file [file normalize [ax7203_env_or_default BITSTREAM_FILE "$project_dir/adam_riscv_ax7203_diagnostic_${target_part}.bit"]]
-set build_id_file [file normalize [ax7203_env_or_default BUILD_ID_FILE "$project_dir/adam_riscv_ax7203_diagnostic_bitstream_id.txt"]]
+set bitstream_file [file normalize [ax7203_env_or_default BITSTREAM_FILE "$project_dir/sifang_core_ax7203_diagnostic_${target_part}.bit"]]
+set build_id_file [file normalize [ax7203_env_or_default BUILD_ID_FILE "$project_dir/sifang_core_ax7203_diagnostic_bitstream_id.txt"]]
 set timing_report [file normalize [ax7203_env_or_default TIMING_REPORT "$project_dir/reports/timing_summary_diagnostic_from_dcp.rpt"]]
 set route_report [file normalize [ax7203_env_or_default ROUTE_REPORT "$project_dir/reports/route_status_diagnostic_from_dcp.rpt"]]
 

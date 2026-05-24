@@ -4,7 +4,7 @@
 > **Summary**: Repair the current implementation by replacing test-passing shortcuts with the architecture promised in the original plan: true ROB commit, end-to-end `{tid, order_id, epoch}` metadata, conservative Store Buffer semantics, and frontend stale-response rejection.
 > **Deliverables**:
 > - `rtl/` confirmed as the only implementation tree
-> - true ROB commit boundary integrated in `rtl/adam_riscv_v2.v`
+> - true ROB commit boundary integrated in `rtl/sifang_core_v2.v`
 > - queue bookkeeping fixed in `rtl/rob_lite.v` and `rtl/store_buffer.v`
 > - subword-correct store-to-load forwarding and older-store stall behavior
 > - per-thread frontend flush isolation, aligned fetch metadata, and stale-response suppression
@@ -36,7 +36,7 @@
 
 ### Deliverables
 - `rtl/` 成为唯一实现树；`comp_test/module_list_v2`、bench preload 路径、回归脚本只指向这一棵树。
-- `rtl/adam_riscv_v2.v` 中不再存在 immediate-commit / WB-as-retire shortcut。
+- `rtl/sifang_core_v2.v` 中不再存在 immediate-commit / WB-as-retire shortcut。
 - `rtl/rob_lite.v` 真正接入顶层：dispatch allocate、WB complete、head-only commit、flush skip。
 - `{tid, order_id, epoch}` 从 dispatch 贯穿到 scoreboard、LSU、Store Buffer、IF response。
 - `rtl/store_buffer.v` 仅在 ROB commit 授权后 drain；flush 后不会 deadlock，也不会错误保持 count/head。
@@ -157,12 +157,12 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   - Pattern: `rtl/scoreboard_v2.v:757-799` — dispatch allocation anchor
   - Pattern: `rtl/scoreboard_v2.v:727-739` — per-thread flush cleanup anchor
   - Pattern: `rtl/exec_pipe1.v:171-182` — memory request metadata boundary
-  - Pattern: `rtl/adam_riscv_v2.v:590-649` — top-level memory metadata wiring
+  - Pattern: `rtl/sifang_core_v2.v:590-649` — top-level memory metadata wiring
   - Pattern: `rtl/stage_if_v2.v:115-134` — IF response bookkeeping
-  - Pattern: `rtl/adam_riscv_v2.v:703-713` — known placeholder/hardwire zone from prior review
+  - Pattern: `rtl/sifang_core_v2.v:703-713` — known placeholder/hardwire zone from prior review
 
   **Acceptance Criteria** (agent-executable only):
-  - [ ] No `req_order_id`, `req_epoch`, `flush_new_epoch_*`, or commit-order top-level wiring remains hardcoded to zero in `rtl/adam_riscv_v2.v`.
+  - [ ] No `req_order_id`, `req_epoch`, `flush_new_epoch_*`, or commit-order top-level wiring remains hardcoded to zero in `rtl/sifang_core_v2.v`.
   - [ ] `python verification/run_all_tests.py --basic --tests test2.S test_rv32i_full.s` exits `0`.
   - [ ] Trace output proves per-thread `order_id` never decreases and `epoch` increments exactly once per redirect on the flushed thread.
 
@@ -181,11 +181,11 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
     Evidence: .sisyphus/evidence/task-2-metadata-spine-error.log
   ```
 
-  **Commit**: YES | Message: `feat(core): propagate order and epoch metadata` | Files: `rtl/scoreboard_v2.v`, `rtl/exec_pipe1.v`, `rtl/adam_riscv_v2.v`, `rtl/stage_if_v2.v`, touched interface RTL
+  **Commit**: YES | Message: `feat(core): propagate order and epoch metadata` | Files: `rtl/scoreboard_v2.v`, `rtl/exec_pipe1.v`, `rtl/sifang_core_v2.v`, `rtl/stage_if_v2.v`, touched interface RTL
 
 - [x] 3. Wire `rob_lite` into the real top-level and split completion from commit
 
-  **What to do**: Instantiate `rob_lite` in `rtl/adam_riscv_v2.v`. Allocate on dispatch accept, mark complete on WB, and drive commit from ROB head only. Scoreboard wakeup may still use WB completion, but architectural visibility must no longer infer commit from WB.
+  **What to do**: Instantiate `rob_lite` in `rtl/sifang_core_v2.v`. Allocate on dispatch accept, mark complete on WB, and drive commit from ROB head only. Scoreboard wakeup may still use WB completion, but architectural visibility must no longer infer commit from WB.
   **Must NOT do**: Do not add value storage to ROB; keep it metadata-only and continue using WB/bypass for transient result availability.
 
   **Recommended Agent Profile**:
@@ -196,14 +196,14 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   **Parallelization**: Can Parallel: NO | Wave 1 | Blocks: [4,5,6,7] | Blocked By: [1,2]
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v:686-747` — known temporary immediate-commit path / commit placeholder zone
-  - Pattern: `rtl/adam_riscv_v2.v:825-865` — current architectural write visibility zone
+  - Pattern: `rtl/sifang_core_v2.v:686-747` — known temporary immediate-commit path / commit placeholder zone
+  - Pattern: `rtl/sifang_core_v2.v:825-865` — current architectural write visibility zone
   - Pattern: `rtl/rob_lite.v:1-120` — ROB interface and state declaration
   - Pattern: `rtl/scoreboard_v2.v:716-723` — current WB-driven deallocation assumption
   - Pattern: `rtl/scoreboard_v2.v:384-392` — existing age-like/serialization anchor
 
   **Acceptance Criteria** (agent-executable only):
-  - [ ] `rtl/adam_riscv_v2.v` instantiates `rob_lite` and no longer contains an immediate-commit fallback for stores.
+  - [ ] `rtl/sifang_core_v2.v` instantiates `rob_lite` and no longer contains an immediate-commit fallback for stores.
   - [ ] `python verification/run_all_tests.py --basic --tests test_commit_order.s` exits `0` with `PASS`.
   - [ ] A trace of `test_commit_order.s` shows completion may precede commit, but retirement order remains head-of-ROB only.
 
@@ -222,7 +222,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
     Evidence: .sisyphus/evidence/task-3-rob-integration-error.log
   ```
 
-  **Commit**: YES | Message: `feat(core): integrate rob commit boundary` | Files: `rtl/adam_riscv_v2.v`, `rtl/rob_lite.v`, touched scoreboard/commit wiring
+  **Commit**: YES | Message: `feat(core): integrate rob commit boundary` | Files: `rtl/sifang_core_v2.v`, `rtl/rob_lite.v`, touched scoreboard/commit wiring
 
 - [x] 4. Repair ROB bookkeeping races and flushed-head deadlock
 
@@ -276,13 +276,13 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   **Parallelization**: Can Parallel: NO | Wave 1 | Blocks: [6,7,10 hard acceptance] | Blocked By: [3,4]
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v:825-865` — current WB-driven regfile writes
-  - Pattern: `rtl/adam_riscv_v2.v:892-893` — current WB-driven retire counters
+  - Pattern: `rtl/sifang_core_v2.v:825-865` — current WB-driven regfile writes
+  - Pattern: `rtl/sifang_core_v2.v:892-893` — current WB-driven retire counters
   - Pattern: `rtl/regs_mt.v:77-123` — architectural register write ports
   - Pattern: `rtl/csr_unit.v` — retire accounting sink
 
   **Acceptance Criteria** (agent-executable only):
-  - [ ] There are no architectural RF/CSR retire updates sourced directly from `wb*_valid` in `rtl/adam_riscv_v2.v`.
+  - [ ] There are no architectural RF/CSR retire updates sourced directly from `wb*_valid` in `rtl/sifang_core_v2.v`.
   - [ ] `python verification/run_all_tests.py --basic --tests test_commit_order.s test_commit_flush_store.s test1.s test2.S test_rv32i_full.s` exits `0`.
   - [ ] Trace evidence shows wrong-path completed instructions can bypass transiently but never update architectural state.
 
@@ -301,7 +301,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
     Evidence: .sisyphus/evidence/task-5-commit-visible-state-error.log
   ```
 
-  **Commit**: YES | Message: `fix(core): gate architectural visibility on commit` | Files: `rtl/adam_riscv_v2.v`, `rtl/regs_mt.v`, touched CSR wiring
+  **Commit**: YES | Message: `fix(core): gate architectural visibility on commit` | Files: `rtl/sifang_core_v2.v`, `rtl/regs_mt.v`, touched CSR wiring
 
 - [x] 6. Make Store Buffer drain strictly commit-authorized and repair its queue invariants
 
@@ -316,7 +316,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   **Parallelization**: Can Parallel: NO | Wave 2 | Blocks: [7,10 hard acceptance] | Blocked By: [5]
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v:686-747` — rejected finding: temporary immediate-commit path
+  - Pattern: `rtl/sifang_core_v2.v:686-747` — rejected finding: temporary immediate-commit path
   - Pattern: `rtl/store_buffer.v:260-299` — commit/drain control path
   - Pattern: `rtl/store_buffer.v:336` — rejected finding: flush clears valid but not count/head repair
   - Pattern: `rtl/store_buffer.v:348` — rejected finding: same-cycle multi-write count race
@@ -342,7 +342,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
     Evidence: .sisyphus/evidence/task-6-store-buffer-drain-error.log
   ```
 
-  **Commit**: YES | Message: `fix(lsu): make store drain commit authorized` | Files: `rtl/adam_riscv_v2.v`, `rtl/store_buffer.v`, touched LSU/memory wiring
+  **Commit**: YES | Message: `fix(lsu): make store drain commit authorized` | Files: `rtl/sifang_core_v2.v`, `rtl/store_buffer.v`, touched LSU/memory wiring
 
 - [x] 7. Fix LSU forwarding, older-store hazard blocking, and subword shaping
 
@@ -402,7 +402,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   - Pattern: `rtl/stage_if_v2.v:80` — rejected finding: per-thread flush driving shared memory reset zone
   - Pattern: `rtl/stage_if_v2.v:138` — rejected finding: `if_pred_taken` alignment bug
   - Pattern: `rtl/pc_mt.v` — per-thread PC update logic
-  - Pattern: `rtl/adam_riscv_v2.v:98-119` — IF/fetch_buffer top-level wiring
+  - Pattern: `rtl/sifang_core_v2.v:98-119` — IF/fetch_buffer top-level wiring
 
   **Acceptance Criteria** (agent-executable only):
   - [ ] A flush on thread A no longer drops valid buffered work for thread B.
@@ -445,7 +445,7 @@ Wave 2: 6) Store Buffer commit-authorized drain [rtl], 7) LSU forwarding + hazar
   - Pattern: `rtl/stage_if_v2.v:115-134` — response boundary where stale drop must happen
   - Pattern: `rtl/inst_memory.v:2-67` — compatibility wrapper path
   - Pattern: `comp_test/tb_v2.sv:2,36-45` — stable preload contract
-  - Pattern: `verification/riscof/adam_riscv/env/tb_riscof.sv:58-64` — second preload consumer
+  - Pattern: `verification/riscof/sifang_core/env/tb_riscof.sv:58-64` — second preload consumer
 
   **Acceptance Criteria** (agent-executable only):
   - [ ] `python verification/run_all_tests.py --basic --tests test_icache_redirect_miss.s` exits `0` with redirect-under-miss PASS.

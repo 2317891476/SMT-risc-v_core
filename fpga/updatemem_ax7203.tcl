@@ -4,10 +4,10 @@
 
 set script_dir [file dirname [info script]]
 set project_dir [file normalize "$script_dir/../build/ax7203"]
-set post_route_dcp "$project_dir/checkpoints/adam_riscv_ax7203_post_route.dcp"
-set mmi_file "$project_dir/adam_riscv_ax7203.mmi"
-set orig_bit "$project_dir/adam_riscv_ax7203_xc7a200tfbg484-2.bit"
-set updated_bit "$project_dir/adam_riscv_ax7203_xc7a200tfbg484-2_updated.bit"
+set post_route_dcp "$project_dir/checkpoints/sifang_core_ax7203_post_route.dcp"
+set mmi_file "$project_dir/sifang_core_ax7203.mmi"
+set orig_bit "$project_dir/sifang_core_ax7203_xc7a200tfbg484-2.bit"
+set updated_bit "$project_dir/sifang_core_ax7203_xc7a200tfbg484-2_updated.bit"
 set hex_file [file normalize "$script_dir/../rom/mem_subsys_ram.hex"]
 
 puts "Opening post-route checkpoint..."

@@ -1,8 +1,8 @@
-// Module List - Complete dependency list for adam_riscv simulation
+// Module List - Complete dependency list for sifang_core simulation
 // Generated for tb.sv testbench
 
 // ─── Core Top ─────────────────────────────────────────────────────────────
-../rtl/adam_riscv.v
+../rtl/sifang_core.v
 
 // ─── Defines (define.v contains all macros) ─────────────────────────────────
 

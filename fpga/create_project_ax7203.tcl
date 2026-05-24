@@ -5,7 +5,7 @@
 set script_dir [file dirname [info script]]
 source "$script_dir/flow_common.tcl"
 
-set project_name "adam_riscv_ax7203"
+set project_name "sifang_core_ax7203"
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set rtl_dir "$script_dir/../rtl"
 set fpga_rtl_dir "$script_dir/rtl"
@@ -35,7 +35,7 @@ set core_clk_mhz [expr {double([ax7203_env_or_default AX7203_CORE_CLK_MHZ 25.0])
 set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_clk_div $core_clk_mhz]] + 0}]
 set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
 set build_threads [ax7203_vivado_jobs AX7203_MAX_THREADS]
-set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "sifang_core_ax7203_top"]
 
 puts "Creating project: $project_name"
 puts "Target part: $target_part"
@@ -239,7 +239,7 @@ if {$enable_ddr3} {
     }
 }
 
-# Generate Clock Wizard IP (required by adam_riscv when FPGA_MODE is defined)
+# Generate Clock Wizard IP (required by sifang_core when FPGA_MODE is defined)
 set clk_wiz_tcl "$script_dir/ip/create_clk_wiz_ax7203.tcl"
 if {[file exists $clk_wiz_tcl]} {
     puts "Generating Clock Wizard IP from: $clk_wiz_tcl"

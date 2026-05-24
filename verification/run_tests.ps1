@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Local RISCOF test runner for AdamRiscv.
+Local RISCOF test runner for SifangCore.
 Usage: python run_riscof.py [--suite SUITE] [--env ENV]
 """
 
@@ -10,7 +10,7 @@ import subprocess
 import argparse
 
 def main():
-    parser = argparse.ArgumentParser(description='Run RISCOF tests for AdamRiscv')
+    parser = argparse.ArgumentParser(description='Run RISCOF tests for SifangCore')
     parser.add_argument('--suite', default='../riscv-tests/isa', 
                         help='Path to riscv-tests suite')
     parser.add_argument('--env', default='../riscv-tests/env',

@@ -2,7 +2,7 @@
 
 ## Current Direction
 
-The active debug baseline is single-thread RV32IM/OoO for AX7203. Historical SMT/T0/T1 structure still exists in names and some internal organization, but new fixes must not restore dual-thread behavior or depend on a second thread.
+The active debug baseline is SifangCore single-thread RV32IM/OoO for AX7203. Historical SMT/T0/T1 structure still exists in some internal organization, but new fixes must not restore dual-thread behavior or depend on a second thread.
 
 The long-term goal is broader than the current bring-up target: build a full-stack, competition-grade and industrial-grade dual-issue out-of-order processor core that can boot Linux and run benchmark/test workloads with high performance.
 
@@ -16,4 +16,4 @@ The long-term goal is broader than the current bring-up target: build a full-sta
 
 - Basic single-thread Icarus tests are past the all-timeout phase.
 - UART16550 and PLIC source 2 are part of the current architecture.
-- Board Dhrystone still needs a fresh implemented bitstream before the latest branch-tracker fix can be validated on hardware.
+- The latest pre-rename Dhrystone board-only run passed with Vivado 2023.2 JTAG and COM5 UART. After the SifangCore structural rename, fresh simulation and a new `sifang_core_ax7203` implementation are required before claiming post-rename board status.

@@ -14,6 +14,8 @@ After RTL changes:
 2. Run WSL Verilator mainline through the repo script, using preload and loader-semantic Dhrystone modes as appropriate.
 3. Only then proceed to Vivado synthesis/implementation and real board validation.
 
+The SifangCore structural rename is RTL-affecting because module names, testbench hierarchy paths, filelists, and FPGA tops changed. It therefore requires the same Icarus -> WSL Verilator -> Vivado/JTAG ladder before post-rename Dhrystone status can replace the pre-rename bitstream evidence.
+
 ## Dhrystone Current Loop
 
 For the current Dhrystone objective, run these Verilator gates before any incremental implementation:

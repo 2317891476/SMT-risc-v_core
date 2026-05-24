@@ -1,4 +1,4 @@
-adam_riscv.v
+sifang_core.v
 alu.v
 alu_control.v
 bpu_bimodal.v

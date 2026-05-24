@@ -71,7 +71,7 @@ module tb_fpga_benchmark_quick;
     reg bench_done_seen;
     localparam integer TB_TIMEOUT_NS = 50_000_000;
 
-    adam_riscv dut (
+    sifang_core dut (
         .sys_clk                   (sys_clk                 ),
         .sys_rstn                  (sys_rstn                ),
         .uart_rx                   (1'b1                    ),

@@ -90,7 +90,7 @@
 `define SW  2'b10
 
 // =============================================================================
-// Extended defines for the upgraded AdamRISCV micro-architecture
+// Extended defines for the upgraded SifangCore micro-architecture
 // Dual-issue, MMU, AI accel constants
 // =============================================================================
 

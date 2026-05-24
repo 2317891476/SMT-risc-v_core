@@ -3,7 +3,7 @@
 ## TL;DR
 > **Summary**: Add a shared blocking memory subsystem that introduces a unified L2 cache plus a 2-master arbiter for the active I-side and D-side paths, then layer machine-mode-only CLINT/PLIC interrupt delivery on top of that subsystem.
 > **Deliverables**:
-> - unified `mem_subsys` + `l2_arbiter` + `l2_cache` integrated into `adam_riscv_v2`
+> - unified `mem_subsys` + `l2_arbiter` + `l2_cache` integrated into `sifang_core_v2`
 > - `clint` + `plic` MMIO blocks with machine timer and machine external interrupt delivery
 > - dedicated targeted ROM/testbench tests for L2 and interrupts
 > - updated `run_all_tests.py` basic/full regression flow covering new P2 tests
@@ -37,7 +37,7 @@ Land a deterministic P2 implementation that introduces a shared unified L2-backe
 - `rtl/l2_cache.v` blocking unified L2 cache core
 - `rtl/clint.v` machine timer MMIO block (`mtime`, `mtimecmp`)
 - `rtl/plic.v` machine external interrupt controller (single machine context)
-- top-level integration updates in `rtl/adam_riscv_v2.v`, `rtl/inst_memory.v`, `rtl/lsu_shell.v`, `rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, and supporting modules
+- top-level integration updates in `rtl/sifang_core_v2.v`, `rtl/inst_memory.v`, `rtl/lsu_shell.v`, `rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, and supporting modules
 - dedicated ROM tests for L2 and interrupts
 - updated `comp_test/tb_v2.sv`, `comp_test/test_content.sv`, and `verification/run_all_tests.py`
 
@@ -117,7 +117,7 @@ Wave 3: interrupt path
 
 - [ ] 1. Stabilize metadata ordering and flush epoch for precise memory/trap behavior
 
-  **What to do**: Fix the pre-existing precision hazards in `rtl/adam_riscv_v2.v` before adding either P2 feature. Make `flush_new_epoch_t0/t1` drive `current_epoch + 1` for the flushed thread, not the old epoch value. Make same-thread dual dispatch allocate unique monotonically increasing `disp0_order_id` / `disp1_order_id` values in one cycle instead of reusing the same counter value. Keep the existing single-counter-per-thread scheme; do not change ROB or scoreboard widths.
+  **What to do**: Fix the pre-existing precision hazards in `rtl/sifang_core_v2.v` before adding either P2 feature. Make `flush_new_epoch_t0/t1` drive `current_epoch + 1` for the flushed thread, not the old epoch value. Make same-thread dual dispatch allocate unique monotonically increasing `disp0_order_id` / `disp1_order_id` values in one cycle instead of reusing the same counter value. Keep the existing single-counter-per-thread scheme; do not change ROB or scoreboard widths.
   **Must NOT do**: Do not introduce per-thread interrupt state, reorder ROB behavior, or widen metadata fields in this task.
 
   **Recommended Agent Profile**:
@@ -128,8 +128,8 @@ Wave 3: interrupt path
   **Parallelization**: Can Parallel: NO | Wave 1 | Blocks: 4, 9, 10, 11 | Blocked By: none
 
   **References** (executor has NO interview context — be exhaustive):
-  - Pattern: `rtl/adam_riscv_v2.v:88-118` — current epoch export is the old epoch value on flush.
-  - Pattern: `rtl/adam_riscv_v2.v:270-271` — current same-thread dual-dispatch assigns identical order IDs.
+  - Pattern: `rtl/sifang_core_v2.v:88-118` — current epoch export is the old epoch value on flush.
+  - Pattern: `rtl/sifang_core_v2.v:270-271` — current same-thread dual-dispatch assigns identical order IDs.
   - Pattern: `rtl/rob_lite.v:64-80` — ROB commit outputs consume order IDs directly for store-buffer commit semantics.
   - Pattern: `rtl/lsu_shell.v:168-220` — LSU/store-buffer depends on `req_order_id`, `req_epoch`, and flush metadata.
 
@@ -153,7 +153,7 @@ Wave 3: interrupt path
     Evidence: .sisyphus/evidence/task-1-metadata-order.log
   ```
 
-  **Commit**: YES | Message: `fix(rtl): stabilize metadata ordering and flush epoch` | Files: [`rtl/adam_riscv_v2.v`]
+  **Commit**: YES | Message: `fix(rtl): stabilize metadata ordering and flush epoch` | Files: [`rtl/sifang_core_v2.v`]
 
 - [ ] 2. Replace the old bench memory contract with explicit shared-memory + TUBE observability
 
@@ -235,7 +235,7 @@ Wave 3: interrupt path
 
 - [ ] 4. Introduce `mem_subsys` scaffold with shared RAM and explicit uncached MMIO decode
 
-  **What to do**: Add `rtl/mem_subsys.v` and one shared backing RAM model under it. This wrapper becomes the only lower-memory endpoint used by `adam_riscv_v2`. Implement explicit decode for four address classes: cacheable RAM window, TUBE MMIO, CLINT MMIO region, PLIC MMIO region. In this task, RAM accesses may still bypass L2 and go directly to the shared RAM model; the goal is to establish the permanent interface, shared array hierarchy, and MMIO behavior. Export `tube_status` as an observable register for the testbench. Keep CLINT/PLIC registers stubbed but addressable, returning zero until Tasks 10-11.
+  **What to do**: Add `rtl/mem_subsys.v` and one shared backing RAM model under it. This wrapper becomes the only lower-memory endpoint used by `sifang_core_v2`. Implement explicit decode for four address classes: cacheable RAM window, TUBE MMIO, CLINT MMIO region, PLIC MMIO region. In this task, RAM accesses may still bypass L2 and go directly to the shared RAM model; the goal is to establish the permanent interface, shared array hierarchy, and MMIO behavior. Export `tube_status` as an observable register for the testbench. Keep CLINT/PLIC registers stubbed but addressable, returning zero until Tasks 10-11.
   **Must NOT do**: Do not add L2 hit/miss policy here; do not leave any direct `stage_mem` or `inst_backing_store` access path active in top-level after this scaffold lands.
 
   **Recommended Agent Profile**:
@@ -270,11 +270,11 @@ Wave 3: interrupt path
     Evidence: .sisyphus/evidence/task-4-tube-mmio.log
   ```
 
-  **Commit**: YES | Message: `feat(mem): add shared memory subsystem scaffold` | Files: [`rtl/mem_subsys.v`, `rtl/adam_riscv_v2.v`, shared RAM helper]
+  **Commit**: YES | Message: `feat(mem): add shared memory subsystem scaffold` | Files: [`rtl/mem_subsys.v`, `rtl/sifang_core_v2.v`, shared RAM helper]
 
 - [ ] 5. Export `inst_memory` refill traffic to top-level and attach it to `mem_subsys`
 
-  **What to do**: Refactor `rtl/inst_memory.v` so the ICache refill interface becomes an external top-level client port instead of being locally terminated by `icache_mem_adapter`. Remove the direct I-side bypass dependency on `inst_backing_store` for normal fetch completion, but preserve the backing-store hierarchy only for preload compatibility if still needed by the bench. In `rtl/adam_riscv_v2.v`, route the new I-side request/response signals into `u_mem_subsys` as master 0.
+  **What to do**: Refactor `rtl/inst_memory.v` so the ICache refill interface becomes an external top-level client port instead of being locally terminated by `icache_mem_adapter`. Remove the direct I-side bypass dependency on `inst_backing_store` for normal fetch completion, but preserve the backing-store hierarchy only for preload compatibility if still needed by the bench. In `rtl/sifang_core_v2.v`, route the new I-side request/response signals into `u_mem_subsys` as master 0.
   **Must NOT do**: Do not change `stage_if_v2` fetch semantics, epoch handling, or fetch-buffer behavior in this task.
 
   **Recommended Agent Profile**:
@@ -285,7 +285,7 @@ Wave 3: interrupt path
   **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: 7 | Blocked By: 4
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v:132-153` — stage_if_v2 currently hides all I-side downstream routing.
+  - Pattern: `rtl/sifang_core_v2.v:132-153` — stage_if_v2 currently hides all I-side downstream routing.
   - Pattern: `rtl/inst_memory.v:41-111` — current ICache refill interface and local adapter termination.
   - Pattern: `verification/run_riscv_tests.py:270-293` — all regressions compile `rtl/*.v`, so new top-level ports are automatically included.
 
@@ -303,16 +303,16 @@ Wave 3: interrupt path
 
   Scenario: Inst-memory top-level port export is visible and used
     Tool: Bash
-    Steps: Run `python verification/run_all_tests.py --basic --tests test_rv32i_full.s 2>&1 | tee .sisyphus/evidence/task-5-iport-latency.log && grep -n "mem_req\|mem_resp" rtl/inst_memory.v rtl/adam_riscv_v2.v >> .sisyphus/evidence/task-5-iport-latency.log`
+    Steps: Run `python verification/run_all_tests.py --basic --tests test_rv32i_full.s 2>&1 | tee .sisyphus/evidence/task-5-iport-latency.log && grep -n "mem_req\|mem_resp" rtl/inst_memory.v rtl/sifang_core_v2.v >> .sisyphus/evidence/task-5-iport-latency.log`
     Expected: Command exits 0; test_rv32i_full PASSes; evidence shows top-level I-side request/response plumbing in the modified files
     Evidence: .sisyphus/evidence/task-5-iport-latency.log
   ```
 
-  **Commit**: YES | Message: `refactor(icache): externalize inst_memory refill port` | Files: [`rtl/inst_memory.v`, `rtl/adam_riscv_v2.v`, optional preload helper]
+  **Commit**: YES | Message: `refactor(icache): externalize inst_memory refill port` | Files: [`rtl/inst_memory.v`, `rtl/sifang_core_v2.v`, optional preload helper]
 
 - [ ] 6. Convert the D-side LSU path from fixed-latency RAM reads to `mem_subsys` request/response handshakes
 
-  **What to do**: Change `rtl/lsu_shell.v` and its top-level integration so loads/stores no longer assume the old single-cycle `stage_mem` semantics. Add one outstanding D-side transaction state machine in `lsu_shell`: accept a request only when no prior D request is pending, hold request metadata until `mem_resp_valid`, and allow store-buffer drains to use the same D-side master port arbitration through `mem_subsys`. Replace the old direct `stage_mem` instance in `adam_riscv_v2.v` with the D-side `mem_subsys` client port.
+  **What to do**: Change `rtl/lsu_shell.v` and its top-level integration so loads/stores no longer assume the old single-cycle `stage_mem` semantics. Add one outstanding D-side transaction state machine in `lsu_shell`: accept a request only when no prior D request is pending, hold request metadata until `mem_resp_valid`, and allow store-buffer drains to use the same D-side master port arbitration through `mem_subsys`. Replace the old direct `stage_mem` instance in `sifang_core_v2.v` with the D-side `mem_subsys` client port.
   **Must NOT do**: Do not enable `l1_dcache_nb` or add multiple outstanding D requests.
 
   **Recommended Agent Profile**:
@@ -325,7 +325,7 @@ Wave 3: interrupt path
   **References**:
   - Pattern: `rtl/lsu_shell.v:159-223` — current D-side memory contract and store-buffer drain signals.
   - Pattern: `rtl/lsu_shell.v:232-269` — current one-cycle pending request metadata logic.
-  - Pattern: `rtl/adam_riscv_v2.v:833-949` — current LSU-to-stage_mem top-level integration.
+  - Pattern: `rtl/sifang_core_v2.v:833-949` — current LSU-to-stage_mem top-level integration.
   - Pattern: `rtl/stage_mem.v:39-69` — old fixed-latency direct RAM semantics being replaced.
 
   **Acceptance Criteria**:
@@ -347,7 +347,7 @@ Wave 3: interrupt path
     Evidence: .sisyphus/evidence/task-6-dhazard.log
   ```
 
-  **Commit**: YES | Message: `refactor(lsu): support variable-latency mem_subsys responses` | Files: [`rtl/lsu_shell.v`, `rtl/adam_riscv_v2.v`]
+  **Commit**: YES | Message: `refactor(lsu): support variable-latency mem_subsys responses` | Files: [`rtl/lsu_shell.v`, `rtl/sifang_core_v2.v`]
 
 - [ ] 7. Implement the blocking unified `l2_cache` and 2-master `l2_arbiter` inside `mem_subsys`
 
@@ -429,7 +429,7 @@ Wave 3: interrupt path
 
 - [ ] 9. Add minimal SYSTEM/CSR/trap plumbing and top-level trap redirect support
 
-  **What to do**: Extend decode/control so `SYSTEM` opcode support exists for `CSRRW`, `CSRRS`, `CSRRC`, `CSRRWI`, `CSRRSI`, `CSRRCI`, and `MRET`. Keep `ECALL`, `EBREAK`, `WFI`, `SFENCE.VMA`, and vectored `mtvec` explicitly out of scope in this task. Add a dedicated smoke ROM `rom/test_csr_mret_smoke.s` for this task only. Wire a live `csr_unit` into `adam_riscv_v2`, route CSR reads/writes through a dedicated serialized path (single issue only; block dual-issue pairing when either slot is a SYSTEM op), and add a separate trap redirect mux that overrides branch redirect when a trap/return is taken. Interrupt/trap support is valid only when `SMT_MODE=0`; when `SMT_MODE=1`, leave interrupts masked and document that behavior in comments/tests.
+  **What to do**: Extend decode/control so `SYSTEM` opcode support exists for `CSRRW`, `CSRRS`, `CSRRC`, `CSRRWI`, `CSRRSI`, `CSRRCI`, and `MRET`. Keep `ECALL`, `EBREAK`, `WFI`, `SFENCE.VMA`, and vectored `mtvec` explicitly out of scope in this task. Add a dedicated smoke ROM `rom/test_csr_mret_smoke.s` for this task only. Wire a live `csr_unit` into `sifang_core_v2`, route CSR reads/writes through a dedicated serialized path (single issue only; block dual-issue pairing when either slot is a SYSTEM op), and add a separate trap redirect mux that overrides branch redirect when a trap/return is taken. Interrupt/trap support is valid only when `SMT_MODE=0`; when `SMT_MODE=1`, leave interrupts masked and document that behavior in comments/tests.
   **Must NOT do**: Do not add delegation, nested interrupts, or per-thread CSR state.
 
   **Recommended Agent Profile**:
@@ -445,8 +445,8 @@ Wave 3: interrupt path
   - Pattern: `rtl/decoder_dual.v:177-206` — illegal/invalid instructions are currently dropped rather than trapped; SYSTEM serialization must fit this decoder boundary.
   - Pattern: `rtl/csr_unit.v:41-69` — CSR request interface and trap outputs already exist.
   - Pattern: `rtl/csr_unit.v:109-216` — current trap entry/MRET semantics and CSR storage behavior.
-  - Pattern: `rtl/adam_riscv_v2.v:1081-1108` — `csr_unit` is present but tied off today.
-  - Pattern: `rtl/adam_riscv_v2.v:132-153` — top-level already has one redirect point to extend.
+  - Pattern: `rtl/sifang_core_v2.v:1081-1108` — `csr_unit` is present but tied off today.
+  - Pattern: `rtl/sifang_core_v2.v:132-153` — top-level already has one redirect point to extend.
 
   **Acceptance Criteria**:
   - [ ] `iverilog -g2012 -s tb_v2 -o comp_test/out_iverilog/bin/task9_csr.out -I rtl rtl/*.v libs/REG_ARRAY/SRAM/ram_bfm.v comp_test/tb_v2.sv` exits 0.
@@ -467,7 +467,7 @@ Wave 3: interrupt path
     Evidence: .sisyphus/evidence/task-9-csr-serialize.log
   ```
 
-  **Commit**: YES | Message: `feat(csr): wire system decode and trap redirect path` | Files: [`rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, `rtl/adam_riscv_v2.v`, `rom/test_csr_mret_smoke.s`, supporting RTL]
+  **Commit**: YES | Message: `feat(csr): wire system decode and trap redirect path` | Files: [`rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, `rtl/sifang_core_v2.v`, `rom/test_csr_mret_smoke.s`, supporting RTL]
 
 - [ ] 10. Implement `clint.v` and machine timer interrupt delivery through `csr_unit`
 

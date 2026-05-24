@@ -2,7 +2,7 @@
     `define FPGA_MODE 1
 `endif
 
-module adam_riscv_ax7203_status_top (
+module sifang_core_ax7203_status_top (
     input  wire sys_clk_p,
     input  wire sys_clk_n,
     input  wire sys_rst_n,
@@ -90,7 +90,7 @@ reg [7:0]  bridge_pending_byte;
 wire       core_uart_edge = core_uart_sync[1] ^ core_uart_sync[0];
 
 (* DONT_TOUCH = "TRUE", KEEP_HIERARCHY = "TRUE" *)
-adam_riscv u_adam_riscv (
+sifang_core u_sifang_core (
     .sys_clk          (sys_clk_200m     ),
     .sys_rstn         (core_rst_n       ),
     .uart_rx          (uart_rx          ),

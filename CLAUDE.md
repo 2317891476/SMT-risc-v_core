@@ -220,7 +220,7 @@ Important signoff numbers from that build:
 Worst global timing path is an async reset release path:
 
 ```text
-por_rst_n_reg/C -> u_adam_riscv/post_lock_ready_reg/CLR
+por_rst_n_reg/C -> u_sifang_core/post_lock_ready_reg/CLR
 ```
 
 Worst core-domain synchronous paths are in dispatch/IQ/MEM candidate selection and still meet the 25 MHz target. Do not treat L1D or OoO core datapaths as the primary timing blockers unless a current report proves otherwise.

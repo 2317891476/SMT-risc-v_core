@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convert riscv-tests to AdamRiscv format.
+Convert riscv-tests to SifangCore format.
 Generates hex files and test manifests for simulation.
 """
 
@@ -93,7 +93,7 @@ class TestConverter:
 
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description="Convert riscv-tests to AdamRiscv format")
+    parser = argparse.ArgumentParser(description="Convert riscv-tests to SifangCore format")
     parser.add_argument("--tests-dir", default="../verification/riscv-tests",
                         help="Path to riscv-tests directory")
     parser.add_argument("--output", default="../verification/generated_tests",
@@ -106,7 +106,7 @@ def main():
     converter = TestConverter(args.tests_dir, args.output)
     
     print("=" * 60)
-    print("  RISC-V Tests Converter for AdamRiscv")
+    print("  RISC-V Tests Converter for SifangCore")
     print("=" * 60)
     
     all_results = {}

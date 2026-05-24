@@ -7,8 +7,8 @@ from riscof.pluginTemplate import pluginTemplate
 
 logger = logging.getLogger()
 
-class adam_riscv(pluginTemplate):
-    __model__ = "adam_riscv"
+class sifang_core(pluginTemplate):
+    __model__ = "sifang_core"
     __version__ = "1.0.0"
 
     def __init__(self, *args, **kwargs):
@@ -36,10 +36,10 @@ class adam_riscv(pluginTemplate):
     def build(self, isa_yaml, platform_yaml):
         ispec = utils.load_yaml(isa_yaml)['hart0']
         self.xlen = ('64' if 64 in ispec['supported_xlen'] else '32')
-        self.isa = 'rv32im'  # AdamRiscv supports RV32IM
+        self.isa = 'rv32im'  # SifangCore supports RV32IM
 
     def runTests(self, testList):
-        make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile.adam_riscv"))
+        make = utils.makeUtil(makefilePath=os.path.join(self.work_dir, "Makefile.sifang_core"))
         make.makeCommand = 'make -k -j' + self.num_jobs
 
         for testname in testList:
@@ -48,7 +48,7 @@ class adam_riscv(pluginTemplate):
             test_dir = testentry['work_dir']
             
             elf = os.path.join(test_dir, "test.elf")
-            sig_file = os.path.join(test_dir, "adam_riscv.signature")
+            sig_file = os.path.join(test_dir, "sifang_core.signature")
             compile_macros = ' -D' + ' -D'.join(testentry['macros']) if testentry['macros'] else ''
 
             # GCC compile command

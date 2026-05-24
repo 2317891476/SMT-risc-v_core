@@ -28,49 +28,49 @@ COMP_TEST_DIR = REPO_ROOT / "comp_test"
 
 PROFILES = {
     "core_diag": {
-        "top": "adam_riscv_ax7203_top",
+        "top": "sifang_core_ax7203_top",
         "tb": "tb_ax7203_top_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_top_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_board_diag_gap.s",
         "expect_token": "[AX7203_TOP] PASS",
     },
     "core_status": {
-        "top": "adam_riscv_ax7203_status_top",
+        "top": "sifang_core_ax7203_status_top",
         "tb": "tb_ax7203_status_top_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_status_top_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_board_diag_pollsafe.s",
         "expect_token": "[AX7203_STATUS] PASS",
     },
     "issue_probe": {
-        "top": "adam_riscv_ax7203_issue_probe_top",
+        "top": "sifang_core_ax7203_issue_probe_top",
         "tb": "tb_ax7203_issue_probe_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_issue_probe_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_board_diag_pollsafe.s",
         "expect_token": "[AX7203_ISSUE_PROBE] PASS",
     },
     "branch_probe": {
-        "top": "adam_riscv_ax7203_branch_probe_top",
+        "top": "sifang_core_ax7203_branch_probe_top",
         "tb": "tb_ax7203_branch_probe_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_branch_probe_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_board_diag_pollsafe.s",
         "expect_token": "[AX7203_BRANCH_PROBE] PASS",
     },
     "main_bridge_probe": {
-        "top": "adam_riscv_ax7203_main_bridge_probe_top",
+        "top": "sifang_core_ax7203_main_bridge_probe_top",
         "tb": "tb_ax7203_main_bridge_probe_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_main_bridge_probe_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_board_diag.s",
         "expect_token": "[AX7203_MAIN_BRIDGE_PROBE] PASS",
     },
     "io_smoke": {
-        "top": "adam_riscv_ax7203_io_smoke_top",
+        "top": "sifang_core_ax7203_io_smoke_top",
         "tb": "tb_ax7203_io_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_io_smoke.sv",
         "rom": None,
         "expect_token": "[AX7203_IO_SMOKE] PASS",
     },
     "uart_echo": {
-        "top": "adam_riscv_ax7203_top",
+        "top": "sifang_core_ax7203_top",
         "tb": "tb_ax7203_uart_echo_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart_echo.s",
@@ -80,7 +80,7 @@ PROFILES = {
         "uart_send_delay_ms": 800,
     },
     "uart16550_echo": {
-        "top": "adam_riscv_ax7203_top",
+        "top": "sifang_core_ax7203_top",
         "tb": "tb_ax7203_uart_echo_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_smoke.sv",
         "rom": REPO_ROOT / "rom" / "test_fpga_uart16550_echo.s",
@@ -94,7 +94,7 @@ PROFILES = {
         "rom_defines": ["SIM_BUILD=1"],
     },
     "uart_echo_raw": {
-        "top": "adam_riscv_ax7203_uart_echo_raw_top",
+        "top": "sifang_core_ax7203_uart_echo_raw_top",
         "tb": "tb_ax7203_uart_echo_raw_smoke",
         "tb_file": COMP_TEST_DIR / "tb_ax7203_uart_echo_raw_smoke.sv",
         "rom": None,
@@ -262,11 +262,11 @@ def run_vivado(script_name: str, *, env: dict[str, str], logs_dir: Path, step_na
 
 
 def resolve_generated_synth_script(top_module: str) -> Path:
-    runs_dir = REPO_ROOT / "build" / "ax7203" / "adam_riscv_ax7203.runs" / "synth_1"
+    runs_dir = REPO_ROOT / "build" / "ax7203" / "sifang_core_ax7203.runs" / "synth_1"
     candidates = [
         runs_dir / f"{top_module}.tcl",
-        runs_dir / "adam_riscv_ax7203_top.tcl",
-        runs_dir / "adam_riscv_ax7203_top.tcl",
+        runs_dir / "sifang_core_ax7203_top.tcl",
+        runs_dir / "sifang_core_ax7203_top.tcl",
     ]
     for candidate in candidates:
         if candidate.exists():
@@ -276,7 +276,7 @@ def resolve_generated_synth_script(top_module: str) -> Path:
 
 def finalize_synth_outputs(top_module: str) -> None:
     project_dir = REPO_ROOT / "build" / "ax7203"
-    runs_dir = project_dir / "adam_riscv_ax7203.runs" / "synth_1"
+    runs_dir = project_dir / "sifang_core_ax7203.runs" / "synth_1"
     checkpoint_dir = project_dir / "checkpoints"
     report_dir = project_dir / "reports"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -284,17 +284,17 @@ def finalize_synth_outputs(top_module: str) -> None:
 
     dcp_candidates = [
         runs_dir / f"{top_module}.dcp",
-        runs_dir / "adam_riscv_ax7203_top.dcp",
-        runs_dir / "adam_riscv_ax7203_top.dcp",
+        runs_dir / "sifang_core_ax7203_top.dcp",
+        runs_dir / "sifang_core_ax7203_top.dcp",
     ]
     synth_dcp = next((path for path in dcp_candidates if path.exists()), None)
     if synth_dcp is None:
         raise SystemExit(f"Failed to locate synthesized checkpoint under {runs_dir}")
-    shutil.copy2(synth_dcp, checkpoint_dir / "adam_riscv_ax7203_post_synth.dcp")
+    shutil.copy2(synth_dcp, checkpoint_dir / "sifang_core_ax7203_post_synth.dcp")
 
     util_candidates = [
         runs_dir / f"{top_module}_utilization_synth.rpt",
-        runs_dir / "adam_riscv_ax7203_top_utilization_synth.rpt",
+        runs_dir / "sifang_core_ax7203_top_utilization_synth.rpt",
     ]
     util_rpt = next((path for path in util_candidates if path.exists()), None)
     if util_rpt is not None:
@@ -421,11 +421,11 @@ def main() -> int:
 
     project_dir = REPO_ROOT / "build" / "ax7203"
     top_module = str(profile["top"])
-    if top_module == "adam_riscv_ax7203_top":
-        build_id_file = project_dir / "adam_riscv_ax7203_bitstream_id.txt"
+    if top_module == "sifang_core_ax7203_top":
+        build_id_file = project_dir / "sifang_core_ax7203_bitstream_id.txt"
         uart_capture = BUILD_DIR / f"ax7203_{args.profile}_uart_capture.txt"
     else:
-        build_id_file = project_dir / f"adam_riscv_ax7203_{top_module}_bitstream_id.txt"
+        build_id_file = project_dir / f"sifang_core_ax7203_{top_module}_bitstream_id.txt"
         uart_capture = BUILD_DIR / f"ax7203_{args.profile}_uart_capture.txt"
     if uart_capture.exists():
         uart_capture.unlink()

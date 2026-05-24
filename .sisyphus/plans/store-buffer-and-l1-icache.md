@@ -1,4 +1,4 @@
-# Store Buffer + L1 ICache for AdamRiscv V2
+# Store Buffer + L1 ICache for SifangCore V2
 
 ## TL;DR
 > **Summary**: Add a minimal commit boundary that makes stores visible only at commit, then layer a conservative Store Buffer and a single-outstanding-miss ICache on top of explicit LSU/IF request-response contracts.
@@ -42,7 +42,7 @@ Deliver a safe minimum architecture upgrade where speculative stores never reach
 - Store Buffer entries are speculative until commit, drained in-order per thread, and never written to memory on the wrong path.
 - Loads either forward from the youngest older fully covering store, or stall/retry if an older store is unresolved or only partially overlaps.
 - `stage_if_v2` no longer assumes fixed-latency `inst_memory`; it speaks an explicit request/response contract via a compatibility wrapper and then an ICache.
-- `comp_test/tb_v2.sv` and `verification/riscof/adam_riscv/env/tb_riscof.sv` preload instruction backing storage through a stable hierarchy that survives the ICache change.
+- `comp_test/tb_v2.sv` and `verification/riscof/sifang_core/env/tb_riscof.sv` preload instruction backing storage through a stable hierarchy that survives the ICache change.
 - Directed ROM tests exist for commit ordering, wrong-path store discard, store forwarding, unresolved-older-store blocking, miss-then-redirect, and stale-response suppression.
 
 ### Definition of Done (verifiable conditions with commands)
@@ -156,8 +156,8 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
   **References**:
   - Pattern: `rtl/scoreboard_v2.v:757-799` — current dispatch allocation and `alloc_seq`
   - Pattern: `rtl/scoreboard_v2.v:727-739` — current per-thread flush cleanup anchor
-  - Pattern: `rtl/adam_riscv_v2.v:67-69` — current thread flush generation
-  - Pattern: `rtl/adam_riscv_v2.v:590-649` — memory request metadata leaving `exec_pipe1`
+  - Pattern: `rtl/sifang_core_v2.v:67-69` — current thread flush generation
+  - Pattern: `rtl/sifang_core_v2.v:590-649` — memory request metadata leaving `exec_pipe1`
   - Pattern: `rtl/stage_if_v2.v:115-134` — current single-cycle-latency IF bookkeeping
 
   **Acceptance Criteria**:
@@ -180,7 +180,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-2-metadata-trace-error.log
   ```
 
-  **Commit**: YES | Message: `feat(core): add order and epoch metadata plumbing` | Files: `rtl/scoreboard_v2.v`, `rtl/adam_riscv_v2.v`, touched interface RTL
+  **Commit**: YES | Message: `feat(core): add order and epoch metadata plumbing` | Files: `rtl/scoreboard_v2.v`, `rtl/sifang_core_v2.v`, touched interface RTL
 
 - [x] 3. Preserve bench preload compatibility behind a stable instruction backing-store wrapper
 
@@ -196,7 +196,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
 
   **References**:
   - Pattern: `comp_test/tb_v2.sv:2,36-45` — current direct preload macro and memory poke
-  - Pattern: `verification/riscof/adam_riscv/env/tb_riscof.sv:58-64` — second direct preload site
+  - Pattern: `verification/riscof/sifang_core/env/tb_riscof.sv:58-64` — second direct preload site
   - Pattern: `rtl/stage_if_v2.v:73-80` — current `u_inst_memory` instantiation
   - Pattern: `rtl/inst_memory.v:2-67` — backing storage hierarchy that benches depend on today
 
@@ -220,7 +220,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-3-preload-wrapper-error.log
   ```
 
-  **Commit**: YES | Message: `refactor(tb): wrap instruction preload hierarchy` | Files: `comp_test/tb_v2.sv`, `verification/riscof/adam_riscv/env/tb_riscof.sv`, wrapper RTL if needed
+  **Commit**: YES | Message: `refactor(tb): wrap instruction preload hierarchy` | Files: `comp_test/tb_v2.sv`, `verification/riscof/sifang_core/env/tb_riscof.sv`, wrapper RTL if needed
 
 - [x] 4. Refactor `stage_if_v2` to an explicit request/response shell without changing cache behavior yet
 
@@ -237,7 +237,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
   **References**:
   - Pattern: `rtl/stage_if_v2.v:49-52` — current PC stall policy tied only to `fb_ready`
   - Pattern: `rtl/stage_if_v2.v:104-134` — current one-cycle synchronous-RAM alignment logic
-  - Pattern: `rtl/adam_riscv_v2.v:98-119` — top-level IF wiring into `fetch_buffer`
+  - Pattern: `rtl/sifang_core_v2.v:98-119` — top-level IF wiring into `fetch_buffer`
   - Pattern: `rtl/fetch_buffer.v:108-124` — current flush behavior at the frontend boundary
 
   **Acceptance Criteria**:
@@ -260,7 +260,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-4-if-shell-error.log
   ```
 
-  **Commit**: YES | Message: `refactor(frontend): add explicit fetch req resp shell` | Files: `rtl/stage_if_v2.v`, `rtl/adam_riscv_v2.v`, frontend helper RTL
+  **Commit**: YES | Message: `refactor(frontend): add explicit fetch req resp shell` | Files: `rtl/stage_if_v2.v`, `rtl/sifang_core_v2.v`, frontend helper RTL
 
 - [x] 5. Refactor the LSU path to an explicit request/response shell and scoreboard gating
 
@@ -276,7 +276,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
 
   **References**:
   - Pattern: `rtl/exec_pipe1.v:171-182` — current combinational mem request export
-  - Pattern: `rtl/adam_riscv_v2.v:660-744` — current direct `exec_pipe1 -> stage_mem -> stage_wb` path
+  - Pattern: `rtl/sifang_core_v2.v:660-744` — current direct `exec_pipe1 -> stage_mem -> stage_wb` path
   - Pattern: `rtl/scoreboard_v2.v:498-525` — current issue selection for load/store
   - Pattern: `rtl/stage_mem.v:45-53,80-97` — current immediate store visibility and 1-cycle load assumption
   - Pattern: `rtl/stage_wb.v:12-18,55-59` — current load shaping and address-lane dependency
@@ -301,7 +301,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-5-lsu-shell-error.log
   ```
 
-  **Commit**: YES | Message: `refactor(lsu): add explicit request response contract` | Files: `rtl/exec_pipe1.v`, `rtl/adam_riscv_v2.v`, `rtl/scoreboard_v2.v`, memory-path RTL
+  **Commit**: YES | Message: `refactor(lsu): add explicit request response contract` | Files: `rtl/exec_pipe1.v`, `rtl/sifang_core_v2.v`, `rtl/scoreboard_v2.v`, memory-path RTL
 
 - [x] 6. Implement a per-thread ROB-lite commit queue and move retire accounting to commit
 
@@ -317,7 +317,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
 
   **References**:
   - Pattern: `rtl/scoreboard_v2.v:716-723` — current deallocation on WB tag match that must no longer equal architectural completion
-  - Pattern: `rtl/adam_riscv_v2.v:758-821` — current WB-to-regfile and CSR retire accounting hookup
+  - Pattern: `rtl/sifang_core_v2.v:758-821` — current WB-to-regfile and CSR retire accounting hookup
   - Pattern: `rtl/scoreboard_v2.v:384-392` — existing age-like branch serialization anchors
   - Test: `README.md:298-303` — existing basic ROM style and expected PASS model
 
@@ -341,7 +341,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-6-commit-queue-error.log
   ```
 
-  **Commit**: YES | Message: `feat(core): add rob lite commit queue` | Files: `rtl/adam_riscv_v2.v`, `rtl/scoreboard_v2.v`, new commit-queue RTL if split out, new ROM tests
+  **Commit**: YES | Message: `feat(core): add rob lite commit queue` | Files: `rtl/sifang_core_v2.v`, `rtl/scoreboard_v2.v`, new commit-queue RTL if split out, new ROM tests
 
 - [x] 7. Gate architectural register and CSR visibility on commit, with strict flush kill of younger results
 
@@ -356,8 +356,8 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
   **Parallelization**: Can Parallel: NO | Wave 2 | Blocks: [8, 9, 10] | Blocked By: [6]
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v:753-793` — current direct regfile write enables from WB paths
-  - Pattern: `rtl/adam_riscv_v2.v:798-821` — CSR retire hooks currently driven by WB valid
+  - Pattern: `rtl/sifang_core_v2.v:753-793` — current direct regfile write enables from WB paths
+  - Pattern: `rtl/sifang_core_v2.v:798-821` — CSR retire hooks currently driven by WB valid
   - Pattern: `rtl/scoreboard_v2.v:727-739` — flush cleanup that must align with commit queue semantics
   - API/Type: commit-queue metadata introduced in Task 6
 
@@ -381,7 +381,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-7-commit-gating-error.log
   ```
 
-  **Commit**: YES | Message: `fix(core): gate architectural state at commit` | Files: `rtl/adam_riscv_v2.v`, commit-related RTL, targeted ROMs/checkers as needed
+  **Commit**: YES | Message: `fix(core): gate architectural state at commit` | Files: `rtl/sifang_core_v2.v`, commit-related RTL, targeted ROMs/checkers as needed
 
 - [x] 8. Implement Store Buffer v1 with commit-gated drain and wrong-path discard
 
@@ -399,7 +399,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
   - Pattern: `rtl/exec_pipe1.v:171-182` — current store request emission point
   - Pattern: `rtl/stage_mem.v:80-97` — current immediate memory write behavior to remove
   - Pattern: `rtl/data_memory.v:52-68` — memory write point that must only see committed stores
-  - Pattern: `rtl/adam_riscv_v2.v:660-691` — current memory-stage instantiation boundary
+  - Pattern: `rtl/sifang_core_v2.v:660-691` — current memory-stage instantiation boundary
 
   **Acceptance Criteria**:
   - [ ] `test_store_buffer_commit.s` passes and shows committed stores become visible in order.
@@ -421,7 +421,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-8-store-buffer-error.log
   ```
 
-  **Commit**: YES | Message: `feat(lsu): add commit gated store buffer` | Files: Store Buffer RTL, `rtl/adam_riscv_v2.v`, LSU path RTL, new ROM test
+  **Commit**: YES | Message: `feat(lsu): add commit gated store buffer` | Files: Store Buffer RTL, `rtl/sifang_core_v2.v`, LSU path RTL, new ROM test
 
 - [x] 9. Add exact-match store-to-load forwarding and unresolved-older-store blocking
 
@@ -480,7 +480,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
   - Pattern: `rtl/stage_if_v2.v:115-134` — current fixed one-cycle response assumption to remove
   - Pattern: `rtl/fetch_buffer.v:108-124` — flush interaction at IF/Decode boundary
   - Pattern: `rtl/l1_dcache_nb.v:125-240` — acceptable structural template only for single-miss FSM behavior
-  - Pattern: `comp_test/tb_v2.sv:36-45` and `verification/riscof/adam_riscv/env/tb_riscof.sv:58-64` — benches that must preload backing storage, not cache internals
+  - Pattern: `comp_test/tb_v2.sv:36-45` and `verification/riscof/sifang_core/env/tb_riscof.sv:58-64` — benches that must preload backing storage, not cache internals
 
   **Acceptance Criteria**:
   - [ ] `test_icache_redirect_miss.s` passes and proves correct redirect after a miss is already outstanding.
@@ -502,7 +502,7 @@ Wave 2: 6) ROB-lite commit queue [rtl], 7) commit-gated architectural state [rtl
     Evidence: .sisyphus/evidence/task-10-icache-error.log
   ```
 
-  **Commit**: YES | Message: `feat(frontend): add single miss icache` | Files: ICache RTL, `rtl/stage_if_v2.v`, `rtl/adam_riscv_v2.v`, bench preload integration, new ROM tests
+  **Commit**: YES | Message: `feat(frontend): add single miss icache` | Files: ICache RTL, `rtl/stage_if_v2.v`, `rtl/sifang_core_v2.v`, bench preload integration, new ROM tests
 
 ## Final Verification Wave (MANDATORY — after ALL implementation tasks)
 > 4 review agents run in PARALLEL. ALL must APPROVE. Present consolidated results to user and get explicit `okay` before completing.

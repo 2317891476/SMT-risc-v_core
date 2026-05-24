@@ -3,7 +3,7 @@
     {
       "id": "rtl",
       "type": "text",
-      "text": "RTL single-thread baseline\nadam_riscv.v, dispatch, ROB, LSU, mem_subsys",
+      "text": "RTL single-thread baseline\nsifang_core.v, dispatch, ROB, LSU, mem_subsys",
       "x": -520,
       "y": -120,
       "width": 300,

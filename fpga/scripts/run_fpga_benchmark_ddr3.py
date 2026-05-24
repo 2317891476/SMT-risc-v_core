@@ -60,8 +60,8 @@ TIMING_SUMMARY_INCR = PROJECT_DIR / "reports" / "timing_summary_incremental.rpt"
 TIMING_DETAIL_INCR = PROJECT_DIR / "reports" / "timing_detail_incremental.rpt"
 UTILIZATION_INCR = PROJECT_DIR / "reports" / "utilization_incremental.rpt"
 SYNTH_TIMING_SUMMARY = PROJECT_DIR / "reports" / "synth_timing_summary.rpt"
-BUILD_ID_FILE = Path(os.environ.get("BUILD_ID_FILE", str(PROJECT_DIR / "adam_riscv_ax7203_bitstream_id.txt")))
-BITSTREAM_FILE = Path(os.environ.get("BITSTREAM_FILE", str(PROJECT_DIR / "adam_riscv_ax7203_xc7a200tfbg484-2.bit")))
+BUILD_ID_FILE = Path(os.environ.get("BUILD_ID_FILE", str(PROJECT_DIR / "sifang_core_ax7203_bitstream_id.txt")))
+BITSTREAM_FILE = Path(os.environ.get("BITSTREAM_FILE", str(PROJECT_DIR / "sifang_core_ax7203_xc7a200tfbg484-2.bit")))
 UART_CAPTURE_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.txt"
 UART_CAPTURE_RAW_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.bin"
 UART_CAPTURE_LOADER_DECODED_FILE = BUILD_DIR / "dhrystone_ddr3_uart_capture.loader.decoded.txt"
@@ -425,7 +425,7 @@ def build_env(
             "AX7203_CORE_CLK_MHZ": f"{core_clk_mhz:.1f}",
             "AX7203_UART_CLK_DIV": str(derive_uart_clk_div(core_clk_mhz, uart_baud)),
             "AX7203_ROM_ASM": str(LOADER_ROM),
-            "AX7203_TOP_MODULE": "adam_riscv_ax7203_top",
+            "AX7203_TOP_MODULE": "sifang_core_ax7203_top",
             "AX7203_DDR3_FETCH_DEBUG": "1" if fetch_debug else "0",
             "AX7203_DDR3_BRIDGE_AUDIT": "1" if bridge_audit else "0",
             "AX7203_STEP2_BEACON_DEBUG": "1" if step2_beacon_debug else "0",
@@ -5243,8 +5243,8 @@ def main() -> int:
         if not args.skip_vivado:
             vivado = which_required("vivado.bat", "vivado")
             current_stage = "create_project"
-            project_file = PROJECT_DIR / "adam_riscv_ax7203.xpr"
-            mig_generated_dir = PROJECT_DIR / "adam_riscv_ax7203.gen" / "sources_1" / "ip" / "mig_7series_0"
+            project_file = PROJECT_DIR / "sifang_core_ax7203.xpr"
+            mig_generated_dir = PROJECT_DIR / "sifang_core_ax7203.gen" / "sources_1" / "ip" / "mig_7series_0"
             needs_project_create = not project_file.exists()
             create_reason = "project missing"
             if (

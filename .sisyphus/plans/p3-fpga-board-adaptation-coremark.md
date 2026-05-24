@@ -50,7 +50,7 @@
 - `/fpga/ip/create_clk_wiz_ax7203.tcl`
 - `/fpga/constraints/ax7203_base.xdc`
 - `/fpga/constraints/ax7203_uart_led.xdc`
-- `/fpga/rtl/adam_riscv_v2_ax7203_top.v`
+- `/fpga/rtl/sifang_core_v2_ax7203_top.v`
 - `/verification/build_coremark_ax7203.py` 或等价脚本（固定路径、固定参数）
 - `/rom/coremark/` CoreMark 移植与链接脚本
 - `.sisyphus/evidence/` 下的综合、实现、下载、启动、UART、CoreMark 证据
@@ -132,7 +132,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
 
   **References**:
   - Pattern: `fpga/check_jtag.tcl` — 现有 `/fpga` 目录命名风格
-  - Pattern: `rtl/adam_riscv_v2.v` — 原生顶层基线
+  - Pattern: `rtl/sifang_core_v2.v` — 原生顶层基线
   - External: `https://alinx.com/public/upload/file/AX7203B_UG.pdf` — AX7203 用户手册（时钟/DDR/UART/JTAG）
   - External: `https://www.en.alinx.com/detail/613` — AX7203 产品页
 
@@ -239,8 +239,8 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
 
 - [ ] 4. Create AX7203-native FPGA top wrapper
 
-  **What to do**: 新建 `fpga/rtl/adam_riscv_v2_ax7203_top.v`，以 `rtl/adam_riscv_v2.v` 为核内基线，只暴露首阶段必须引脚：200MHz 差分时钟、复位、UART TX/RX、2 个用户 LED、JTAG/Flash 所需专用配置路径依赖。保留 DDR3 端口占位策略但不接入首个里程碑。
-  **Must NOT do**: 不得直接把 `rtl/adam_riscv_v2.v` 当作板级顶层；不得在首阶段引入 DDR MIG 接口。
+  **What to do**: 新建 `fpga/rtl/sifang_core_v2_ax7203_top.v`，以 `rtl/sifang_core_v2.v` 为核内基线，只暴露首阶段必须引脚：200MHz 差分时钟、复位、UART TX/RX、2 个用户 LED、JTAG/Flash 所需专用配置路径依赖。保留 DDR3 端口占位策略但不接入首个里程碑。
+  **Must NOT do**: 不得直接把 `rtl/sifang_core_v2.v` 当作板级顶层；不得在首阶段引入 DDR MIG 接口。
 
   **Recommended Agent Profile**:
   - Category: `rtl` — Reason: 顶层封装与管脚导出
@@ -250,7 +250,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
   **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T7,T8,T10,T11,T13 | Blocked By: T1,T2
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v` — 当前核顶层
+  - Pattern: `rtl/sifang_core_v2.v` — 当前核顶层
   - Pattern: `rtl/syn_rst.v` — reset sync 逻辑
   - Pattern: `cva6_ref/corev_apu/fpga/src/ariane_xilinx.sv` — FPGA wrapper 结构模板
   - Pattern: `docs/interface_reference.md` — 端口参考
@@ -264,7 +264,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
   ```
   Scenario: Wrapper compiles with core
     Tool: Bash
-    Steps: run iverilog -tnull -Wall rtl/*.v fpga/rtl/adam_riscv_v2_ax7203_top.v
+    Steps: run iverilog -tnull -Wall rtl/*.v fpga/rtl/sifang_core_v2_ax7203_top.v
     Expected: compile succeeds without syntax errors
     Evidence: .sisyphus/evidence/task-4-wrapper-compile.log
 
@@ -275,7 +275,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
     Evidence: .sisyphus/evidence/task-4-wrapper-ddr-check.txt
   ```
 
-  **Commit**: YES | Message: `feat(fpga): add ax7203 board wrapper top` | Files: `fpga/rtl/adam_riscv_v2_ax7203_top.v`
+  **Commit**: YES | Message: `feat(fpga): add ax7203 board wrapper top` | Files: `fpga/rtl/sifang_core_v2_ax7203_top.v`
 
 - [ ] 5. Author initial AX7203 XDC set
 
@@ -318,7 +318,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
 
 - [ ] 6. Generate clock/reset IP and deterministic startup path
 
-  **What to do**: 提供 `fpga/ip/create_clk_wiz_ax7203.tcl`，在 `FPGA_MODE` 下满足 `rtl/adam_riscv_v2.v` 对 `clk_wiz_0` 的依赖；将 `syn_rst.v` 与 PLL/MMCM lock 联动，定义 async assert / sync deassert 的板级复位释放顺序。首阶段仅生成 CPU 所需主时钟，不引入额外 generated clock 除非必须。
+  **What to do**: 提供 `fpga/ip/create_clk_wiz_ax7203.tcl`，在 `FPGA_MODE` 下满足 `rtl/sifang_core_v2.v` 对 `clk_wiz_0` 的依赖；将 `syn_rst.v` 与 PLL/MMCM lock 联动，定义 async assert / sync deassert 的板级复位释放顺序。首阶段仅生成 CPU 所需主时钟，不引入额外 generated clock 除非必须。
   **Must NOT do**: 不得依赖手工 GUI 生成 IP；不得让 reset 在 lock 未稳定时释放。
 
   **Recommended Agent Profile**:
@@ -329,7 +329,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
   **Parallelization**: Can Parallel: YES | Wave 2 | Blocks: T7,T8,T10,T11,T13 | Blocked By: T1,T2,T4,T5
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v` — `FPGA_MODE` 下 `clk_wiz_0` 依赖
+  - Pattern: `rtl/sifang_core_v2.v` — `FPGA_MODE` 下 `clk_wiz_0` 依赖
   - Pattern: `rtl/syn_rst.v` — reset 同步
   - Pattern: `cva6_ref/corev_apu/fpga/xilinx/xlnx_clk_gen/tcl/run.tcl` — clock IP TCL 风格
 
@@ -486,7 +486,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
 
   **References**:
   - External: `AX7203B_UG.pdf` — USB-UART 资源
-  - Pattern: `rtl/adam_riscv_v2.v` — 顶层集成方式
+  - Pattern: `rtl/sifang_core_v2.v` — 顶层集成方式
   - Pattern: `rtl/mem_subsys.v` — MMIO 结果路径可复用
 
   **Acceptance Criteria**:
@@ -523,7 +523,7 @@ Wave 5: T9/T12/T14（CoreMark 构建、BRAM-first 运行、板级测分与 `-3` 
   **Parallelization**: Can Parallel: YES | Wave 4 | Blocks: T14 | Blocked By: T1,T2,T4,T5,T6
 
   **References**:
-  - Pattern: `rtl/adam_riscv_v2.v` — CPU 长路径主要来源
+  - Pattern: `rtl/sifang_core_v2.v` — CPU 长路径主要来源
   - Pattern: `rtl/scoreboard_v2.v` — 可能的关键组合路径之一
   - Pattern: `rtl/rob_lite.v` — 可能的关键组合路径之一
   - Pattern: `cva6_ref/corev_apu/fpga/scripts/run.tcl` — 报告输出结构参考

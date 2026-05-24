@@ -1,5 +1,5 @@
 ##########################################################
-# test_smt.s  -  SMT smoke test for AdamRiscv (strict RV32I)
+# test_smt.s  -  SMT smoke test for SifangCore (strict RV32I)
 #
 # Both threads use STRAIGHT-LINE code only (no branches).
 # This avoids speculative-store issues with the OoO scheduler.

@@ -7,7 +7,7 @@
 
 ## Module Index
 
-- [`adam_riscv`](#adam_riscv)
+- [`sifang_core`](#sifang_core)
 - [`syn_rst`](#syn_rst)
 - [`pc`](#pc)
 - [`stage_if`](#stage_if)
@@ -35,9 +35,9 @@
 - [`imm_gen`](#imm_gen)
 - [`ctrl`](#ctrl)
 
-## `adam_riscv`
+## `sifang_core`
 
-- File: `module\CORE\RTL_V1_2\adam_riscv.v`
+- File: `module\CORE\RTL_V1_2\sifang_core.v`
 
 | Port | Dir | Width | Description |
 |---|---|---:|---|

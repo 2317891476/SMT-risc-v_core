@@ -4,7 +4,7 @@
 
 set script_dir [file dirname [info script]]
 set project_dir "$script_dir/../build/ax7203"
-set project_name "adam_riscv_ax7203"
+set project_name "sifang_core_ax7203"
 set report_dir "$project_dir/reports"
 
 # Parse arguments

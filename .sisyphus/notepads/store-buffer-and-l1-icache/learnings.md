@@ -23,7 +23,7 @@ u_stage_if_v2.u_inst_memory.u_inst_backing_store.u_ram.mem[]
 - `rtl/inst_backing_store.v` (new) - Wrapper module with ram_bfm instance
 - `rtl/inst_memory.v` - Uses wrapper for REG_ARRAY case
 - `comp_test/tb_v2.sv` - Updated TB_IROM macro
-- `verification/riscof/adam_riscv/env/tb_riscof.sv` - Updated preload path
+- `verification/riscof/sifang_core/env/tb_riscof.sv` - Updated preload path
 - `comp_test/module_list_v2` - Added inst_backing_store.v
 
 ### Design Decisions
@@ -84,7 +84,7 @@ All basic tests pass:
 ### Files Modified
 - `rtl/stage_if_v2.v` - Complete refactoring with req/resp shell
 - `rtl/scoreboard_v2.v` - Fixed duplicate `win_order_id` declaration
-- `rtl/adam_riscv_v2.v` - Added `include "define_v2.v"` and removed duplicate `mem_wb_valid`
+- `rtl/sifang_core_v2.v` - Added `include "define_v2.v"` and removed duplicate `mem_wb_valid`
 
 ### Design Decisions
 1. Maintained synchronous RAM timing (1-cycle latency) - no behavioral change
@@ -95,8 +95,8 @@ All basic tests pass:
 
 ### Pre-existing Issues Fixed
 1. Duplicate `win_order_id` in `scoreboard_v2.v` (lines 169 and 198)
-2. Missing `define_v2.v` include in `adam_riscv_v2.v`
-3. Duplicate `mem_wb_valid` declaration in `adam_riscv_v2.v`
+2. Missing `define_v2.v` include in `sifang_core_v2.v`
+3. Duplicate `mem_wb_valid` declaration in `sifang_core_v2.v`
 
 
 ## Task: LSU Path Refactor to Explicit Request/Response Shell
@@ -126,7 +126,7 @@ Refactored the load/store path from fire-and-forget to an explicit LSU contract 
    - Updated issue gating for port 1 (LOAD/STORE): only issue when `lsu_req_ready` is high
    - Already had `order_id` and `epoch` outputs in place
 
-4. **Updated `rtl/adam_riscv_v2.v`**:
+4. **Updated `rtl/sifang_core_v2.v`**:
    - Integrated LSU shell between exec_pipe1 and stage_mem
    - Updated writeback path to use LSU response signals
    - Updated bypass networks to use new LSU response wires
@@ -180,7 +180,7 @@ output wire [4:0] commit0_tag,     // Tag of committing instruction T0
 output wire [4:0] commit1_tag,     // Tag of committing instruction T1
 ```
 
-#### 2. Added WB Result Buffer in `adam_riscv_v2.v`:
+#### 2. Added WB Result Buffer in `sifang_core_v2.v`:
 - 32-entry buffer indexed by tag (matches scoreboard tag space)
 - Stores result data, rd, tid at WB time
 - Entry cleared at commit time
@@ -227,7 +227,7 @@ All tests pass:
 
 ### Files Modified
 - `rtl/rob_lite.v` - Added commit metadata outputs (rd, tag)
-- `rtl/adam_riscv_v2.v` - Added WB result buffer; changed regfile writes to commit-gated
+- `rtl/sifang_core_v2.v` - Added WB result buffer; changed regfile writes to commit-gated
 
 ### Architectural Invariants
 

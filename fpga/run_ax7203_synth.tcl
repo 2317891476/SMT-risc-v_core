@@ -5,7 +5,7 @@
 set script_dir [file dirname [info script]]
 source "$script_dir/flow_common.tcl"
 
-set project_name "adam_riscv_ax7203"
+set project_name "sifang_core_ax7203"
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
 set enable_rocc [ax7203_env_or_default AX7203_ENABLE_ROCC 0]
@@ -25,7 +25,7 @@ set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_
 set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
 set synth_jobs [ax7203_vivado_jobs AX7203_SYNTH_JOBS]
 set synth_timeout_min [ax7203_env_or_default AX7203_SYNTH_TIMEOUT_MIN 15]
-set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "sifang_core_ax7203_top"]
 set project_file "$project_dir/$project_name.xpr"
 
 if {![file exists $project_file]} {
@@ -184,7 +184,7 @@ if {![file exists $synth_run_dcp]} {
     set synth_run_dcp "$runs_dir/synth_1/${project_name}_top.dcp"
 }
 if {![file exists $synth_run_dcp]} {
-    set synth_run_dcp "$runs_dir/synth_1/adam_riscv_ax7203_top.dcp"
+    set synth_run_dcp "$runs_dir/synth_1/sifang_core_ax7203_top.dcp"
 }
 if {![file exists $synth_run_dcp]} {
     puts "WARNING: synth_1 run checkpoint not found under $runs_dir; using manual checkpoint $synth_checkpoint"

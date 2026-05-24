@@ -1,4 +1,4 @@
-# Makefile.ax7203 - CoreMark build for AdamRiscv AX7203
+# Makefile.ax7203 - CoreMark build for SifangCore AX7203
 # Usage: make -f Makefile.ax7203
 
 # Toolchain

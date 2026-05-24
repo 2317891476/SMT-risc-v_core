@@ -2,7 +2,7 @@
     `define FPGA_MODE 1
 `endif
 
-module adam_riscv_ax7203_beacon_transport_top (
+module sifang_core_ax7203_beacon_transport_top (
     input  wire sys_clk_p,
     input  wire sys_clk_n,
     input  wire sys_rst_n,

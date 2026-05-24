@@ -21,7 +21,7 @@ vivado -mode batch -source program_ax7203_jtag.tcl
 - **LED0**: Should toggle (heartbeat)
 - **LED1**: Should be ON (boot complete)
 - **LED[4:2]**: Core status indicators
-- **UART**: Should see "AdamRiscv AX7203 Boot" message at 115200 baud
+- **UART**: Should see "SifangCore AX7203 Boot" message at 115200 baud
 
 ### 3. Evidence Collection
 After successful programming, capture:

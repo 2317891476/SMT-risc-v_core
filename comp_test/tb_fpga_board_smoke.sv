@@ -13,7 +13,7 @@ module tb_fpga_board_smoke;
     integer uart_edge_count;
     reg tube_seen;
 
-    adam_riscv dut (
+    sifang_core dut (
         .sys_clk          (sys_clk),
         .sys_rstn         (sys_rstn),
         .uart_rx          (1'b1),

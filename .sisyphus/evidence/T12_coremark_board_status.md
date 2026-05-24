@@ -33,7 +33,7 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 ### 2. Capture CoreMark Results
 Open serial terminal at 115200 baud. Expected output:
 ```
-AdamRiscv AX7203 Boot
+SifangCore AX7203 Boot
 CoreMark Benchmark
 Iterations: 2000
 Total Ticks: <X>

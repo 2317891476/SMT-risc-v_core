@@ -1,16 +1,16 @@
 `timescale 1ns/1ns
-`define TB_IROM tb.u_adam_riscv.u_stage_if.u_inst_memory.u_inst_backing_store.u_ram
-`define TB_REGS tb.u_adam_riscv.u_regs_mt
+`define TB_IROM tb.u_sifang_core.u_stage_if.u_inst_memory.u_inst_backing_store.u_ram
+`define TB_REGS tb.u_sifang_core.u_regs_mt
 `ifdef TB_LEGACY_MEM
-`define TB_DATA_MEM tb.u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.data_mem
-`define TB_MEM_SUBSYS tb.u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.data_mem
+`define TB_DATA_MEM tb.u_sifang_core.gen_legacy_mem.u_legacy_mem_subsys.data_mem
+`define TB_MEM_SUBSYS tb.u_sifang_core.gen_legacy_mem.u_legacy_mem_subsys.data_mem
 `else
 // Data memory path through mem_subsys (when USE_MEM_SUBSYS=1)
-`define TB_DATA_MEM tb.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ram
+`define TB_DATA_MEM tb.u_sifang_core.gen_mem_subsys.u_mem_subsys.ram
 // For backward compatibility with test_content.sv
-`define TB_MEM_SUBSYS tb.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ram
+`define TB_MEM_SUBSYS tb.u_sifang_core.gen_mem_subsys.u_mem_subsys.ram
 `endif
-`define TUBE_STATUS tb.u_adam_riscv.tube_status
+`define TUBE_STATUS tb.u_sifang_core.tube_status
 
 `define RAM_DEEP 4096
 
@@ -26,7 +26,7 @@
 // RoCC monitoring hooks (for verification when RoCC is integrated)
 // These macros reference RoCC signals for command/response/DMA tracing
 `ifndef ROCC_INST_PATH
-`define ROCC_INST_PATH tb.u_adam_riscv.u_rocc_ai_accelerator
+`define ROCC_INST_PATH tb.u_sifang_core.u_rocc_ai_accelerator
 `endif
 
 // RoCC STATUS.READ result bits (per define.v)
@@ -51,7 +51,7 @@ reg [7:0] inst_bytes [0:(`RAM_DEEP*4)-1];
 reg [7:0] data_bytes [0:(`RAM_DEEP*4)-1];
 integer j;
 
-adam_riscv u_adam_riscv(
+sifang_core u_sifang_core(
     .sys_clk  (clk ),
     .sys_rstn (rst ),
     .uart_rx  (tb_uart_rx),
@@ -147,8 +147,8 @@ end
 
 `ifdef TB_LEGACY_MEM
 always @(posedge clk) begin
-    if (rst && u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.uart_write_fire) begin
-        $write("%c", u_adam_riscv.gen_legacy_mem.u_legacy_mem_subsys.uart_write_byte);
+    if (rst && u_sifang_core.gen_legacy_mem.u_legacy_mem_subsys.uart_write_fire) begin
+        $write("%c", u_sifang_core.gen_legacy_mem.u_legacy_mem_subsys.uart_write_byte);
     end
 end
 `endif
@@ -159,7 +159,7 @@ end
 //------------------------------------------------------------------------------------------------
 initial begin : plic_stimulus
     // Default: no external interrupt
-    force u_adam_riscv.ext_irq_src = 1'b0;
+    force u_sifang_core.ext_irq_src = 1'b0;
     
     // Wait for reset release
     @(posedge rst);
@@ -168,14 +168,14 @@ initial begin : plic_stimulus
     // to allow test setup (enable interrupts, configure PLIC)
     if (TB_SELECTED_TEST_ID == 10) begin
         #5000;  // Wait 5us for test setup
-        force u_adam_riscv.ext_irq_src = 1'b1;
+        force u_sifang_core.ext_irq_src = 1'b1;
         #1000;  // Hold for 1us
-        force u_adam_riscv.ext_irq_src = 1'b0;
+        force u_sifang_core.ext_irq_src = 1'b0;
     end else if (TB_SELECTED_TEST_ID == 19) begin
         #5000;  // Wait 5us for test setup
-        force u_adam_riscv.ext_irq_src = 1'b1;
+        force u_sifang_core.ext_irq_src = 1'b1;
         #1000;
-        force u_adam_riscv.ext_irq_src = 1'b0;
+        force u_sifang_core.ext_irq_src = 1'b0;
     end
 end
 
@@ -355,231 +355,231 @@ if (`TB_DEBUG) begin : gen_tb_debug
 always @(posedge clk) begin
     if (rst) begin
         // Monitor dispatch
-        if (u_adam_riscv.disp0_valid_gated && !u_adam_riscv.sb_disp_stall) begin
+        if (u_sifang_core.disp0_valid_gated && !u_sifang_core.sb_disp_stall) begin
             $display("[DISP0] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv.dec0_pc,
-                     u_adam_riscv.dec0_fu,
-                     u_adam_riscv.sb_disp0_tag,
-                     u_adam_riscv.disp0_order_id,
-                     u_adam_riscv.dec0_rd,
-                     u_adam_riscv.dec0_tid,
+                     u_sifang_core.dec0_pc,
+                     u_sifang_core.dec0_fu,
+                     u_sifang_core.sb_disp0_tag,
+                     u_sifang_core.disp0_order_id,
+                     u_sifang_core.dec0_rd,
+                     u_sifang_core.dec0_tid,
                      $time);
         end
-        if (u_adam_riscv.disp1_valid_gated && !u_adam_riscv.sb_disp_stall) begin
+        if (u_sifang_core.disp1_valid_gated && !u_sifang_core.sb_disp_stall) begin
             $display("[DISP1] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv.dec1_pc,
-                     u_adam_riscv.dec1_fu,
-                     u_adam_riscv.sb_disp1_tag,
-                     u_adam_riscv.disp1_order_id,
-                     u_adam_riscv.dec1_rd,
-                     u_adam_riscv.dec1_tid,
+                     u_sifang_core.dec1_pc,
+                     u_sifang_core.dec1_fu,
+                     u_sifang_core.sb_disp1_tag,
+                     u_sifang_core.disp1_order_id,
+                     u_sifang_core.dec1_rd,
+                     u_sifang_core.dec1_tid,
                      $time);
         end
-        if (u_adam_riscv.iss0_valid) begin
+        if (u_sifang_core.iss0_valid) begin
             $display("[ISS0] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv.iss0_pc,
-                     u_adam_riscv.iss0_fu,
-                     u_adam_riscv.iss0_tag,
-                     u_adam_riscv.iss0_order_id,
-                     u_adam_riscv.iss0_rd,
-                     u_adam_riscv.iss0_tid,
+                     u_sifang_core.iss0_pc,
+                     u_sifang_core.iss0_fu,
+                     u_sifang_core.iss0_tag,
+                     u_sifang_core.iss0_order_id,
+                     u_sifang_core.iss0_rd,
+                     u_sifang_core.iss0_tid,
                      $time);
             $display("[ISS0 SRC DBG] rs1=x%0d used=%0b src1_tag=%0d ro1=0x%08h tagv=%0b tagd=0x%08h byp_a=0x%08h fwd_a=%0d @%0t",
-                     u_adam_riscv.iss0_rs1,
-                     u_adam_riscv.iss0_rs1_used,
-                     u_adam_riscv.iss0_src1_tag,
-                     u_adam_riscv.ro0_data1,
-                     u_adam_riscv.p0_tagbuf_a_valid,
-                     u_adam_riscv.p0_tagbuf_a_data,
-                     u_adam_riscv.byp0_op_a,
-                     u_adam_riscv.byp0_fwd_a,
+                     u_sifang_core.iss0_rs1,
+                     u_sifang_core.iss0_rs1_used,
+                     u_sifang_core.iss0_src1_tag,
+                     u_sifang_core.ro0_data1,
+                     u_sifang_core.p0_tagbuf_a_valid,
+                     u_sifang_core.p0_tagbuf_a_data,
+                     u_sifang_core.byp0_op_a,
+                     u_sifang_core.byp0_fwd_a,
                      $time);
         end
-        if (u_adam_riscv.p1_winner_valid) begin
+        if (u_sifang_core.p1_winner_valid) begin
             $display("[ISS1] pc=0x%08h fu=%0d tag=%0d ord=%0d rd=%0d tid=%0d @%0t",
-                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_pc :
-                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_pc :
-                                                    u_adam_riscv.p1_mul_cand_pc,
-                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_fu :
-                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_fu :
-                                                    u_adam_riscv.p1_mul_cand_fu,
-                     u_adam_riscv.p1_issue_tag,
-                     u_adam_riscv.p1_issue_arch_order_id,
-                     u_adam_riscv.p1_issue_is_mem ? u_adam_riscv.p1_mem_cand_rd :
-                     u_adam_riscv.p1_issue_is_div ? u_adam_riscv.p1_div_cand_rd :
-                                                    u_adam_riscv.p1_mul_cand_rd,
-                     u_adam_riscv.p1_issue_arch_tid,
+                     u_sifang_core.p1_issue_is_mem ? u_sifang_core.p1_mem_cand_pc :
+                     u_sifang_core.p1_issue_is_div ? u_sifang_core.p1_div_cand_pc :
+                                                    u_sifang_core.p1_mul_cand_pc,
+                     u_sifang_core.p1_issue_is_mem ? u_sifang_core.p1_mem_cand_fu :
+                     u_sifang_core.p1_issue_is_div ? u_sifang_core.p1_div_cand_fu :
+                                                    u_sifang_core.p1_mul_cand_fu,
+                     u_sifang_core.p1_issue_tag,
+                     u_sifang_core.p1_issue_arch_order_id,
+                     u_sifang_core.p1_issue_is_mem ? u_sifang_core.p1_mem_cand_rd :
+                     u_sifang_core.p1_issue_is_div ? u_sifang_core.p1_div_cand_rd :
+                                                    u_sifang_core.p1_mul_cand_rd,
+                     u_sifang_core.p1_issue_arch_tid,
                      $time);
-            if (u_adam_riscv.p1_issue_is_mem && u_adam_riscv.p1_mem_cand_mem_write) begin
+            if (u_sifang_core.p1_issue_is_mem && u_sifang_core.p1_mem_cand_mem_write) begin
                 $display("[ISS1 STORE DBG] rs2=x%0d used=%0b src2_tag=%0d ro2=0x%08h byp_b=0x%08h fwd_b=%0d @%0t",
-                         u_adam_riscv.p1_mem_cand_rs2,
-                         u_adam_riscv.p1_mem_cand_rs2_used,
-                         u_adam_riscv.p1_mem_cand_src2_tag,
-                         u_adam_riscv.ro1_data2,
-                         u_adam_riscv.byp1_op_b,
-                         u_adam_riscv.byp1_fwd_b,
+                         u_sifang_core.p1_mem_cand_rs2,
+                         u_sifang_core.p1_mem_cand_rs2_used,
+                         u_sifang_core.p1_mem_cand_src2_tag,
+                         u_sifang_core.ro1_data2,
+                         u_sifang_core.byp1_op_b,
+                         u_sifang_core.byp1_fwd_b,
                          $time);
             end
         end
         // Monitor exec_pipe1 memory requests
-        if (u_adam_riscv.p1_mem_req_valid) begin
+        if (u_sifang_core.p1_mem_req_valid) begin
             $display("[P1 MEM REQ] addr=0x%08h wen=%0b wdata=0x%08h tag=%0d @%0t",
-                     u_adam_riscv.p1_mem_req_addr,
-                     u_adam_riscv.p1_mem_req_wen,
-                     u_adam_riscv.p1_mem_req_wdata,
-                     u_adam_riscv.p1_mem_req_tag,
+                     u_sifang_core.p1_mem_req_addr,
+                     u_sifang_core.p1_mem_req_wen,
+                     u_sifang_core.p1_mem_req_wdata,
+                     u_sifang_core.p1_mem_req_tag,
                      $time);
         end
         // Monitor WB0
-        if (u_adam_riscv.wb0_valid) begin
+        if (u_sifang_core.wb0_valid) begin
             $display("[WB0] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
-                     u_adam_riscv.wb0_tag,
-                     u_adam_riscv.wb0_rd,
-                     u_adam_riscv.wb0_tid,
-                     u_adam_riscv.wb0_fu,
+                     u_sifang_core.wb0_tag,
+                     u_sifang_core.wb0_rd,
+                     u_sifang_core.wb0_tid,
+                     u_sifang_core.wb0_fu,
                      $time);
         end
         // Monitor WB1
-        if (u_adam_riscv.wb1_valid) begin
+        if (u_sifang_core.wb1_valid) begin
             $display("[WB1] tag=%0d rd=%0d tid=%0d fu=%0d @%0t",
-                     u_adam_riscv.wb1_tag,
-                     u_adam_riscv.wb1_rd,
-                     u_adam_riscv.wb1_tid,
-                     u_adam_riscv.wb1_fu,
+                     u_sifang_core.wb1_tag,
+                     u_sifang_core.wb1_rd,
+                     u_sifang_core.wb1_tid,
+                     u_sifang_core.wb1_fu,
                      $time);
         end
-        if (u_adam_riscv.w_regs_en_0) begin
+        if (u_sifang_core.w_regs_en_0) begin
             $display("[RF W0] tid=%0d rd=%0d data=0x%08h @%0t",
-                     u_adam_riscv.w_regs_tid_0,
-                     u_adam_riscv.w_regs_addr_0,
-                     u_adam_riscv.w_regs_data_0,
+                     u_sifang_core.w_regs_tid_0,
+                     u_sifang_core.w_regs_addr_0,
+                     u_sifang_core.w_regs_data_0,
                      $time);
         end
-        if (u_adam_riscv.w_regs_en_1) begin
+        if (u_sifang_core.w_regs_en_1) begin
             $display("[RF W1] tid=%0d rd=%0d data=0x%08h @%0t",
-                     u_adam_riscv.w_regs_tid_1,
-                     u_adam_riscv.w_regs_addr_1,
-                     u_adam_riscv.w_regs_data_1,
+                     u_sifang_core.w_regs_tid_1,
+                     u_sifang_core.w_regs_addr_1,
+                     u_sifang_core.w_regs_data_1,
                      $time);
         end
-        if (u_adam_riscv.if_valid &&
-            (u_adam_riscv.if_pc >= 32'h00000290) &&
-            (u_adam_riscv.if_pc <= 32'h00000670)) begin
+        if (u_sifang_core.if_valid &&
+            (u_sifang_core.if_pc >= 32'h00000290) &&
+            (u_sifang_core.if_pc <= 32'h00000670)) begin
             $display("[IF] pc=0x%08h inst=0x%08h @%0t",
-                     u_adam_riscv.if_pc,
-                     u_adam_riscv.if_inst,
+                     u_sifang_core.if_pc,
+                     u_sifang_core.if_inst,
                      $time);
         end
-        if (u_adam_riscv.pipe0_br_complete || u_adam_riscv.pipe0_br_ctrl) begin
+        if (u_sifang_core.pipe0_br_complete || u_sifang_core.pipe0_br_ctrl) begin
             $display("[BR] complete=%0b taken=%0b tid=%0d order=%0d target=0x%08h @%0t",
-                     u_adam_riscv.pipe0_br_complete,
-                     u_adam_riscv.pipe0_br_ctrl,
-                     u_adam_riscv.pipe0_br_tid,
-                     u_adam_riscv.pipe0_br_order_id,
-                     u_adam_riscv.pipe0_br_addr,
+                     u_sifang_core.pipe0_br_complete,
+                     u_sifang_core.pipe0_br_ctrl,
+                     u_sifang_core.pipe0_br_tid,
+                     u_sifang_core.pipe0_br_order_id,
+                     u_sifang_core.pipe0_br_addr,
                      $time);
         end
-        if (u_adam_riscv.u_stage_if.fetch_req_launch || (u_adam_riscv.combined_flush != 2'b00)) begin
+        if (u_sifang_core.u_stage_if.fetch_req_launch || (u_sifang_core.combined_flush != 2'b00)) begin
             $display("[IF CTRL] launch=%0b pc_out=0x%08h pending=0x%08h flags=0x%02h flush=%b @%0t",
-                     u_adam_riscv.u_stage_if.fetch_req_launch,
-                     u_adam_riscv.u_stage_if.pc_out,
-                     u_adam_riscv.u_stage_if.fetch_pc_pending,
-                     u_adam_riscv.u_stage_if.debug_if_flags,
-                     u_adam_riscv.combined_flush,
+                     u_sifang_core.u_stage_if.fetch_req_launch,
+                     u_sifang_core.u_stage_if.pc_out,
+                     u_sifang_core.u_stage_if.fetch_pc_pending,
+                     u_sifang_core.u_stage_if.debug_if_flags,
+                     u_sifang_core.combined_flush,
                      $time);
         end
         // Monitor store buffer write attempts
-        if (u_adam_riscv.sb_mem_write_valid) begin
+        if (u_sifang_core.sb_mem_write_valid) begin
             $display("[SB WRITE] addr=0x%08h data=0x%08h wen=0x%h @%0t",
-                     u_adam_riscv.sb_mem_write_addr,
-                     u_adam_riscv.sb_mem_write_data,
-                     u_adam_riscv.sb_mem_write_wen,
+                     u_sifang_core.sb_mem_write_addr,
+                     u_sifang_core.sb_mem_write_data,
+                     u_sifang_core.sb_mem_write_wen,
                      $time);
         end
         // Monitor TUBE status (test completion marker)
-        if (u_adam_riscv.tube_status !== 8'b0) begin
+        if (u_sifang_core.tube_status !== 8'b0) begin
             $display("[TUBE STATUS] status=0x%02h @%0t",
-                     u_adam_riscv.tube_status,
+                     u_sifang_core.tube_status,
                      $time);
         end
         // Monitor ROB commits
-        if (u_adam_riscv.rob_commit0_valid) begin
+        if (u_sifang_core.rob_commit0_valid) begin
             $display("[ROB C0] tag=%0d rd=%0d ord=%0d st=%0b @%0t",
-                     u_adam_riscv.rob_commit0_tag,
-                     u_adam_riscv.rob_commit0_rd,
-                     u_adam_riscv.rob_commit0_order_id,
-                     u_adam_riscv.rob_commit0_is_store,
+                     u_sifang_core.rob_commit0_tag,
+                     u_sifang_core.rob_commit0_rd,
+                     u_sifang_core.rob_commit0_order_id,
+                     u_sifang_core.rob_commit0_is_store,
                      $time);
         end
-        if (u_adam_riscv.rob_commit1_valid) begin
+        if (u_sifang_core.rob_commit1_valid) begin
             $display("[ROB C1] tag=%0d rd=%0d ord=%0d st=%0b @%0t",
-                     u_adam_riscv.rob_commit1_tag,
-                     u_adam_riscv.rob_commit1_rd,
-                     u_adam_riscv.rob_commit1_order_id,
-                     u_adam_riscv.rob_commit1_is_store,
+                     u_sifang_core.rob_commit1_tag,
+                     u_sifang_core.rob_commit1_rd,
+                     u_sifang_core.rob_commit1_order_id,
+                     u_sifang_core.rob_commit1_is_store,
                      $time);
         end
         if (($time >= 7000) && ($time <= 7600)) begin
             $display("[STALL DBG] dec0_valid=%0b dec0_pc=0x%08h dec1_valid=%0b dec1_pc=0x%08h stall=%0b rob_stall=%0b sb_stall=%0b rob0_full=%0b rob1_full=%0b @%0t",
-                     u_adam_riscv.dec0_valid,
-                     u_adam_riscv.dec0_pc,
-                     u_adam_riscv.dec1_valid,
-                     u_adam_riscv.dec1_pc,
-                     u_adam_riscv.stall,
-                     u_adam_riscv.rob_disp_stall,
-                     u_adam_riscv.sb_disp_stall,
-                     u_adam_riscv.rob0_full,
-                     u_adam_riscv.rob1_full,
+                     u_sifang_core.dec0_valid,
+                     u_sifang_core.dec0_pc,
+                     u_sifang_core.dec1_valid,
+                     u_sifang_core.dec1_pc,
+                     u_sifang_core.stall,
+                     u_sifang_core.rob_disp_stall,
+                     u_sifang_core.sb_disp_stall,
+                     u_sifang_core.rob0_full,
+                     u_sifang_core.rob1_full,
                      $time);
             $display("[ROB WIN DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_flushed=%0b h_tag=%0d h_ord=%0d @%0t",
-                     u_adam_riscv.u_rob.rob_head,
-                     u_adam_riscv.u_rob.rob_tail,
-                     u_adam_riscv.u_rob.rob_count,
-                     u_adam_riscv.u_rob.rob_valid[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_complete[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_flushed[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_tag[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_order_id[u_adam_riscv.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_head,
+                     u_sifang_core.u_rob.rob_tail,
+                     u_sifang_core.u_rob.rob_count,
+                     u_sifang_core.u_rob.rob_valid[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_complete[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_flushed[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_tag[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_order_id[u_sifang_core.u_rob.rob_head],
                      $time);
         end
-        if (u_adam_riscv.ext_timer_irq || u_adam_riscv.ext_external_irq ||
-            u_adam_riscv.trap_enter || u_adam_riscv.trap_return) begin
+        if (u_sifang_core.ext_timer_irq || u_sifang_core.ext_external_irq ||
+            u_sifang_core.trap_enter || u_sifang_core.trap_return) begin
             $display("[IRQ DBG] mtip=%0b meip=%0b trap_enter=%0b trap_return=%0b trap_pc=0x%08h trap_target=0x%08h mepc=0x%08h mcause=0x%08h mstatus=0x%08h mie=0x%08h mip=0x%08h mtvec=0x%08h @%0t",
-                     u_adam_riscv.ext_timer_irq,
-                     u_adam_riscv.ext_external_irq,
-                     u_adam_riscv.trap_enter,
-                     u_adam_riscv.trap_return,
-                     u_adam_riscv.trap_pc_r,
-                     u_adam_riscv.trap_target,
-                     u_adam_riscv.u_csr_unit.mepc,
-                     u_adam_riscv.u_csr_unit.mcause,
-                     u_adam_riscv.u_csr_unit.mstatus,
-                     u_adam_riscv.u_csr_unit.mie,
-                     u_adam_riscv.u_csr_unit.mip,
-                     u_adam_riscv.u_csr_unit.mtvec,
+                     u_sifang_core.ext_timer_irq,
+                     u_sifang_core.ext_external_irq,
+                     u_sifang_core.trap_enter,
+                     u_sifang_core.trap_return,
+                     u_sifang_core.trap_pc_r,
+                     u_sifang_core.trap_target,
+                     u_sifang_core.u_csr_unit.mepc,
+                     u_sifang_core.u_csr_unit.mcause,
+                     u_sifang_core.u_csr_unit.mstatus,
+                     u_sifang_core.u_csr_unit.mie,
+                     u_sifang_core.u_csr_unit.mip,
+                     u_sifang_core.u_csr_unit.mtvec,
                      $time);
         end
-        if ((u_adam_riscv.dec0_pc >= 32'h00000054) &&
-            (u_adam_riscv.dec0_pc <= 32'h0000005c)) begin
+        if ((u_sifang_core.dec0_pc >= 32'h00000054) &&
+            (u_sifang_core.dec0_pc <= 32'h0000005c)) begin
             $display("[ROB DBG] head=%0d tail=%0d count=%0d h_valid=%0b h_complete=%0b h_tag=%0d @%0t",
-                     u_adam_riscv.u_rob.rob_head,
-                     u_adam_riscv.u_rob.rob_tail,
-                     u_adam_riscv.u_rob.rob_count,
-                     u_adam_riscv.u_rob.rob_valid[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_complete[u_adam_riscv.u_rob.rob_head],
-                     u_adam_riscv.u_rob.rob_tag[u_adam_riscv.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_head,
+                     u_sifang_core.u_rob.rob_tail,
+                     u_sifang_core.u_rob.rob_count,
+                     u_sifang_core.u_rob.rob_valid[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_complete[u_sifang_core.u_rob.rob_head],
+                     u_sifang_core.u_rob.rob_tag[u_sifang_core.u_rob.rob_head],
                      $time);
             $display("[IQ INT DBG] slot0 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d | slot1 valid=%0b issued=%0b ready=%0b qj=%0d qk=%0d @%0t",
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_valid[0],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_issued[0],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_ready[0],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qj[0],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qk[0],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_valid[1],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_issued[1],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_ready[1],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qj[1],
-                     u_adam_riscv.u_dispatch_unit.u_iq_int.e_qk[1],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_valid[0],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_issued[0],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_ready[0],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_qj[0],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_qk[0],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_valid[1],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_issued[1],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_ready[1],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_qj[1],
+                     u_sifang_core.u_dispatch_unit.u_iq_int.e_qk[1],
                      $time);
         end
     end
@@ -603,16 +603,16 @@ always @(posedge clk) begin
         if (heartbeat_counter % 1000 == 0) begin
             $display("[HEARTBEAT] Cycle=%0d PC=0x%08h if_valid=%b if_inst=0x%08h dec0_valid=%b fb_pop0_valid=%b stall=%b rob_stall=%b sb_stall=%b br_pending=%b rob_count=%0d rst=%b @%0t",
                      heartbeat_counter,
-                     u_adam_riscv.dec0_pc,
-                     u_adam_riscv.if_valid,
-                     u_adam_riscv.if_inst,
-                     u_adam_riscv.dec0_valid,
-                     u_adam_riscv.fb_pop0_valid,
-                     u_adam_riscv.stall,
-                     u_adam_riscv.rob_disp_stall,
-                     u_adam_riscv.sb_disp_stall,
-                     u_adam_riscv.sb_branch_pending_any,
-                     u_adam_riscv.u_rob.rob_count,
+                     u_sifang_core.dec0_pc,
+                     u_sifang_core.if_valid,
+                     u_sifang_core.if_inst,
+                     u_sifang_core.dec0_valid,
+                     u_sifang_core.fb_pop0_valid,
+                     u_sifang_core.stall,
+                     u_sifang_core.rob_disp_stall,
+                     u_sifang_core.sb_disp_stall,
+                     u_sifang_core.sb_branch_pending_any,
+                     u_sifang_core.u_rob.rob_count,
                      rst,
                      $time);
         end

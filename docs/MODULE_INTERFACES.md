@@ -9,7 +9,7 @@
 
 ### 00. 顶层 / 集成
 
-- [`adam_riscv`](#adam_riscv) - `rtl/adam_riscv.v` - OoO 双发射 RV32IM SMT 核心顶层（IF/Decode/Dispatch/Exec/Mem/WB 串接）
+- [`sifang_core`](#sifang_core) - `rtl/sifang_core.v` - OoO 双发射 RV32IM SMT 核心顶层（IF/Decode/Dispatch/Exec/Mem/WB 串接）
 
 ### 01. 取指 (IF) 与分支预测
 
@@ -97,14 +97,14 @@
 
 ### 11. FPGA 板级顶层与 beacon
 
-- [`adam_riscv_ax7203_beacon_transport_top`](#adam_riscv_ax7203_beacon_transport_top) - `fpga/rtl/adam_riscv_ax7203_beacon_transport_top.v` - 板级顶层变体：UART beacon 透传调试
-- [`adam_riscv_ax7203_branch_probe_top`](#adam_riscv_ax7203_branch_probe_top) - `fpga/rtl/adam_riscv_ax7203_branch_probe_top.v` - 板级顶层变体：branch 探针
-- [`adam_riscv_ax7203_io_smoke_top`](#adam_riscv_ax7203_io_smoke_top) - `fpga/rtl/adam_riscv_ax7203_io_smoke_top.v` - 板级顶层变体：IO smoke 测试
-- [`adam_riscv_ax7203_issue_probe_top`](#adam_riscv_ax7203_issue_probe_top) - `fpga/rtl/adam_riscv_ax7203_issue_probe_top.v` - 板级顶层变体：issue 探针
-- [`adam_riscv_ax7203_main_bridge_probe_top`](#adam_riscv_ax7203_main_bridge_probe_top) - `fpga/rtl/adam_riscv_ax7203_main_bridge_probe_top.v` - 板级顶层变体：主桥探针
-- [`adam_riscv_ax7203_status_top`](#adam_riscv_ax7203_status_top) - `fpga/rtl/adam_riscv_ax7203_status_top.v` - 板级顶层变体：status beacon
-- [`adam_riscv_ax7203_top`](#adam_riscv_ax7203_top) - `fpga/rtl/adam_riscv_ax7203_top.v` - AX7203 板级最终顶层（核心 + DDR3 桥 + UART + LED）
-- [`adam_riscv_ax7203_uart_echo_raw_top`](#adam_riscv_ax7203_uart_echo_raw_top) - `fpga/rtl/adam_riscv_ax7203_uart_echo_raw_top.v` - 板级顶层变体：UART 回环 smoke
+- [`sifang_core_ax7203_beacon_transport_top`](#sifang_core_ax7203_beacon_transport_top) - `fpga/rtl/sifang_core_ax7203_beacon_transport_top.v` - 板级顶层变体：UART beacon 透传调试
+- [`sifang_core_ax7203_branch_probe_top`](#sifang_core_ax7203_branch_probe_top) - `fpga/rtl/sifang_core_ax7203_branch_probe_top.v` - 板级顶层变体：branch 探针
+- [`sifang_core_ax7203_io_smoke_top`](#sifang_core_ax7203_io_smoke_top) - `fpga/rtl/sifang_core_ax7203_io_smoke_top.v` - 板级顶层变体：IO smoke 测试
+- [`sifang_core_ax7203_issue_probe_top`](#sifang_core_ax7203_issue_probe_top) - `fpga/rtl/sifang_core_ax7203_issue_probe_top.v` - 板级顶层变体：issue 探针
+- [`sifang_core_ax7203_main_bridge_probe_top`](#sifang_core_ax7203_main_bridge_probe_top) - `fpga/rtl/sifang_core_ax7203_main_bridge_probe_top.v` - 板级顶层变体：主桥探针
+- [`sifang_core_ax7203_status_top`](#sifang_core_ax7203_status_top) - `fpga/rtl/sifang_core_ax7203_status_top.v` - 板级顶层变体：status beacon
+- [`sifang_core_ax7203_top`](#sifang_core_ax7203_top) - `fpga/rtl/sifang_core_ax7203_top.v` - AX7203 板级最终顶层（核心 + DDR3 桥 + UART + LED）
+- [`sifang_core_ax7203_uart_echo_raw_top`](#sifang_core_ax7203_uart_echo_raw_top) - `fpga/rtl/sifang_core_ax7203_uart_echo_raw_top.v` - 板级顶层变体：UART 回环 smoke
 - [`uart_branch_probe_beacon`](#uart_branch_probe_beacon) - `fpga/rtl/uart_branch_probe_beacon.v` - UART branch probe beacon
 - [`uart_ddr3_fetch_probe_beacon`](#uart_ddr3_fetch_probe_beacon) - `fpga/rtl/uart_ddr3_fetch_probe_beacon.v` - UART DDR3 fetch probe beacon
 - [`uart_issue_probe_beacon`](#uart_issue_probe_beacon) - `fpga/rtl/uart_issue_probe_beacon.v` - UART issue probe beacon
@@ -120,9 +120,9 @@
 
 ## 00. 顶层 / 集成
 
-### adam_riscv
+### sifang_core
 
-- 源文件：`rtl/adam_riscv.v`
+- 源文件：`rtl/sifang_core.v`
 - 角色：OoO 双发射 RV32IM SMT 核心顶层（IF/Decode/Dispatch/Exec/Mem/WB 串接）
 - 端口：
 
@@ -2805,9 +2805,9 @@
 
 ## 11. FPGA 板级顶层与 beacon
 
-### adam_riscv_ax7203_beacon_transport_top
+### sifang_core_ax7203_beacon_transport_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_beacon_transport_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_beacon_transport_top.v`
 - 角色：板级顶层变体：UART beacon 透传调试
 - 端口：
 
@@ -2820,9 +2820,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_branch_probe_top
+### sifang_core_ax7203_branch_probe_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_branch_probe_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_branch_probe_top.v`
 - 角色：板级顶层变体：branch 探针
 - 端口：
 
@@ -2835,9 +2835,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_io_smoke_top
+### sifang_core_ax7203_io_smoke_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_io_smoke_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_io_smoke_top.v`
 - 角色：板级顶层变体：IO smoke 测试
 - 端口：
 
@@ -2850,9 +2850,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_issue_probe_top
+### sifang_core_ax7203_issue_probe_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_issue_probe_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_issue_probe_top.v`
 - 角色：板级顶层变体：issue 探针
 - 端口：
 
@@ -2865,9 +2865,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_main_bridge_probe_top
+### sifang_core_ax7203_main_bridge_probe_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_main_bridge_probe_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_main_bridge_probe_top.v`
 - 角色：板级顶层变体：主桥探针
 - 端口：
 
@@ -2880,9 +2880,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_status_top
+### sifang_core_ax7203_status_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_status_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_status_top.v`
 - 角色：板级顶层变体：status beacon
 - 端口：
 
@@ -2895,9 +2895,9 @@
     output wire [4:0] led
 ```
 
-### adam_riscv_ax7203_top
+### sifang_core_ax7203_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_top.v`
 - 角色：AX7203 板级最终顶层（核心 + DDR3 桥 + UART + LED）
 - 端口：
 
@@ -2925,9 +2925,9 @@
     output wire ddr3_cs_n `endif
 ```
 
-### adam_riscv_ax7203_uart_echo_raw_top
+### sifang_core_ax7203_uart_echo_raw_top
 
-- 源文件：`fpga/rtl/adam_riscv_ax7203_uart_echo_raw_top.v`
+- 源文件：`fpga/rtl/sifang_core_ax7203_uart_echo_raw_top.v`
 - 角色：板级顶层变体：UART 回环 smoke
 - 端口：
 

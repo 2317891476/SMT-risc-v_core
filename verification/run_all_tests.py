@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Unified test runner for AdamRiscv.
+Unified test runner for SifangCore.
 Supports: basic tests, riscv-tests, riscv-arch-test, RISCOF.
 
 Test suites:
@@ -477,7 +477,7 @@ class TestRunner:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="AdamRiscv Unified Test Runner")
+    parser = argparse.ArgumentParser(description="SifangCore Unified Test Runner")
     parser.add_argument("--basic", action="store_true", help="Run basic tests (test1, test2, test_rv32i_full)")
     parser.add_argument("--riscv-tests", action="store_true", help="Run classic riscv-tests (auto-download)")
     parser.add_argument("--riscv-arch-test", action="store_true", help="Run official arch tests (auto-download)")
@@ -494,7 +494,7 @@ def main():
     runner.start_time = time.time()
     
     print("=" * 60)
-    print("  AdamRiscv Unified Test Runner")
+    print("  SifangCore Unified Test Runner")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
     

@@ -1,6 +1,6 @@
-# CoreMark Port for AdamRiscv AX7203 (BRAM Bare-Metal)
+# CoreMark Port for SifangCore AX7203 (BRAM Bare-Metal)
 
-This directory contains the CoreMark platform port for **adam_riscv_v2 (RV32IM)** on the **AX7203 FPGA** target.
+This directory contains the CoreMark platform port for **sifang_core_v2 (RV32IM)** on the **AX7203 FPGA** target.
 
 The port is designed for:
 

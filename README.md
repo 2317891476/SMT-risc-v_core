@@ -1,8 +1,8 @@
-﻿# AdamRiscv — 高性能乱序双发射 RISC-V 处理器
+﻿# SifangCore: A RISC-V Processor Core
 
 ## 1. 项目概述
 
-`AdamRiscv` 是面向**全国 CPU 系统能力培养大赛**的高性能 RV32I 处理器实现。项目在一个教学级 SMT 有序内核基础上，完成了工业级的微架构升级，后端已从集中式 Scoreboard 全面迁移至 **重命名 + ROB + 分离式发射队列 + 物理寄存器堆** 的现代乱序架构。
+`SifangCore` 是面向**全国 CPU 系统能力培养大赛**的高性能 RV32I 处理器实现。项目在一个教学级 SMT 有序内核基础上，完成了工业级的微架构升级，后端已从集中式 Scoreboard 全面迁移至 **重命名 + ROB + 分离式发射队列 + 物理寄存器堆** 的现代乱序架构。
 
 IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
  1    2      3              4               5    6     7    8
@@ -117,10 +117,10 @@ IF → FB → DualDec → Dispatch(Rename+IQ) → RO → EX → MEM → WB
 ## 3. 目录结构
 
 ```text
-AdamRiscv/
+SifangCore/
 ├─ module/CORE/RTL/           # 核心 RTL
-│  ├─ adam_riscv.v                  # 顶层 (乱序双发射)
-│  ├─ adam_riscv.v                顶层 (乱序双发射, 新架构)
+│  ├─ sifang_core.v                  # 顶层 (乱序双发射)
+│  ├─ sifang_core.v                顶层 (乱序双发射, 新架构)
 │  │
 │  │  ── 前端 ──
 │  ├─ stage_if.v                 # ★ 升级版 IF (集成 BPU)
@@ -177,7 +177,7 @@ AdamRiscv/
 │  ├─ observability_contract_ax7203.md  # ★ UART/LED 输出规范
 │  ├─ resource.md                   # ★ 官方引脚资源文档
 │  ├─ rtl/
-│  │  ├─ adam_riscv_ax7203_top.v # ★ FPGA 顶层封装
+│  │  ├─ sifang_core_ax7203_top.v # ★ FPGA 顶层封装
 │  │  └─ uart_tx_simple.v           # ★ 简化 UART (板级调试)
 │  ├─ constraints/
 │  │  ├─ ax7203_base.xdc            # ★ 时钟/复位约束
@@ -323,7 +323,7 @@ python verification/run_all_tests.py --basic
 
 ```
 ============================================================
-  AdamRiscv Unified Test Runner
+  SifangCore Unified Test Runner
   2026-03-29 13:59:12
 ============================================================
   Running basic tests...
@@ -631,7 +631,7 @@ python verification/run_all_tests.py --basic  # test_rv32i_full.s 包含 17 条�
 
 ## 8. 架构概述
 
-| 特性 | 当前架构 (adam_riscv.v) |
+| 特性 | 当前架构 (sifang_core.v) |
 |------|-------------------|
 | 流水线 | IF→FB→DualDec→Dispatch(Rename+IQ)→RO→EX(×2)→MEM→WB |
 | 后端架构 | **Rename + ROB + 3×Split IQ + 48-entry PRF** (替代旧 Scoreboard) |
@@ -765,12 +765,12 @@ fpga/
 ├─ observability_contract_ax7203.md # UART/LED 输出规范
 ├─ resource.md                      # ★ 官方硬件资源文档 (完整引脚表)
 ├─ rtl/
-│  ├─ adam_riscv_ax7203_top.v                 # 默认板级 top（CPU UART 板测入口）
-│  ├─ adam_riscv_ax7203_status_top.v          # 板级状态诊断 top
-│  ├─ adam_riscv_ax7203_issue_probe_top.v     # issue 路径诊断 top
-│  ├─ adam_riscv_ax7203_branch_probe_top.v    # branch 路径诊断 top
-│  ├─ adam_riscv_ax7203_main_bridge_probe_top.v # 主桥接 UART 诊断 top
-│  ├─ adam_riscv_ax7203_io_smoke_top.v        # 纯板级 IO smoke top
+│  ├─ sifang_core_ax7203_top.v                 # 默认板级 top（CPU UART 板测入口）
+│  ├─ sifang_core_ax7203_status_top.v          # 板级状态诊断 top
+│  ├─ sifang_core_ax7203_issue_probe_top.v     # issue 路径诊断 top
+│  ├─ sifang_core_ax7203_branch_probe_top.v    # branch 路径诊断 top
+│  ├─ sifang_core_ax7203_main_bridge_probe_top.v # 主桥接 UART 诊断 top
+│  ├─ sifang_core_ax7203_io_smoke_top.v        # 纯板级 IO smoke top
 │  ├─ uart_rx_monitor.v                       # 板侧 UART 帧监测器
 │  ├─ uart_status_beacon.v                    # 状态信标
 │  ├─ uart_issue_probe_beacon.v               # issue probe 信标
@@ -811,7 +811,7 @@ fpga/
 | 项目 | 当前已验证结果 | 证据 |
 |------|------|------|
 | 主线自动验收 | `PASS` / `FailedStage=none` | `build/fpga_mainline_validation/summary.txt` |
-| Bitstream / Build ID | `0x69E89179` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| Bitstream / Build ID | `0x69E89179` | `build/ax7203/sifang_core_ax7203_bitstream_id.txt` |
 | 板级配置 | `RS=16 / FetchBuffer=16 / SMT=1 / 25MHz / mem_subsys + DDR3 + L2_PASSTHROUGH` | 本节 §13.4 固定配置 |
 | JTAG 烧录 | `DONE=1`, `EOS=1`, `USERCODE/USR_ACCESS` 均匹配 | `build/fpga_mainline_validation/09_program_jtag.log` |
 | DDR3 板测 | 捕获 `CAL=1` 与 `DDR3 PASS`，顶层仿真和板级 ROM 均执行 `0x8000_0000` 的 `DEADBEEF` 写回读 | `build/fpga_mainline_validation/05_run_top_sim.log`, `build/uart_test_rs16.txt` |
@@ -880,7 +880,7 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 |------|------|------|------|
 | 后端架构 | **OoO (Rename+ROB+IQ+PRF)** | OoO | 当前主基线已经是乱序后端 |
 | 发射宽度 | `2` | `2` | 当前仍为双发射 core |
-| ROB 深度 | `16` | `16` | `adam_riscv.v` 固定值 |
+| ROB 深度 | `16` | `16` | `sifang_core.v` 固定值 |
 | 物理寄存器堆 | `48-entry/thread PRF (4R2W)` | `48` | `32 arch + 16 rename` |
 | IQ 配置 | `INT=8, MEM=16, MUL=4` | `INT=8, MEM=16, MUL=4` | 当前主线为 `RS_DEPTH=16` |
 | Fetch Buffer 深度 | `16` | `16` | 当前主线关键参数 |
@@ -904,7 +904,7 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **当前综合进去的主要部件**
 
-- `adam_riscv` 主核：双发射前后端、`dispatch_unit`、`rob`、`rename_map_table`、`freelist`、`phys_regfile`、`issue_queue`×3、`iq_pipe1_arbiter`
+- `sifang_core` 主核：双发射前后端、`dispatch_unit`、`rob`、`rename_map_table`、`freelist`、`phys_regfile`、`issue_queue`×3、`iq_pipe1_arbiter`
 - 执行与访存路径：`exec_pipe0/1`、`mul_unit`、`lsu_shell`、`store_buffer`、`mem_subsys`、`l2_arbiter`、`l2_cache` passthrough、`clint`、`plic`
 - DDR3 路径：`ddr3_mem_port` + MIG 7-Series IP + AXI lane steering / CDC bridge
 - 取指路径：`stage_if + BPU + inst_memory`
@@ -932,7 +932,7 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **当前最差路径**
 
-- 当前全局最差路径是异步 recovery：`por_rst_n_reg/C -> u_adam_riscv/post_lock_cnt_reg[4]/CLR`，slack `+0.426ns`。
+- 当前全局最差路径是异步 recovery：`por_rst_n_reg/C -> u_sifang_core/post_lock_cnt_reg[4]/CLR`，slack `+0.426ns`。
 - 当前最差 setup 路径已不在 `u_p1_arb -> PRF -> bypass` 或 MEM candidate CE 链上；报告中最差 setup 示例为 UART TX 到板级 monitor 的跨时钟/调试路径，slack `+0.883ns`。
 - DDR3/MIG 相关 setup 路径也通过，报告中 MIG PHY control / ODDR 相关路径 slack 均为正值。
 
@@ -952,10 +952,10 @@ vivado -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **当前固定边界**
 
-- DUT 顶层：`adam_riscv`
+- DUT 顶层：`sifang_core`
 - 保留：OoO core、`mem_subsys`、L1 ICache、full L1DCache、MMIO、benchmark payload、CSR / `mcycle` / `minstret`
-- 替换：`adam_riscv_ax7203_top`、`ddr3_mem_port`、MIG / DDR3 PHY、板级 bit-level UART
-- mock boundary：`adam_riscv` 对外暴露的 DDR3 高层 `req/resp` 接口
+- 替换：`sifang_core_ax7203_top`、`ddr3_mem_port`、MIG / DDR3 PHY、板级 bit-level UART
+- mock boundary：`sifang_core` 对外暴露的 DDR3 高层 `req/resp` 接口
 - 默认模式：`direct preload`
 - 第二模式：`loader-semantic`（byte-level 注入，当前仅完成骨架）
 - Verilator 运行环境：**仅 WSL**；Windows 侧通过 `wsl.exe` 调用，不提供 Windows-native fallback
@@ -1044,13 +1044,13 @@ python fpga/scripts/run_verilator_mainline.py --mode loader-semantic --benchmark
 
 | Profile | Top | 默认 ROM | 用途 |
 |------|------|------|------|
-| `core_diag` | `adam_riscv_ax7203_top` | `rom/test_fpga_uart_board_diag_gap.s` | 单线程/低频 CPU 板级 smoke |
-| `uart_echo` | `adam_riscv_ax7203_top` | `rom/test_fpga_uart_echo.s` | 单线程 MMIO UART echo / RX 验证 |
-| `core_status` | `adam_riscv_ax7203_status_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 状态导出诊断 |
-| `issue_probe` | `adam_riscv_ax7203_issue_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | issue / wakeup 诊断 |
-| `branch_probe` | `adam_riscv_ax7203_branch_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | branch 链路诊断 |
-| `main_bridge_probe` | `adam_riscv_ax7203_main_bridge_probe_top` | `rom/test_fpga_uart_board_diag.s` | 主 UART bridge 观测 |
-| `io_smoke` | `adam_riscv_ax7203_io_smoke_top` | 无 | 纯板级 IO 通路 smoke |
+| `core_diag` | `sifang_core_ax7203_top` | `rom/test_fpga_uart_board_diag_gap.s` | 单线程/低频 CPU 板级 smoke |
+| `uart_echo` | `sifang_core_ax7203_top` | `rom/test_fpga_uart_echo.s` | 单线程 MMIO UART echo / RX 验证 |
+| `core_status` | `sifang_core_ax7203_status_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | 状态导出诊断 |
+| `issue_probe` | `sifang_core_ax7203_issue_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | issue / wakeup 诊断 |
+| `branch_probe` | `sifang_core_ax7203_branch_probe_top` | `rom/test_fpga_uart_board_diag_pollsafe.s` | branch 链路诊断 |
+| `main_bridge_probe` | `sifang_core_ax7203_main_bridge_probe_top` | `rom/test_fpga_uart_board_diag.s` | 主 UART bridge 观测 |
+| `io_smoke` | `sifang_core_ax7203_io_smoke_top` | 无 | 纯板级 IO 通路 smoke |
 
 **历史/辅助脚本示例**
 
@@ -1125,7 +1125,7 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py --bridge-audit-step2-only --port 
 | 项目 | 当前结果 | 证据 |
 |------|------|------|
 | Step2-only 顶层仿真 | `PASS`，`ready=1 retire=1 calib=1 tube=04`，`READY + C1/C2 + C3/C4/C5 START/AFTER/OK + SUMMARY(mask=0x1F)` 全部到齐 | `build/fpga_bridge_audit_step2_only/06_run_step2_only_top_sim.log` |
-| 最新辅助 bitstream | `BuildID=0x69E39477` | `build/ax7203/adam_riscv_ax7203_bitstream_id.txt` |
+| 最新辅助 bitstream | `BuildID=0x69E39477` | `build/ax7203/sifang_core_ax7203_bitstream_id.txt` |
 | 当前辅助 bitstream 时序 | `WNS=+0.522ns`, `WHS=+0.030ns`, `All user specified timing constraints are met.` | `build/ax7203/reports/timing_summary_aggressive.rpt` |
 | 脚本化 10 秒板测 gate | `PASS`；板级抓包按 beacon 帧解析稳定恢复 `READY/C1..C5/SUMMARY`，`summary_mask=0x1F`，`any_bad=0` | `build/fpga_bridge_audit_step2_only/summary.txt` |
 | 板级原始抓包 | 二进制原始串口数据 | `build/ddr3_bridge_audit_step2_only_uart_capture.bin` |
@@ -1332,7 +1332,7 @@ ICache 放大后 Verilator 与板级 IPC 已高度一致，说明新瓶颈（BPU
 
 **关键产物**
 
-- Bitstream: `build/ax7203/adam_riscv_ax7203_xc7a200tfbg484-2.bit`（`BuildID=0x69E8BEAF`）
+- Bitstream: `build/ax7203/sifang_core_ax7203_xc7a200tfbg484-2.bit`（`BuildID=0x69E8BEAF`）
 - 顶层汇总: `build/fpga_benchmark_ddr3/summary.txt`
 - UART 板级捕获（baseline）: `build/dhrystone_ddr3_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
 - UART 板级捕获（smoke）: `build/dhrystone_ddr3_smoke_uart_capture.txt`, `.bin`, `.loader.decoded.txt`
@@ -1429,7 +1429,7 @@ python fpga/scripts/run_fpga_benchmark_ddr3.py `
 | [rtl/icache.v](rtl/icache.v) | 新增 `icache_miss_event` 输出（复用现有 `req_valid_r && !hit` 条件）|
 | [rtl/inst_memory.v](rtl/inst_memory.v) + [rtl/stage_if.v](rtl/stage_if.v) | 向上透传 `icache_miss_event` 到核顶层 |
 | [rtl/store_buffer.v](rtl/store_buffer.v) + [rtl/lsu_shell.v](rtl/lsu_shell.v) | 新增 `sb_stall_event` 输出（复用 `sb_full_t0 \|\| sb_full_t1`），经 lsu_shell 透传到核顶层 |
-| [rtl/adam_riscv.v](rtl/adam_riscv.v) | CSR 实例化处新增 7 个 HPM port 连接；4 个活跃事件源（branch/icache/sb/issue_bubble）+ 3 个 `1'b0` 占位 |
+| [rtl/sifang_core.v](rtl/sifang_core.v) | CSR 实例化处新增 7 个 HPM port 连接；4 个活跃事件源（branch/icache/sb/issue_bubble）+ 3 个 `1'b0` 占位 |
 
 **软件读取（内联汇编避开 OoO 核 hazard）**
 
@@ -1603,7 +1603,7 @@ vivado.bat -mode batch -source fpga/program_ax7203_jtag.tcl
 
 **方案**: 在 Scoreboard 发射（IS）和 Register Operand（RO）之间插入一组流水线寄存器 `reg_is_ro`，将单周期跨模块路径拆分为两拍。
 
-**修改范围**: 仅 `rtl/adam_riscv.v`（+236/-84 行），不修改任何子模块。
+**修改范围**: 仅 `rtl/sifang_core.v`（+236/-84 行），不修改任何子模块。
 
 | 内容 | 说明 |
 |------|------|
@@ -1706,7 +1706,7 @@ win_br_reg[15] (1.9ns)
   ↓ [B] effective_br_seq → pending_branch → fpga_cand_l0 filter (~8ns, 8 levels, CARRY4)
   ↓ [C] Candidate tree reduction l0→l4 (~3ns, 8 levels)
   ↓ [D] sel0/sel1 + issue output mux (~12ns, 15 levels, fanout=204)
-  ↓ [E] iss0_tag → adam_riscv iss0_is_rocc bypass → scoreboard win_issued/ready (~18ns, 16 levels)
+  ↓ [E] iss0_tag → sifang_core iss0_is_rocc bypass → scoreboard win_issued/ready (~18ns, 16 levels)
 win_ready_reg[3] (51ns)
 ```
 
@@ -1716,12 +1716,12 @@ win_ready_reg[3] (51ns)
 
 #### Phase 1: 切断 `iss0_is_rocc` 跨模块反馈环 (消除 Stage E, -18ns)
 
-FPGA 构建中 `ENABLE_ROCC_ACCEL=0`（默认值），RoCC 不综合。但 `iss0_is_rocc` 信号仍由 decode 组合逻辑驱动，形成 scoreboard → adam_riscv → scoreboard 的跨模块反馈路径（~18ns, 16 levels），占总延迟的 36%。
+FPGA 构建中 `ENABLE_ROCC_ACCEL=0`（默认值），RoCC 不综合。但 `iss0_is_rocc` 信号仍由 decode 组合逻辑驱动，形成 scoreboard → sifang_core → scoreboard 的跨模块反馈路径（~18ns, 16 levels），占总延迟的 36%。
 
 | 文件 | 修改 |
 |------|------|
 | `rtl/scoreboard.v` L1530 | `ifdef FPGA_MODE` 下去掉 RoCC 门控：`if (sel0_found)` 替代原条件 |
-| `rtl/adam_riscv.v` L1177 | `ifdef FPGA_MODE` 下 hardwire `iss0_is_rocc = 1'b0` |
+| `rtl/sifang_core.v` L1177 | `ifdef FPGA_MODE` 下 hardwire `iss0_is_rocc = 1'b0` |
 
 #### Phase 2: 候选谓词寄存化 (消除 Stage A+B, -16ns)
 
@@ -1764,7 +1764,7 @@ scoreboard/fu_busy_reg[6] → exec_pipe0/stored_br_mark_reg
 
 **注意**: `reg_is_ro` 流水线寄存器（§13.15 原始设计）因仿真中引入 flush/branch 交互 bug 被暂时回退。仅保留 Scoreboard 侧优化（entry_eligible_r + store tree + iss0_is_rocc bypass）。同时修复了 scoreboard flush 时 `branch_in_flight` 可能死锁的 bug（flush 块中强制清零对应线程的 `branch_in_flight`）。
 
-**修改范围**: `rtl/scoreboard.v`（`ifdef FPGA_MODE` 内 + flush 安全修复）+ `rtl/adam_riscv.v`（仅 `iss0_is_rocc` ifdef）。
+**修改范围**: `rtl/scoreboard.v`（`ifdef FPGA_MODE` 内 + flush 安全修复）+ `rtl/sifang_core.v`（仅 `iss0_is_rocc` ifdef）。
 
 **仿真验证**: 26/26 basic tests PASS。FPGA bitstream 在 30 MHz 下生成（9.28 MB）。
 
@@ -1804,7 +1804,7 @@ OoO 后端的关键路径为 MEM IQ 的 O(N²) 选择链（load-store ordering�
 
 **根因**: `assign rstn_in = sys_rstn;` 在 `clk_locked` 断言前释放核心复位。真实 MMCM 在锁定前产生毛刺时钟边沿，破坏 OoO 后端的复杂内部状态（freelist 指针、ROB 计数器、IQ 条目）。旧 Scoreboard 结构更简单，能容忍启动瞬态。
 
-**修复方案**: 在 `adam_riscv.v` 中添加 `ifdef FPGA_MODE` 保护的复位门控:
+**修复方案**: 在 `sifang_core.v` 中添加 `ifdef FPGA_MODE` 保护的复位门控:
 
 ```verilog
 reg [7:0] post_lock_cnt;
@@ -1840,7 +1840,7 @@ assign rstn_in = sys_rstn & post_lock_ready;
 | Slice Registers | 9,779 (3.63%) |
 | 综合时间 | 3 分 30 秒 |
 
-**修改范围**: `rtl/adam_riscv.v`（`post_lock_cnt` + `post_lock_ready`）+ `comp_test/clk_wiz_0_stub.v`（更真实的 lock 延迟建模）。
+**修改范围**: `rtl/sifang_core.v`（`post_lock_cnt` + `post_lock_ready`）+ `comp_test/clk_wiz_0_stub.v`（更真实的 lock 延迟建模）。
 
 **仿真验证**: FPGA_MODE smoke test PASS, 25/26 basic tests PASS (RS_DEPTH=16, 仅 `test_clint_timer_rearm` 失败), 25/26 basic tests PASS (RS_DEPTH=4, 同一测试失败)。经 §13.17 优化后，OoO 后端 Fmax 从 20 MHz 提升至 25 MHz。
 
@@ -1867,7 +1867,7 @@ assign rstn_in = sys_rstn & post_lock_ready;
 | **25 MHz** | **+6.732ns** | **+0.053ns** | **✅ Bitstream 生成** |
 | 30 MHz | — | -1.644ns | ❌ 仍无法收敛 |
 
-> **里程碑**: OoO 后端 Fmax 从 20 MHz 提升至 **25 MHz (+25%)**。Bitstream 位于 `build/ax7203/adam_riscv_ax7203_xc7a200tfbg484-2.bit`。
+> **里程碑**: OoO 后端 Fmax 从 20 MHz 提升至 **25 MHz (+25%)**。Bitstream 位于 `build/ax7203/sifang_core_ax7203_xc7a200tfbg484-2.bit`。
 
 #### Phase 2: RS_DEPTH=16 可行性探索
 

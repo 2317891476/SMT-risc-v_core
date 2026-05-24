@@ -396,7 +396,7 @@ module verilator_mainline_top (
     wire [1:0]  sb_head_idx_t0 = u_dut.u_lsu_shell.u_store_buffer.sb_head;
     wire [1:0]  sb_head_idx_t1 = 2'd0;
 
-    adam_riscv u_dut (
+    sifang_core u_dut (
         .sys_clk(sys_clk),
         .sys_rstn(sys_rstn),
         .led(led_unused),

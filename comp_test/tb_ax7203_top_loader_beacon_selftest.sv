@@ -111,7 +111,7 @@ module tb_ax7203_top_loader_beacon_selftest;
     wire core_uart_tx_start = dut.core_uart_byte_valid_dbg;
     wire [7:0] core_uart_tx_byte = dut.core_uart_byte_dbg;
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p   (sys_clk_p),
         .sys_clk_n   (sys_clk_n),
         .sys_rst_n   (sys_rst_n),

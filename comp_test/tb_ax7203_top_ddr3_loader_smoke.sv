@@ -229,7 +229,7 @@ module tb_ax7203_top_ddr3_loader_smoke;
     wire [7:0] dbg_uart_flags         = fetch_dbg[335:328];
     wire [7:0] dbg_uart_tx_write_count= fetch_dbg[327:320];
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p   (sys_clk_p),
         .sys_clk_n   (sys_clk_n),
         .sys_rst_n   (sys_rst_n),
@@ -259,15 +259,15 @@ module tb_ax7203_top_ddr3_loader_smoke;
             if (fast_uart_inject != 0) begin
                 injected_uart_byte = data;
                 @(negedge dut.core_clk_dbg);
-                force dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_byte_valid = 1'b1;
-                force dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_byte = injected_uart_byte;
-                force dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_frame_error = 1'b0;
+                force dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_byte_valid = 1'b1;
+                force dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_byte = injected_uart_byte;
+                force dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_frame_error = 1'b0;
                 @(posedge dut.core_clk_dbg);
                 @(negedge dut.core_clk_dbg);
-                release dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_byte_valid;
-                release dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_byte;
-                release dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_frame_error;
-                while (dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.uart_rx_count_r > 2)
+                release dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_byte_valid;
+                release dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_byte;
+                release dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_frame_error;
+                while (dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.uart_rx_count_r > 2)
                     @(posedge dut.core_clk_dbg);
             end else begin
                 uart_rx = 1'b0;
@@ -617,14 +617,14 @@ module tb_ax7203_top_ddr3_loader_smoke;
                  dut.core_ddr3_req_addr,
                  dut.core_ddr3_req_write,
                  dut.core_ddr3_resp_valid,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ddr3_arb_state,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ddr3_owner_r,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ddr3_req_valid,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.ddr3_req_ready,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.m0_ddr3_req_ready,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.m1_ddr3_req_ready,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.m0_ddr3_resp_valid,
-                 dut.u_adam_riscv.gen_mem_subsys.u_mem_subsys.m1_ddr3_resp_valid);
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.ddr3_arb_state,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.ddr3_owner_r,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.ddr3_req_valid,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.ddr3_req_ready,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.m0_ddr3_req_ready,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.m1_ddr3_req_ready,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.m0_ddr3_resp_valid,
+                 dut.u_sifang_core.gen_mem_subsys.u_mem_subsys.m1_ddr3_resp_valid);
         $display("[AX7203_DDR3_LOADER] FETCH pc_out=%08h pc_pending=%08h if_flags=%02h ic_state=%02h m0_flags=%02h pipe=%02h if_v=%0d fb=%0d dec=%0d disp=%0d retire=%0d",
                  dbg_fetch_pc_out, dbg_fetch_pc_pending, dbg_if_flags, dbg_ic_state_flags, dbg_m0_flags, dbg_pipe_flags,
                  dbg_if_valid_count, dbg_fb_pop_count, dbg_dec0_count, dbg_disp0_count, dbg_retire_count);

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Run riscv-tests and riscv-arch-test on AdamRiscv.
+Run riscv-tests and riscv-arch-test on SifangCore.
 Adapts tests to our memory map and testbench format.
 Auto-downloads test suites if not present.
 """
@@ -151,8 +151,8 @@ def create_model_test_header():
 def create_adapter_header():
     """Create header that adapts test reporting to our TUBE"""
     return '''
-#ifndef _ADAM_RISCV_TEST_H
-#define _ADAM_RISCV_TEST_H
+#ifndef _SIFANG_CORE_TEST_H
+#define _SIFANG_CORE_TEST_H
 
 // TUBE address for test completion
 #define TUBE_ADDR 0x13000000
@@ -452,7 +452,7 @@ def run_tests_for_suite(suite_name, categories=None, auto_download=True):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Run RISC-V tests on AdamRiscv")
+    parser = argparse.ArgumentParser(description="Run RISC-V tests on SifangCore")
     parser.add_argument("--suite", choices=["riscv-tests", "riscv-arch-test", "all"], 
                         default="riscv-tests", help="Test suite to run")
     parser.add_argument("--download", action="store_true", help="Force download even if exists")
@@ -464,7 +464,7 @@ def main():
     _FPGA_CONFIG = args.fpga_config
     
     print("=" * 60)
-    print("  RISC-V Tests Runner for AdamRiscv")
+    print("  RISC-V Tests Runner for SifangCore")
     print("=" * 60)
     
     all_results = []

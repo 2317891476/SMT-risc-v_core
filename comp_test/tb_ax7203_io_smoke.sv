@@ -14,7 +14,7 @@ module tb_ax7203_io_smoke;
     reg led_uart_seen;
     reg uart_tx_q;
 
-    adam_riscv_ax7203_io_smoke_top dut (
+    sifang_core_ax7203_io_smoke_top dut (
         .sys_clk_p (sys_clk_p),
         .sys_clk_n (sys_clk_n),
         .sys_rst_n (sys_rst_n),

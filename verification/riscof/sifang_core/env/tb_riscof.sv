@@ -1,6 +1,6 @@
 `timescale 1ns/1ns
 
-// RISCOF Testbench for AdamRiscv
+// RISCOF Testbench for SifangCore
 // This testbench loads hex files, runs simulation, and extracts signature
 
 module tb_riscof;
@@ -21,7 +21,7 @@ reg [31:0] irom [0:4095];
 reg [31:0] dram [0:4095];
 
 // Instantiate DUT
-adam_riscv u_dut (
+sifang_core u_dut (
     .sys_clk  (clk),
     .sys_rstn (rst)
 );

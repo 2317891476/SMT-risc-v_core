@@ -69,7 +69,7 @@ endmodule
 // =============================================================================
 // Module: uart_tx_autoboot
 // Description: UART Transmitter with auto-boot message
-//   Transmits "AdamRiscv AX7203 Boot\r\n" on startup
+//   Transmits "SifangCore AX7203 Boot\r\n" on startup
 // =============================================================================
 
 module uart_tx_autoboot (
@@ -78,7 +78,7 @@ module uart_tx_autoboot (
     output wire        tx           // UART TX line
 );
 
-    // Boot message: "AdamRiscv AX7203 Boot\r\n"
+    // Boot message: "SifangCore AX7203 Boot\r\n"
     localparam MSG_LEN = 24;
     localparam [MSG_LEN*8-1:0] BOOT_MSG = {
         8'h0A,  // \n
@@ -95,16 +95,16 @@ module uart_tx_autoboot (
         8'h58,  // X
         8'h41,  // A
         8'h20,  // (space)
-        8'h76,  // v
-        8'h69,  // i
-        8'h73,  // s
-        8'h63,  // c
-        8'h52,  // R
-        8'h6D,  // m
+        8'h65,  // e
+        8'h72,  // r
+        8'h6F,  // o
+        8'h43,  // C
+        8'h67,  // g
+        8'h6E,  // n
         8'h61,  // a
-        8'h64,  // d
-        8'h41,  // A
-        8'h0D   // \r
+        8'h66,  // f
+        8'h69,  // i
+        8'h53   // S
     };
 
     // State machine
@@ -155,30 +155,30 @@ module uart_tx_autoboot (
                 S_START: begin
                     // Load character from message
                     case (char_idx)
-                        5'd0:  tx_data <= 8'h41;  // A
-                        5'd1:  tx_data <= 8'h64;  // d
-                        5'd2:  tx_data <= 8'h61;  // a
-                        5'd3:  tx_data <= 8'h6D;  // m
-                        5'd4:  tx_data <= 8'h52;  // R
-                        5'd5:  tx_data <= 8'h69;  // i
-                        5'd6:  tx_data <= 8'h73;  // s
-                        5'd7:  tx_data <= 8'h63;  // c
-                        5'd8:  tx_data <= 8'h76;  // v
-                        5'd9:  tx_data <= 8'h20;  // (space)
-                        5'd10: tx_data <= 8'h41;  // A
-                        5'd11: tx_data <= 8'h58;  // X
-                        5'd12: tx_data <= 8'h37;  // 7
-                        5'd13: tx_data <= 8'h32;  // 2
-                        5'd14: tx_data <= 8'h30;  // 0
-                        5'd15: tx_data <= 8'h33;  // 3
-                        5'd16: tx_data <= 8'h20;  // (space)
-                        5'd17: tx_data <= 8'h42;  // B
-                        5'd18: tx_data <= 8'h6F;  // o
+                        5'd0:  tx_data <= 8'h53;  // S
+                        5'd1:  tx_data <= 8'h69;  // i
+                        5'd2:  tx_data <= 8'h66;  // f
+                        5'd3:  tx_data <= 8'h61;  // a
+                        5'd4:  tx_data <= 8'h6E;  // n
+                        5'd5:  tx_data <= 8'h67;  // g
+                        5'd6:  tx_data <= 8'h43;  // C
+                        5'd7:  tx_data <= 8'h6F;  // o
+                        5'd8:  tx_data <= 8'h72;  // r
+                        5'd9:  tx_data <= 8'h65;  // e
+                        5'd10: tx_data <= 8'h20;  // (space)
+                        5'd11: tx_data <= 8'h41;  // A
+                        5'd12: tx_data <= 8'h58;  // X
+                        5'd13: tx_data <= 8'h37;  // 7
+                        5'd14: tx_data <= 8'h32;  // 2
+                        5'd15: tx_data <= 8'h30;  // 0
+                        5'd16: tx_data <= 8'h33;  // 3
+                        5'd17: tx_data <= 8'h20;  // (space)
+                        5'd18: tx_data <= 8'h42;  // B
                         5'd19: tx_data <= 8'h6F;  // o
-                        5'd20: tx_data <= 8'h74;  // t
-                        5'd21: tx_data <= 8'h0D;  // \r
-                        5'd22: tx_data <= 8'h0A;  // \n
-                        5'd23: tx_data <= 8'h00;  // null
+                        5'd20: tx_data <= 8'h6F;  // o
+                        5'd21: tx_data <= 8'h74;  // t
+                        5'd22: tx_data <= 8'h0D;  // \r
+                        5'd23: tx_data <= 8'h0A;  // \n
                         default: tx_data <= 8'h00;
                     endcase
                     tx_start <= 1'b1;

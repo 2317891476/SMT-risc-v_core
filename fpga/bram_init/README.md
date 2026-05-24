@@ -4,7 +4,7 @@ This directory contains the first FPGA milestone memory flow for AX7203: use on-
 
 ## Goal
 
-- Bring up `adam_riscv_v2_ax7203_top` with a simple BRAM-backed memory image.
+- Bring up `sifang_core_v2_ax7203_top` with a simple BRAM-backed memory image.
 - Keep the memory path minimal for synthesis/debug before external DDR3 integration.
 
 ## Strategy

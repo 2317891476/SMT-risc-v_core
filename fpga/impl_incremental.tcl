@@ -42,9 +42,9 @@ proc ax7203_parse_incremental_cell_reuse_pct {path} {
 }
 
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
-set project_name "adam_riscv_ax7203"
+set project_name "sifang_core_ax7203"
 set target_part [ax7203_env_or_default TARGET_PART "xc7a200tfbg484-2"]
-set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "sifang_core_ax7203_top"]
 set impl_jobs [ax7203_vivado_jobs AX7203_IMPL_JOBS]
 set enable_mem_subsys [ax7203_env_or_default AX7203_ENABLE_MEM_SUBSYS 1]
 set enable_ddr3 [ax7203_env_or_default AX7203_ENABLE_DDR3 1]
@@ -65,7 +65,7 @@ set route_directive [ax7203_env_or_default AX7203_INCREMENTAL_ROUTE_DIRECTIVE "Q
 set report_dir "$project_dir/reports"
 set checkpoint_dir "$project_dir/checkpoints"
 set synth_checkpoint "$checkpoint_dir/${project_name}_post_synth.dcp"
-if {$top_module eq "adam_riscv_ax7203_top"} {
+if {$top_module eq "sifang_core_ax7203_top"} {
     set route_checkpoint "$checkpoint_dir/${project_name}_post_route.dcp"
     set incremental_route_checkpoint "$checkpoint_dir/${project_name}_incremental_route.dcp"
     set reference_checkpoint [file normalize [ax7203_env_or_default AX7203_INCREMENTAL_REF_DCP $route_checkpoint]]
@@ -121,9 +121,9 @@ puts "Core clock: ${core_clk_mhz} MHz"
 puts "UART clock divider: $uart_clk_div"
 
 open_checkpoint $synth_checkpoint
-if {[llength [get_cells -quiet u_adam_riscv/clk2cpu/inst]] > 0} {
-    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_board_xdc
-    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_timing_xdc
+if {[llength [get_cells -quiet u_sifang_core/clk2cpu/inst]] > 0} {
+    read_xdc -cells {u_sifang_core/clk2cpu/inst} $clk_wiz_board_xdc
+    read_xdc -cells {u_sifang_core/clk2cpu/inst} $clk_wiz_timing_xdc
 }
 read_xdc $base_xdc
 read_xdc $uart_led_xdc
@@ -142,8 +142,19 @@ puts "Phase 2: read_checkpoint -directive $incremental_directive -incremental"
 read_checkpoint -directive $incremental_directive -incremental $reference_checkpoint
 
 set incremental_reuse_preplace "$report_dir/incremental_reuse_preplace.rpt"
-catch {report_incremental_reuse -file $incremental_reuse_preplace}
+file delete -force $incremental_reuse_preplace
+set incremental_reuse_preplace_status [catch {report_incremental_reuse -file $incremental_reuse_preplace} incremental_reuse_preplace_err]
 set preplace_cell_reuse_pct [ax7203_parse_incremental_cell_reuse_pct $incremental_reuse_preplace]
+if {$incremental_reuse_preplace_status != 0 || $preplace_cell_reuse_pct < 0} {
+    puts "ERROR: Incremental reuse report is unavailable before placement."
+    puts "Vivado likely disabled incremental implementation because the reference checkpoint did not match the current netlist."
+    if {$incremental_reuse_preplace_status != 0} {
+        puts "report_incremental_reuse error: $incremental_reuse_preplace_err"
+    }
+    puts "Next step: follow the Dhrystone debug loop; do not spend a full implementation cycle as default place/route."
+    catch {close_design}
+    exit 1
+}
 if {$preplace_cell_reuse_pct >= 0 && $preplace_cell_reuse_pct < $min_reuse_pct} {
     puts "ERROR: Incremental cell reuse ${preplace_cell_reuse_pct}% is below threshold ${min_reuse_pct}% before placement."
     puts "Next step: follow the Dhrystone debug loop; do not auto-run aggressive implementation."
@@ -161,6 +172,7 @@ if {[catch {place_design -directive $place_directive} place_err]} {
     catch {close_design}
     exit 1
 }
+file delete -force $incremental_reuse_place
 catch {report_incremental_reuse -file $incremental_reuse_place}
 
 puts "Phase 4: phys_opt_design -directive $physopt_directive"
@@ -176,6 +188,7 @@ if {[catch {route_design -directive $route_directive} route_err]} {
     catch {close_design}
     exit 1
 }
+file delete -force $incremental_reuse_route
 catch {report_incremental_reuse -file $incremental_reuse_route}
 
 if {$skip_post_route_physopt} {

@@ -1,10 +1,10 @@
 `timescale 1ns/1ns
-`define TB_IROM tb_debug.u_adam_riscv.u_stage_if.u_inst_memory.u_ram_data
-`define TB_REGS tb_debug.u_adam_riscv.u_regs_mt
-`define TB_DRAM tb_debug.u_adam_riscv.u_stage_mem.u_data_memory.u_ram_data
-`define TB_SB tb_debug.u_adam_riscv.u_scoreboard
-`define TB_P0 tb_debug.u_adam_riscv.u_exec_pipe0
-`define TB_P1 tb_debug.u_adam_riscv.u_exec_pipe1
+`define TB_IROM tb_debug.u_sifang_core.u_stage_if.u_inst_memory.u_ram_data
+`define TB_REGS tb_debug.u_sifang_core.u_regs_mt
+`define TB_DRAM tb_debug.u_sifang_core.u_stage_mem.u_data_memory.u_ram_data
+`define TB_SB tb_debug.u_sifang_core.u_scoreboard
+`define TB_P0 tb_debug.u_sifang_core.u_exec_pipe0
+`define TB_P1 tb_debug.u_sifang_core.u_exec_pipe1
 
 `define RAM_DEEP 4096
 
@@ -20,7 +20,7 @@ reg [7:0] inst_bytes [0:(`RAM_DEEP*4)-1];
 reg [7:0] data_bytes [0:(`RAM_DEEP*4)-1];
 integer j;
 
-adam_riscv u_adam_riscv(
+sifang_core u_sifang_core(
     .sys_clk  (clk ),
     .sys_rstn (rst )
 );
@@ -62,15 +62,15 @@ end
 // Track register write enables directly from regs_mt
 always @(posedge clk) begin
     if (rst) begin
-        if (tb_debug.u_adam_riscv.u_regs_mt.w_regs_en_0) begin
+        if (tb_debug.u_sifang_core.u_regs_mt.w_regs_en_0) begin
             $display("WB0: rd=%0d, data=%h", 
-                     tb_debug.u_adam_riscv.u_regs_mt.w_regs_addr_0, 
-                     tb_debug.u_adam_riscv.u_regs_mt.w_regs_data_0);
+                     tb_debug.u_sifang_core.u_regs_mt.w_regs_addr_0,
+                     tb_debug.u_sifang_core.u_regs_mt.w_regs_data_0);
         end
-        if (tb_debug.u_adam_riscv.u_regs_mt.w_regs_en_1) begin
+        if (tb_debug.u_sifang_core.u_regs_mt.w_regs_en_1) begin
             $display("WB1: rd=%0d, data=%h", 
-                     tb_debug.u_adam_riscv.u_regs_mt.w_regs_addr_1, 
-                     tb_debug.u_adam_riscv.u_regs_mt.w_regs_data_1);
+                     tb_debug.u_sifang_core.u_regs_mt.w_regs_addr_1,
+                     tb_debug.u_sifang_core.u_regs_mt.w_regs_data_1);
         end
     end
 end

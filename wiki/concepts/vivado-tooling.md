@@ -40,6 +40,14 @@ The Verilator gates used to authorize Vivado must be board-equivalent. Check `Bo
 
 As of 2026-05-24, WSL Verilator is available again after the Ubuntu-22.04 distro was started externally. The board-equivalent 5000-run preload and loader-semantic Dhrystone gates now pass with `BENCHMARK_RUNTIME_PROFILE=board`, so board-only or incremental Vivado work can proceed from current simulation evidence.
 
+The SifangCore rename changes Vivado project, checkpoint, bitstream, and top-module stems from the old project name to `sifang_core_ax7203`. Do not reuse old source-level top names as compatibility aliases. Existing routed DCPs in `build/` may remain as local generated history, but a post-rename board claim needs a new `sifang_core_ax7203` synth/implementation artifact.
+
+First post-rename incremental attempt used the pre-rename routed checkpoint only as a generated reference. Vivado reported 7.65% cell matching and 8.28% net matching, disabled incremental mode, then spent a full default route cycle and ended at `WNS=-30.855`, `WHS=-5.037`. `impl_incremental.tcl` now deletes stale incremental reuse reports before each `report_incremental_reuse` call and treats an unavailable pre-place reuse report as a hard fail, so low-reuse references do not waste implementation time.
+
+After a full structural rename, the first post-rename routed reference may need to be seeded with `impl_aggressive.tcl` once the Verilator boundary matrix passes. This is not an automatic fallback from incremental mode; it is the explicit way to create a same-name routed DCP for future incremental debug.
+
+The SifangCore seed implementation completed with Vivado 2023.2 build ID `0x6A132BA3`, `WNS=+0.403`, and `WHS=+0.051`. A following board-only run programmed the bitstream over Vivado JTAG, read back USR_ACCESS and USERCODE as `0x6A132BA3`, and passed COM5 UART smoke plus the 5000-run Dhrystone baseline. Future incremental runs should use the new `sifang_core_ax7203_post_route.dcp` reference.
+
 `--fpga-impl-mode incremental` must fail closed. It should not automatically start `impl_aggressive.tcl`; run aggressive explicitly only when the debug loop allows it. `fpga/impl_incremental.tcl` also exits without launching aggressive and points back to the Dhrystone debug loop.
 
 `fpga/impl_aggressive.tcl` must return a non-zero process exit code when implementation does not reach `SUCCESS`, so automation does not accidentally treat a failed aggressive run as usable. This is only a fallback/signoff path after the Verilator gates justify spending a full implementation cycle.

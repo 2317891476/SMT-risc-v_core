@@ -73,7 +73,7 @@ module tb_ax7203_top_uart_loader_transport_smoke;
     wire ready_gate = saw_ready_dbg || saw_ready_phy || saw_ready_hint;
     wire load_start_gate = saw_load_start_dbg || saw_load_start_phy || saw_load_start_hint;
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p   (sys_clk_p),
         .sys_clk_n   (sys_clk_n),
         .sys_rst_n   (sys_rst_n),

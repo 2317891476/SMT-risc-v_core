@@ -26,7 +26,7 @@ module tb_ax7203_uart_rx_diag_smoke;
     localparam [7:0] TEST_BYTE = 8'h5A;
     localparam integer TB_TIMEOUT_NS = 36_000_000;
 
-    adam_riscv_ax7203_top dut (
+    sifang_core_ax7203_top dut (
         .sys_clk_p (sys_clk_p),
         .sys_clk_n (sys_clk_n),
         .sys_rst_n (sys_rst_n),

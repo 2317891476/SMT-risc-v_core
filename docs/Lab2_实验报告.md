@@ -35,11 +35,11 @@
 
 ### 2. 顶层九级流水架构
 
-顶层 `adam_riscv` 已重构为 9 级通路：
+顶层 `sifang_core` 已重构为 9 级通路：
 
 - `IF -> IF/IS寄存器(reg_if_id) -> IS(stage_is) -> Scoreboard -> RO寄存器(reg_is_ro) -> RO(stage_ro) -> RO/EX寄存器(reg_ro_ex) -> EX1(stage_ex) -> EX2/EX3/EX4(reg_ex_stage x3) -> MEM -> WB`
 
-关键连接见 `module/CORE/RTL_V1_2/adam_riscv.v:302`、`module/CORE/RTL_V1_2/adam_riscv.v:415`、`module/CORE/RTL_V1_2/adam_riscv.v:440`、`module/CORE/RTL_V1_2/adam_riscv.v:465`。
+关键连接见 `module/CORE/RTL_V1_2/sifang_core.v:302`、`module/CORE/RTL_V1_2/sifang_core.v:415`、`module/CORE/RTL_V1_2/sifang_core.v:440`、`module/CORE/RTL_V1_2/sifang_core.v:465`。
 
 ### 3. 记分牌核心数据结构
 
@@ -75,7 +75,7 @@ assign op_A_pre        = ex_regs_data1;
 上述实现表明 EX1 不再依赖旁路网络，操作数来自 RO/寄存器堆路径。
 
 ```verilog
-// module/CORE/RTL_V1_2/adam_riscv.v
+// module/CORE/RTL_V1_2/sifang_core.v
 reg_ex_stage u_reg_ex1_ex2(...);
 reg_ex_stage u_reg_ex2_ex3(...);
 reg_ex_stage u_reg_ex3_ex4(...);
@@ -88,7 +88,7 @@ reg_ex_stage u_reg_ex3_ex4(...);
 #### 1.2 无数据旁路
 
 ```verilog
-// module/CORE/RTL_V1_2/adam_riscv.v
+// module/CORE/RTL_V1_2/sifang_core.v
 assign forward_data = 1'b0;
 ```
 
@@ -176,8 +176,8 @@ end
 
 | 实验要求 | 代码实现位置 | 对应说明 |
 |---|---|---|
-| EX 扩 4 拍 | `adam_riscv.v` 中 3 级 `reg_ex_stage` | EX1 执行 + EX2/3/4 打拍 |
-| 无数据旁路 | `stage_ex.v`、`adam_riscv.v` | 操作数直接来自寄存器读路径，前递关闭 |
+| EX 扩 4 拍 | `sifang_core.v` 中 3 级 `reg_ex_stage` | EX1 执行 + EX2/3/4 打拍 |
+| 无数据旁路 | `stage_ex.v`、`sifang_core.v` | 操作数直接来自寄存器读路径，前递关闭 |
 | ID 拆分 IS/RO | `stage_is.v`、`reg_is_ro.v`、`stage_ro.v`、`reg_ro_ex.v` | IS 译码，RO 读操作数 |
 | 7 类 FU 状态管理 | `scoreboard.v` 中 `fu_busy[1:7]` | Index 1~7 对应 ADD..SW |
 | 结果寄存器状态 | `scoreboard.v` 中 `reg_result_status[31:0]` | 用 tag 跟踪生产者，增强“最后写者”语义 |
@@ -231,7 +231,7 @@ end
 
 #### 3.1 EX 扩 4 拍
 
-观测信号u_adam_riscv.ex1_alu_o/ex2_alu_o/ex3_alu_o/ex4_alu_o如下图所示
+观测信号u_sifang_core.ex1_alu_o/ex2_alu_o/ex3_alu_o/ex4_alu_o如下图所示
 
 ![image-20260227121427973](C:/Users/23178/AppData/Roaming/Typora/typora-user-images/image-20260227121427973.png)
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Download and setup RISC-V test suites for AdamRiscv.
+Download and setup RISC-V test suites for SifangCore.
 Usage: python download_tests.py
 """
 
@@ -78,7 +78,7 @@ def download_suite(name, info):
 
 def main():
     print("=" * 60)
-    print("  RISC-V Test Suite Downloader for AdamRiscv")
+    print("  RISC-V Test Suite Downloader for SifangCore")
     print("=" * 60)
     
     results = {}

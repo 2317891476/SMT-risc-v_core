@@ -1,10 +1,10 @@
 // =============================================================================
-// Module : adam_riscv_ax7203_io_smoke_top
+// Module : sifang_core_ax7203_io_smoke_top
 // Description: Minimal AX7203 board IO smoke top used to validate the physical
 // UART/LED path independently from the CPU core.
 // =============================================================================
 
-module adam_riscv_ax7203_io_smoke_top (
+module sifang_core_ax7203_io_smoke_top (
     input  wire sys_clk_p,
     input  wire sys_clk_n,
     input  wire sys_rst_n,

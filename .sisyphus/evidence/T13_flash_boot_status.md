@@ -15,7 +15,7 @@ This task requires programming the QSPI Flash on the AX7203 board.
 ```bash
 vivado -mode batch -source fpga/write_ax7203_cfgmem.tcl
 ```
-Generates: `build/ax7203/adam_riscv_ax7203_primary.mcs`
+Generates: `build/ax7203/sifang_core_ax7203_primary.mcs`
 
 ### 2. Program Flash
 ```bash
@@ -27,7 +27,7 @@ vivado -mode batch -source fpga/program_ax7203_flash.tcl
 2. Power cycle board
 3. Verify boot from Flash:
    - LEDs show boot pattern
-   - UART shows "AdamRiscv AX7203 Boot"
+   - UART shows "SifangCore AX7203 Boot"
 
 ### 4. Reboot Command
 ```bash

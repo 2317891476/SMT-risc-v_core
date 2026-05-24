@@ -3,7 +3,7 @@
 ## TL;DR
 > **Summary**: Complete the currently standalone RoCC accelerator by wiring CUSTOM0 decode through the active V2 pipeline, adding a dedicated M2 DMA path into `mem_subsys`, finishing the GEMM DMA FSM, and shipping deterministic directed tests plus full regression and GitHub sync.
 > **Deliverables**:
-> - End-to-end integrated `rocc_ai_accelerator` in `adam_riscv_v2`
+> - End-to-end integrated `rocc_ai_accelerator` in `sifang_core_v2`
 > - Dedicated RoCC DMA M2 master in `mem_subsys` / `l2_arbiter`
 > - Real RAM-backed GEMM load/compute/storeback pipeline
 > - New directed RoCC DMA/GEMM tests in `--basic` with explicit goldens
@@ -167,7 +167,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
   - Pattern: `rtl/stage_is.v` — active decode classification seam, currently no CUSTOM0 path
   - Pattern: `rtl/ctrl.v` — control decode seam, currently no RoCC control outputs
   - Pattern: `rtl/decoder_dual.v` — existing serialization logic for special instructions; extend this instead of inventing a separate ad hoc gate
-  - Pattern: `rtl/adam_riscv_v2.v` — top-level decode/issue plumbing endpoint for added metadata
+  - Pattern: `rtl/sifang_core_v2.v` — top-level decode/issue plumbing endpoint for added metadata
   - Pattern: `rtl/rocc_ai_accelerator.v` — funct7 command inventory to preserve end to end
 
   **Acceptance Criteria** (agent-executable only):
@@ -190,7 +190,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
     Evidence: .sisyphus/evidence/task-2-rocc-serialize.log
   ```
 
-  **Commit**: YES | Message: `feat(rocc): add serialized custom decode path` | Files: [`rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, `rtl/adam_riscv_v2.v`, `rom/test_rocc_decode_serialize.s`]
+  **Commit**: YES | Message: `feat(rocc): add serialized custom decode path` | Files: [`rtl/stage_is.v`, `rtl/ctrl.v`, `rtl/decoder_dual.v`, `rtl/sifang_core_v2.v`, `rom/test_rocc_decode_serialize.s`]
 
 - [ ] 3. Harden the directed-test harness for RoCC-specific goldens
 
@@ -235,7 +235,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
 
 - [ ] 4. Integrate RoCC into top-level issue/retire with flush-safe completion
 
-  **What to do**: Instantiate `rtl/rocc_ai_accelerator.v` in `rtl/adam_riscv_v2.v` and connect it to the active V2 command path using the metadata added in Task 2. Implement a serialized single-outstanding command launcher and a WB/ROB-safe response merge. Add explicit flush/kill or epoch protection so a stale RoCC completion after branch mispredict/trap/reset cannot complete a reused tag. Define arbitration against existing WB paths so RoCC completion never silently collides with current `wb1` sources. Suppress architectural write when `rd == x0` while still completing the instruction correctly.
+  **What to do**: Instantiate `rtl/rocc_ai_accelerator.v` in `rtl/sifang_core_v2.v` and connect it to the active V2 command path using the metadata added in Task 2. Implement a serialized single-outstanding command launcher and a WB/ROB-safe response merge. Add explicit flush/kill or epoch protection so a stale RoCC completion after branch mispredict/trap/reset cannot complete a reused tag. Define arbitration against existing WB paths so RoCC completion never silently collides with current `wb1` sources. Suppress architectural write when `rd == x0` while still completing the instruction correctly.
   **Must NOT do**: Do not write RoCC results directly into the regfile, do not rely on raw tag identity without kill/epoch protection, and do not allow more than one in-flight RoCC command.
 
   **Recommended Agent Profile**:
@@ -246,15 +246,15 @@ Wave 4: full regression + docs + commit/push (Task 11)
   **Parallelization**: Can Parallel: NO | Wave 2 | Blocks: [7, 8, 9, 10] | Blocked By: [1, 2]
 
   **References** (executor has NO interview context — be exhaustive):
-  - Pattern: `rtl/adam_riscv_v2.v` — active WB/ROB/top-level integration point, currently lacks accelerator instantiation
+  - Pattern: `rtl/sifang_core_v2.v` — active WB/ROB/top-level integration point, currently lacks accelerator instantiation
   - Pattern: `rtl/rocc_ai_accelerator.v:89` — `accel_interrupt` currently TODO/tied low
   - Pattern: `rtl/rocc_ai_accelerator.v:189` — unimplemented op handling placeholder
   - Pattern: `rtl/rocc_ai_accelerator.v:203` — GEMM accumulator placeholder seam
-  - Pattern: existing WB/ROB tag flow in `rtl/adam_riscv_v2.v`, `rtl/scoreboard_v2.v`, and execution-pipe result plumbing
+  - Pattern: existing WB/ROB tag flow in `rtl/sifang_core_v2.v`, `rtl/scoreboard_v2.v`, and execution-pipe result plumbing
   - Pattern: `rtl/exec_pipe1.v` / `rtl/lsu_shell.v` — current long-latency request/response metadata handling reference
 
   **Acceptance Criteria** (agent-executable only):
-  - [ ] `adam_riscv_v2` instantiates `rocc_ai_accelerator` and emits RoCC commands only when serialized/allowed.
+  - [ ] `sifang_core_v2` instantiates `rocc_ai_accelerator` and emits RoCC commands only when serialized/allowed.
   - [ ] A RoCC response completes through the existing WB/ROB machinery and cannot retire after flush if killed.
   - [ ] `rd == x0` RoCC commands complete without corrupting architectural register state.
 
@@ -273,7 +273,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
     Evidence: .sisyphus/evidence/task-4-rocc-flush-kill.log
   ```
 
-  **Commit**: YES | Message: `feat(rocc): integrate serialized issue and safe completion` | Files: [`rtl/adam_riscv_v2.v`, `rtl/rocc_ai_accelerator.v`, related scoreboard/WB plumbing files]
+  **Commit**: YES | Message: `feat(rocc): integrate serialized issue and safe completion` | Files: [`rtl/sifang_core_v2.v`, `rtl/rocc_ai_accelerator.v`, related scoreboard/WB plumbing files]
 
 - [ ] 5. Add a dedicated M2 RoCC DMA master to the lower-memory path
 
@@ -314,7 +314,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
     Evidence: .sisyphus/evidence/task-5-m2-contention.log
   ```
 
-  **Commit**: YES | Message: `feat(mem): add dedicated rocc dma m2 path` | Files: [`rtl/mem_subsys.v`, `rtl/l2_arbiter.v`, `rtl/l2_cache.v`, `rtl/adam_riscv_v2.v`]
+  **Commit**: YES | Message: `feat(mem): add dedicated rocc dma m2 path` | Files: [`rtl/mem_subsys.v`, `rtl/l2_arbiter.v`, `rtl/l2_cache.v`, `rtl/sifang_core_v2.v`]
 
 - [ ] 6. Finish the RoCC DMA engine for RAM-backed data movement and status semantics
 
@@ -489,7 +489,7 @@ Wave 4: full regression + docs + commit/push (Task 11)
 
   **References** (executor has NO interview context — be exhaustive):
   - Pattern: `rom/test_interrupt_mask_mret.s` — negative-path state validation style
-  - Pattern: flush/redirect logic in active V2 path through `rtl/adam_riscv_v2.v`
+  - Pattern: flush/redirect logic in active V2 path through `rtl/sifang_core_v2.v`
   - Test: `comp_test/test_content.sv` — explicit RAM/register/status goldens required
   - Guardrail: Oracle-approved stale-tag/flush protection requirement from planning notes
 

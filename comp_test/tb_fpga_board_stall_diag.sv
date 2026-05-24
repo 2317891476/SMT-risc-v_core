@@ -30,7 +30,7 @@ module tb_fpga_board_stall_diag;
     integer suspicious_cycles;
     reg [7:0] debug_uart_tx_store_count_q;
 
-    adam_riscv dut (
+    sifang_core dut (
         .sys_clk(sys_clk),
         .sys_rstn(sys_rstn),
         .ext_irq_src(ext_irq_src),

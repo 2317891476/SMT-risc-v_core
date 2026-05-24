@@ -9,7 +9,7 @@ set script_dir [file dirname [info script]]
 source "$script_dir/flow_common.tcl"
 
 set project_dir [file normalize [ax7203_env_or_default PROJECT_DIR "$script_dir/../build/ax7203"]]
-set project_name "adam_riscv_ax7203"
+set project_name "sifang_core_ax7203"
 set project_file "$project_dir/$project_name.xpr"
 
 # Parse arguments
@@ -31,7 +31,7 @@ set uart_clk_div [expr {[ax7203_env_or_default AX7203_UART_CLK_DIV [ax7203_uart_
 set dcache_mode [ax7203_env_or_default AX7203_DCACHE_MODE "full"]
 set impl_jobs [ax7203_vivado_jobs AX7203_IMPL_JOBS]
 set impl_timeout_min [ax7203_env_or_default AX7203_IMPL_TIMEOUT_MIN 45]
-set top_module [ax7203_env_or_default AX7203_TOP_MODULE "adam_riscv_ax7203_top"]
+set top_module [ax7203_env_or_default AX7203_TOP_MODULE "sifang_core_ax7203_top"]
 set is_compare 0
 if {[info exists ::env(TARGET_PART)]} {
     set target_part $::env(TARGET_PART)
@@ -43,7 +43,7 @@ if {[info exists ::env(COMPARE_BUILD)]} {
 set report_dir "$project_dir/reports"
 set checkpoint_dir "$project_dir/checkpoints"
 set synth_checkpoint "$checkpoint_dir/${project_name}_post_synth.dcp"
-if {$top_module eq "adam_riscv_ax7203_top"} {
+if {$top_module eq "sifang_core_ax7203_top"} {
     set route_checkpoint "$checkpoint_dir/${project_name}_post_route.dcp"
     set bitstream_file "$project_dir/${project_name}_${target_part}.bit"
     set build_id_file "$project_dir/${project_name}_bitstream_id.txt"
@@ -169,7 +169,7 @@ if {[llength $synth_run] == 0} {
 }
 
 set required_xdc_list [list $base_xdc $uart_led_xdc]
-if {$top_module eq "adam_riscv_ax7203_top"} {
+if {$top_module eq "sifang_core_ax7203_top"} {
     set required_xdc_list [concat [list $clk_wiz_board_xdc $clk_wiz_timing_xdc] $required_xdc_list]
 }
 foreach required_xdc $required_xdc_list {
@@ -185,9 +185,9 @@ ax7203_apply_vivado_threads $impl_jobs
 
 puts "Opening synthesized checkpoint: $synth_checkpoint"
 open_checkpoint $synth_checkpoint
-if {[llength [get_cells -quiet u_adam_riscv/clk2cpu/inst]] > 0} {
-    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_board_xdc
-    read_xdc -cells {u_adam_riscv/clk2cpu/inst} $clk_wiz_timing_xdc
+if {[llength [get_cells -quiet u_sifang_core/clk2cpu/inst]] > 0} {
+    read_xdc -cells {u_sifang_core/clk2cpu/inst} $clk_wiz_board_xdc
+    read_xdc -cells {u_sifang_core/clk2cpu/inst} $clk_wiz_timing_xdc
 }
 read_xdc $base_xdc
 read_xdc $uart_led_xdc

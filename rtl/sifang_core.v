@@ -1,8 +1,8 @@
 // =============================================================================
-// Module : adam_riscv
+// Module : sifang_core
 // Description: Upgraded top-level processor integrating all new micro-architecture
 //   modules from the 4-phase upgrade. This module preserves backward compatibility
-//   with the existing adam_riscv.v module interface (sys_clk, sys_rstn, led) while
+//   with the existing sifang_core.v module interface (sys_clk, sys_rstn, led) while
 //   wiring the new internal pipeline.
 //
 //   New Pipeline:
@@ -19,7 +19,7 @@
 //   - RoCC AI Accelerator (stub connected, not activated in basic tests)
 // =============================================================================
 
-module adam_riscv(
+module sifang_core(
     input wire sys_clk,
 `ifdef FPGA_MODE
     output wire[2:0] led,

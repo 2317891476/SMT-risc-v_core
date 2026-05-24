@@ -2,7 +2,7 @@
 `include "tb.sv"
 // Use standard tb but add debug check after tube fires
 initial begin
-    wait (tb.u_adam_riscv.tube_status === 8'h04);
+    wait (tb.u_sifang_core.tube_status === 8'h04);
     #200ns;
     $display("=== RS4 DEBUG CHECKS (test2) ===");
     $display("x0  = %h (expect 00000000)", `TB_REGS.reg_bank[0][0]);
@@ -15,7 +15,7 @@ initial begin
     $display("x7  = %h (expect 0000003f)", `TB_REGS.reg_bank[0][7]);
     $display("x8  = %h (expect 0000003f)", `TB_REGS.reg_bank[0][8]);
     $display("x9  = %h (expect f3f2f21a)", `TB_REGS.reg_bank[0][9]);
-    $display("tube= %h (expect 04)", tb.u_adam_riscv.tube_status);
+    $display("tube= %h (expect 04)", tb.u_sifang_core.tube_status);
     $display("mem[1024]=%h (expect f3f2f21a)", `TB_MEM_SUBSYS[1024]);
     $display("mem[1025]=%h (expect f7f6f5f4)", `TB_MEM_SUBSYS[1025]);
 end
