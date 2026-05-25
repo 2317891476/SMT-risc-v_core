@@ -613,6 +613,9 @@ wire        lsu_resp_regs_write;
 wire [2:0]  lsu_resp_fu;
 wire [0:0]  lsu_resp_tid = 1'b0;
 wire [`METADATA_ORDER_ID_W-1:0] lsu_resp_order_id;
+wire        lsu_resp_exc_valid;
+wire [31:0] lsu_resp_exc_cause;
+wire [31:0] lsu_resp_exc_tval;
 wire        lsu_load_hazard;
 wire        lsu_early_wakeup_valid;
 wire [RS_TAG_W_CFG-1:0]  lsu_early_wakeup_tag;
@@ -2539,7 +2542,7 @@ wire trap_pc_speculative = sb_branch_pending_any ||
                                                 p0_pre_ro_is_ecall || p0_pre_ro_is_ebreak)) ||
                            pipe0_mret_valid ||
                            pipe0_sret_valid ||
-                           pipe0_exc_valid;
+                           csr_sync_exc_valid;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
 
 always @(posedge clk or negedge rstn) begin
@@ -2571,7 +2574,7 @@ wire precise_interrupt_ready =
     !(p0_pre_ro_valid && p0_pre_ro_is_csr) &&
     !pipe0_mret_valid &&
     !pipe0_sret_valid &&
-    !pipe0_exc_valid &&
+    !csr_sync_exc_valid &&
     !csr_pending_t0 &&
     !mret_pending_t0 &&
     !fence_i_pending_t0 &&
@@ -3814,6 +3817,9 @@ lsu_shell #(
     .resp_regs_write    (lsu_resp_regs_write  ),
     .resp_fu            (lsu_resp_fu          ),
     .resp_rdata         (lsu_resp_rdata       ),
+    .resp_exc_valid     (lsu_resp_exc_valid   ),
+    .resp_exc_cause     (lsu_resp_exc_cause   ),
+    .resp_exc_tval      (lsu_resp_exc_tval    ),
     .resp_early_wakeup_valid(lsu_early_wakeup_valid),
     .resp_early_wakeup_tag(lsu_early_wakeup_tag),
 
@@ -3934,6 +3940,73 @@ assign mem_wb_data   = mem_wb_data_sel;
 assign lsu_early_wakeup_valid_safe =
     lsu_early_wakeup_valid && lsu_resp_live_match &&
     (lsu_early_wakeup_tag == lsu_resp_tag);
+
+reg        tag_exc_valid [0:RS_TAG_DEPTH_CFG];
+reg [31:0] tag_exc_cause [0:RS_TAG_DEPTH_CFG];
+reg [31:0] tag_exc_tval  [0:RS_TAG_DEPTH_CFG];
+integer exc_track_idx;
+
+wire lsu_resp_exc_live_match = lsu_resp_live_match && lsu_resp_exc_valid;
+wire commit0_exc_valid =
+    rob_commit0_valid && (rob_commit0_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_exc_valid[rob_commit0_tag];
+wire commit1_exc_valid =
+    rob_commit1_valid && (rob_commit1_tag != {RS_TAG_W_CFG{1'b0}}) &&
+    tag_exc_valid[rob_commit1_tag];
+wire commit_exc_valid = commit0_exc_valid || commit1_exc_valid;
+wire [31:0] commit_exc_cause = commit0_exc_valid ? tag_exc_cause[rob_commit0_tag] :
+                                commit1_exc_valid ? tag_exc_cause[rob_commit1_tag] :
+                                32'd0;
+wire [31:0] commit_exc_tval  = commit0_exc_valid ? tag_exc_tval[rob_commit0_tag] :
+                                commit1_exc_valid ? tag_exc_tval[rob_commit1_tag] :
+                                32'd0;
+wire [31:0] commit_exc_pc    = commit0_exc_valid ? rob_commit0_pc :
+                                commit1_exc_valid ? rob_commit1_pc :
+                                32'd0;
+wire csr_sync_exc_valid = commit_exc_valid || pipe0_exc_valid;
+wire [31:0] csr_sync_exc_cause = commit_exc_valid ? commit_exc_cause : pipe0_exc_cause;
+wire [31:0] csr_sync_exc_tval  = commit_exc_valid ? commit_exc_tval  : pipe0_exc_tval;
+wire [31:0] csr_sync_exc_pc    = commit_exc_valid ? commit_exc_pc :
+                                  pipe0_exc_valid  ? pipe0_exc_pc :
+                                                     trap_entry_pc;
+
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        for (exc_track_idx = 0; exc_track_idx <= RS_TAG_DEPTH_CFG; exc_track_idx = exc_track_idx + 1) begin
+            tag_exc_valid[exc_track_idx] <= 1'b0;
+            tag_exc_cause[exc_track_idx] <= 32'd0;
+            tag_exc_tval[exc_track_idx]  <= 32'd0;
+        end
+    end else begin
+        if (combined_flush_any) begin
+            for (exc_track_idx = 1; exc_track_idx <= RS_TAG_DEPTH_CFG; exc_track_idx = exc_track_idx + 1) begin
+                if (tag_exc_valid[exc_track_idx] &&
+                    (!tag_live_map[exc_track_idx] ||
+                     (tag_tid_map[exc_track_idx] == flush_tid_mux &&
+                      (!flush_is_order_based || (tag_order_map[exc_track_idx] > flush_order_id_mux))))) begin
+                    tag_exc_valid[exc_track_idx] <= 1'b0;
+                    tag_exc_cause[exc_track_idx] <= 32'd0;
+                    tag_exc_tval[exc_track_idx]  <= 32'd0;
+                end
+            end
+        end
+        if (rob_commit0_valid && (rob_commit0_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[rob_commit0_tag] <= 1'b0;
+            tag_exc_cause[rob_commit0_tag] <= 32'd0;
+            tag_exc_tval[rob_commit0_tag]  <= 32'd0;
+        end
+        if (rob_commit1_valid && (rob_commit1_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[rob_commit1_tag] <= 1'b0;
+            tag_exc_cause[rob_commit1_tag] <= 32'd0;
+            tag_exc_tval[rob_commit1_tag]  <= 32'd0;
+        end
+        if (lsu_resp_exc_live_match && (lsu_resp_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[lsu_resp_tag] <= 1'b1;
+            tag_exc_cause[lsu_resp_tag] <= lsu_resp_exc_cause;
+            tag_exc_tval[lsu_resp_tag]  <= lsu_resp_exc_tval;
+        end
+    end
+end
 
 // mem_wb_tid for bypass network
 assign mem_wb_tid_r = lsu_resp_tid;
@@ -4352,10 +4425,10 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .csr_op          (pipe0_csr_op      ),
     .csr_wdata       (pipe0_csr_wdata   ),
     .csr_rdata       (csr_rdata         ),
-    .exc_valid       (pipe0_exc_valid   ),
-    .exc_cause       (pipe0_exc_cause   ),
-    .exc_pc          (pipe0_exc_valid ? pipe0_exc_pc : trap_entry_pc),
-    .exc_tval        (pipe0_exc_tval    ),
+    .exc_valid       (csr_sync_exc_valid),
+    .exc_cause       (csr_sync_exc_cause),
+    .exc_pc          (csr_sync_exc_pc   ),
+    .exc_tval        (csr_sync_exc_tval ),
     .mret_valid      (pipe0_mret_valid  ),
     .mret_commit     (rob_commit0_is_mret || rob_commit1_is_mret),
     .sret_valid      (pipe0_sret_valid  ),

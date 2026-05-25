@@ -34,10 +34,11 @@ Implemented foundation:
 - `mem_subsys` now services the MMU PTW physical port. Low physical addresses access the shared 16KB backing RAM below the L2 RAM write port; high physical addresses arbitrate into the DDR3 bridge below normal I/D traffic, with an aging counter so PTW is not starved indefinitely.
 - `sfence.vma` is now tracked as a serializing SYSTEM instruction. The first integrated version waits for ROB commit and an empty store buffer, then issues a full TLB flush to `mmu_sv32`; selective ASID/VPN operands are intentionally ignored for v1.
 - A core-level Sv32 identity test now installs page tables in local RAM, executes `sfence.vma` in M-mode and S-mode, enters S-mode with Sv32 enabled, fetches through the I-side MMU, performs D-side translated store/load, and writes PASS through an identity-mapped MMIO megapage.
+- D-side load/store page faults now complete through the LSU without issuing memory or enqueuing stores, record cause/tval by RS tag, and enter `csr_unit` only when the corresponding ROB entry commits. `test_sv32_core_page_fault` validates delegated S-mode load/store page faults with `scause`, `stval`, and `sepc`.
 
 Known architecture gaps before Linux can boot:
 
-- Precise instruction/load/store page-fault causes and `tval` must be carried into CSR at the right ROB point.
+- Precise instruction-fetch page-fault causes and `tval` still need a fetch-fault uop or equivalent ROB metadata path. D-side load/store page faults now have a ROB-commit CSR path.
 - PTW A/D writeback currently updates the physical backing store/DDR3 path, but it does not invalidate or update CPU cache lines that may already contain the same PTE. The standalone MMU test verifies hardware A/D behavior at the PTW memory interface; OS-visible PTE coherence still needs a shared cache path or invalidation policy before Linux can rely on A/D bits under cached page-table reads.
 - The current no-page-table privilege smoke writes `satp.MODE=0`; actual MODE=1 execution is intentionally covered by Sv32/MMU tests that install page tables first.
 - The current S-mode work is single hart only; SMP, FPU, compressed instructions, and device storage are intentionally out of scope for the first Linux pass.

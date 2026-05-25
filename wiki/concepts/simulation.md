@@ -63,6 +63,7 @@ As of 2026-05-22 10:03 +08:00, the boundary matrix above passed after two consec
 - Linux prerequisite directed tests now pass: `test_priv_mret_sret_delegation`, `test_amo_lrsc`, `test_plic_s_context_uart_irq`, and `test_sbi_timer_injection`.
 - Sv32 module-level tests now pass through the unified runner: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma`. These cover bare/M-mode bypass, 4KB and 4MB translations, U/S/SUM/MXR permission checks, load/store/fetch page-fault metadata, hardware A/D PTE updates, and full-flush `sfence.vma`.
 - The core-level Sv32 integration smoke `test_sv32_core_identity` passes under `--fpga-config`. It installs local page tables, executes `sfence.vma` in M-mode and S-mode, enters S-mode with Sv32 enabled, exercises I-side and D-side translation, and writes PASS through an MMIO megapage. It deliberately does not read back hardware-updated A/D bits through the CPU cache hierarchy because PTW writeback cache coherence is still an open Linux blocker.
+- The core-level D-side fault test `test_sv32_core_page_fault` passes under `--fpga-config`. It leaves VA `0x1000` unmapped, enters S-mode with load/store page faults delegated, triggers both fault classes, and verifies `scause`, `stval`, and `sepc` in the S-mode trap handler.
 - Classic `riscv-tests` now includes `rv32ua`; `python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua` passes 10/10 after extending the riscv-tests testbench timeout for the long LR/SC loop.
 - Store-buffer stress tests for long stream and long drain/poll patterns have passed.
 - Loader long simulation with 32-byte blocks passed after the branch-complete duplicate-pulse fix.
@@ -85,7 +86,7 @@ This mode preloads `fw_payload.bin` at `0x80000000`, starts the core at DDR3, di
 - `Run /init as init process`
 - `SIFANGCORE LINUX PASS`
 
-As of 2026-05-25, the mode is wired into the wrapper/harness but cannot pass because `build\linux\fw_payload.bin` is not produced yet, ROB-precise fetch/load/store page-fault delivery is not implemented, and PTW A/D writeback still needs a CPU-cache coherence policy. The command correctly fails early with a missing-payload message when the image is absent.
+As of 2026-05-25, the mode is wired into the wrapper/harness but cannot pass because `build\linux\fw_payload.bin` is not produced yet, precise fetch page-fault delivery still needs a ROB metadata path, and PTW A/D writeback still needs a CPU-cache coherence policy. D-side load/store page faults now reach CSR at ROB commit. The command correctly fails early with a missing-payload message when the image is absent.
 
 ## Recording Rule
 

@@ -25,8 +25,8 @@ Status as of 2026-05-25 +08:00:
 
 - Linux bring-up has started. Implemented and tested prerequisites: S-mode CSR/trap/delegation, SRET/MRET privilege transitions, RV32A AMO/LRSC, PLIC UART source 2 through S-context, and OpenSBI-style STIP injection into S-mode timer interrupt.
 - New Linux staging files live under `software/linux/`: AX7203 DTB, minimal initramfs `/init`, and a WSL build script that currently emits DTB/initramfs staging artifacts and intentionally gates full `fw_payload.bin` generation until OpenSBI/Linux/BusyBox source/configs are ready.
-- Current Linux blockers: I/D translation, the `mem_subsys` PTW endpoint, and commit-ordered full-flush `sfence.vma` are integrated. Precise fetch/load/store page faults are not yet carried into CSR at ROB commit, and PTW A/D writeback is not coherent with CPU cache lines if software reads the same PTE through L2/L1 after the hardware update.
-- Verification on 2026-05-25 after `sfence.vma` core wiring: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma` pass under `--fpga-config`; `test_sv32_core_identity` now executes `sfence.vma` in M-mode and S-mode and passes; `--basic` and `--basic --fpga-config` both pass 42/42; `rv32ua` riscv-tests pass 10/10.
+- Current Linux blockers: I/D translation, the `mem_subsys` PTW endpoint, commit-ordered full-flush `sfence.vma`, and ROB-commit D-side load/store page-fault delivery are integrated. Precise fetch page faults are not yet carried into CSR, and PTW A/D writeback is not coherent with CPU cache lines if software reads the same PTE through L2/L1 after the hardware update.
+- Verification on 2026-05-25 after D-side page-fault wiring: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma` pass under `--fpga-config`; `test_sv32_core_identity` and `test_sv32_core_page_fault` pass under `--fpga-config`; `--basic` and `--basic --fpga-config` both pass 43/43; `rv32ua` riscv-tests pass 10/10.
 - Board-equivalent WSL Verilator Dhrystone after `sfence.vma` wiring passes in both 5000-run modes: preload has `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap/stuck/unexpected UART, and `Cycles=28837429`; loader-semantic has `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, `DHRYSTONE DONE`, no trap/stuck/unexpected UART, and `Cycles=166376270`.
 - The repository is being fully renamed to SifangCore. RTL, FPGA top modules, RISCOF plugin names, Tcl/Python default stems, documentation, and UART boot banners now use `sifang_core` / `SifangCore`.
 - SMT removal/single-thread RTL debugging is past the basic simulation bring-up stage.
@@ -46,7 +46,7 @@ Status as of 2026-05-25 +08:00:
 ```powershell
 python verification\run_all_tests.py --basic
 python verification\run_all_tests.py --basic --fpga-config
-python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection test_sv32_core_identity --fpga-config
+python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection test_sv32_core_identity test_sv32_core_page_fault --fpga-config
 python verification\run_all_tests.py --tests test_sv32_translation test_sv32_page_faults test_sfence_vma --fpga-config -v
 python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
 python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
@@ -91,6 +91,7 @@ python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5
 
 ## Timeline
 
+- 2026-05-25: D-side Sv32 load/store page faults now produce LSU exception completions, are recorded by tag, and enter CSR only when the faulting ROB entry commits. New `test_sv32_core_page_fault` passes; basic is now 43/43 and board-equivalent WSL Verilator Dhrystone remains green.
 - 2026-05-25: `sfence.vma` is now wired as a commit-ordered full TLB flush in the core. The core-level Sv32 identity test executes it in both M-mode and S-mode; Icarus, rv32ua, and board-equivalent WSL Verilator Dhrystone remain green.
 - 2026-05-25: `mem_subsys` gained the integrated Sv32 PTW physical endpoint, with local RAM service and low-priority DDR3 arbitration. Core-level Sv32 identity execution now passes, and board-equivalent WSL Verilator Dhrystone remains green.
 - 2026-05-25: `mmu_sv32` was rewritten around a simple physical PTW port, hardware A/D update, U/S/SUM/MXR permission checks, page-fault metadata, and full-flush `sfence.vma`; module-level Sv32 tests pass and the MMU is instantiated in the core as a bare-mode scaffold.

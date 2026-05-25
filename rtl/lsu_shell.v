@@ -106,6 +106,9 @@ module lsu_shell #(
 
     // Response data (for loads)
     output reg  [31:0]        resp_rdata,        // Load data (sign/unsign extended)
+    output reg                resp_exc_valid,
+    output reg  [31:0]        resp_exc_cause,
+    output reg  [31:0]        resp_exc_tval,
 
     // Early wakeup for IQ dependency tracking
     output wire               resp_early_wakeup_valid,
@@ -217,6 +220,7 @@ wire req_amo_is_store_side = req_amo && (req_amo_op != `AMO_LR);
 assign mmu_dtlb_req_valid = req_valid && !req_flush_kill;
 assign mmu_dtlb_req_vaddr = req_addr;
 assign mmu_dtlb_req_store = req_wen || req_amo_is_store_side;
+wire req_translation_fault = req_valid && !req_flush_kill && mmu_dtlb_resp_fault;
 wire req_translation_ready = mmu_dtlb_resp_hit && !mmu_dtlb_resp_fault;
 wire [31:0] req_paddr = req_translation_ready ? mmu_dtlb_resp_paddr : req_addr;
 wire _unused_mmu_dtlb_meta = |{mmu_dtlb_resp_cause, mmu_dtlb_resp_tval, mmu_dtlb_busy};
@@ -296,11 +300,15 @@ wire amo_accept = req_translation_ready &&
                   !req_flush_kill &&
                   req_at_rob_head &&
                   !sb_older_store_pending_for_load;
+wire fault_accept = req_translation_fault &&
+                    state_machine_idle &&
+                    !sb_drain_ready_to_issue;
 
-assign req_accept = req_amo ? amo_accept :
-                    is_store ? store_accept : load_accept;
-assign store_enqueue_fire = is_store && req_accept;
-assign legacy_load_issue_fire = !use_mem_subsys && is_load && req_accept && !sb_forward_valid;
+assign req_accept = req_amo ? (amo_accept || fault_accept) :
+                    is_store ? (store_accept || fault_accept) :
+                    (load_accept || fault_accept);
+assign store_enqueue_fire = is_store && store_accept;
+assign legacy_load_issue_fire = !use_mem_subsys && is_load && load_accept && !sb_forward_valid;
 
 // Export load hazard signal for scoreboard stalling
 assign load_hazard = is_load && sb_load_hazard;
@@ -441,11 +449,13 @@ assign sb_mem_write_ready_mux = use_mem_subsys ?
                                 sb_mem_write_ready;
 
 wire mem_subsys_load_issue_fire =
-    use_mem_subsys && req_valid && req_accept && is_load && !sb_forward_valid;
+    use_mem_subsys && req_valid && load_accept && is_load && !sb_forward_valid;
 wire mem_subsys_amo_issue_fire =
-    use_mem_subsys && req_valid && req_accept && is_amo;
+    use_mem_subsys && req_valid && amo_accept && is_amo;
 wire store_accept_resp_fire =
-    (lsu_state == LSU_IDLE) && req_valid && req_accept && is_store;
+    (lsu_state == LSU_IDLE) && req_valid && store_accept && is_store;
+wire fault_accept_resp_fire =
+    (lsu_state == LSU_IDLE) && req_valid && fault_accept;
 
 assign m1_req_valid = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
                       1'b1 : m1_req_valid_r;
@@ -587,6 +597,14 @@ always @(posedge clk or negedge rstn) begin
                     m1_req_wdata_r      <= sb_mem_write_data_int;
                     m1_req_wen_r        <= sb_mem_write_wen_int;
                     lr_reservation_valid_r <= 1'b0;
+                end else if (req_valid && fault_accept) begin
+                    pending_valid <= 1'b0;
+                    pending_amo   <= 1'b0;
+                    m1_txn_is_drain <= 1'b0;
+                    m1_txn_is_amo <= 1'b0;
+                    lsu_state <= LSU_IDLE;
+                    if (is_store || req_amo_is_store_side)
+                        lr_reservation_valid_r <= 1'b0;
                 end else if (req_valid && req_accept) begin
 `ifdef VERBOSE_SIM_LOGS
                     if (is_store && (req_paddr == `DEBUG_BEACON_EVT_ADDR)) begin
@@ -1012,8 +1030,27 @@ always @(posedge clk or negedge rstn) begin
         resp_regs_write   <= 1'b0;
         resp_fu           <= 3'd0;
         resp_rdata        <= 32'd0;
+        resp_exc_valid    <= 1'b0;
+        resp_exc_cause    <= 32'd0;
+        resp_exc_tval     <= 32'd0;
     end else begin
-        if (store_accept_resp_fire) begin
+        resp_exc_valid <= 1'b0;
+        resp_exc_cause <= 32'd0;
+        resp_exc_tval  <= 32'd0;
+        if (fault_accept_resp_fire) begin
+            resp_valid        <= 1'b1;
+            resp_order_id     <= req_order_id;
+            resp_epoch        <= req_epoch;
+            resp_tag          <= req_tag;
+            resp_rd           <= req_rd;
+            resp_func3        <= req_func3;
+            resp_regs_write   <= 1'b0;
+            resp_fu           <= req_fu;
+            resp_rdata        <= 32'd0;
+            resp_exc_valid    <= 1'b1;
+            resp_exc_cause    <= {27'd0, mmu_dtlb_resp_cause};
+            resp_exc_tval     <= mmu_dtlb_resp_tval;
+        end else if (store_accept_resp_fire) begin
             resp_valid        <= 1'b1;
             resp_valid        <= 1'b1;
             resp_order_id     <= req_order_id;

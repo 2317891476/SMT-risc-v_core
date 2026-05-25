@@ -88,6 +88,7 @@ BASIC_TEST_IDS = {
     "test_plic_s_context_uart_irq": 37,
     "test_sbi_timer_injection": 38,
     "test_sv32_core_identity": 39,
+    "test_sv32_core_page_fault": 40,
 }
 
 MODULE_TESTS = {
@@ -344,6 +345,7 @@ class TestRunner:
                 "test_plic_s_context_uart_irq.s",
                 "test_sbi_timer_injection.s",
                 "test_sv32_core_identity.s",
+                "test_sv32_core_page_fault.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
