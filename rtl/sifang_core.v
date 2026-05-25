@@ -451,6 +451,9 @@ reg        fence_i_pending_t0, fence_i_pending_t1;
 reg        fence_i_commit_seen_t0, fence_i_commit_seen_t1;
 reg        fence_i_dcache_flush_active_t0, fence_i_dcache_flush_active_t1;
 reg [`METADATA_ORDER_ID_W-1:0] fence_i_pending_order_t0, fence_i_pending_order_t1;
+reg        sfence_pending_t0, sfence_pending_t1;
+reg        sfence_commit_seen_t0, sfence_commit_seen_t1;
+reg [`METADATA_ORDER_ID_W-1:0] sfence_pending_order_t0, sfence_pending_order_t1;
 wire       lsu_debug_store_buffer_empty;
 
 always @(posedge clk or negedge rstn) begin
@@ -790,6 +793,7 @@ wire [11:0] dec0_csr_addr, dec1_csr_addr;
 wire        dec0_is_rocc, dec1_is_rocc;
 wire [6:0]  dec0_rocc_funct7, dec1_rocc_funct7;
 wire        dec0_is_fence_i, dec1_is_fence_i;
+wire        dec0_is_sfence_vma, dec1_is_sfence_vma;
 
 decoder_dual u_decoder_dual(
     .stall           (stall           ),
@@ -864,6 +868,12 @@ assign dec0_is_fence_i = dec0_valid && (fb_pop0_inst[6:0] == `MISC_MEM) &&
                          (fb_pop0_inst[14:12] == 3'b001);
 assign dec1_is_fence_i = dec1_valid && (fb_pop1_inst[6:0] == `MISC_MEM) &&
                          (fb_pop1_inst[14:12] == 3'b001);
+assign dec0_is_sfence_vma = dec0_valid && (fb_pop0_inst[6:0] == `SYSTEM) &&
+                            (fb_pop0_inst[14:12] == 3'b000) &&
+                            (fb_pop0_inst[31:25] == 7'b0001001);
+assign dec1_is_sfence_vma = dec1_valid && (fb_pop1_inst[6:0] == `SYSTEM) &&
+                            (fb_pop1_inst[14:12] == 3'b000) &&
+                            (fb_pop1_inst[31:25] == 7'b0001001);
 
 // Squash dispatches if flush active
 wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
@@ -911,14 +921,15 @@ assign fl_disp_stall = (((d0_needs_alloc && d1_needs_alloc) ? !fl_can_alloc_2 :
 // Never dispatch in the same cycle as a redirect/flush. The IQ flush logic
 // runs before dispatch allocation, so allowing same-cycle dispatch can leak
 // wrong-path entries into the IQs after branch/trap redirects.
-wire dec0_system_pending = dec0_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1) :
-                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0);
-wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1) :
-                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0);
+wire dec0_system_pending = dec0_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1 || sfence_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0 || sfence_pending_t0);
+wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1 || fence_i_pending_t1 || sfence_pending_t1) :
+                                      (mret_pending_t0 || csr_pending_t0 || fence_i_pending_t0 || sfence_pending_t0);
 wire dec0_blocked_by_pending_system = dec0_system_pending;
 wire dec1_blocked_by_pending_system =
     dec1_system_pending ||
-    (disp0_valid_pre_rob && (dec0_is_xret || dec0_is_trap || dec0_is_csr || dec0_is_fence_i) && (dec0_tid == dec1_tid));
+    (disp0_valid_pre_rob && (dec0_is_xret || dec0_is_trap || dec0_is_csr ||
+                             dec0_is_fence_i || dec0_is_sfence_vma) && (dec0_tid == dec1_tid));
 assign sys_disp_stall = disp0_valid_pre_rob && dec0_blocked_by_pending_system;
 wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
                          !combined_flush_any && !dec0_blocked_by_pending_system;
@@ -2273,6 +2284,19 @@ wire fence_i_flush_done_t1 = USE_MEM_SUBSYS ?
 wire fence_i_clear_t0 = fence_i_pending_t0 && fence_i_flush_done_t0;
 wire fence_i_clear_t1 = fence_i_pending_t1 && fence_i_flush_done_t1;
 assign fence_i_invalidate = fence_i_clear_t0 || fence_i_clear_t1;
+wire sfence_commit_hit_t0 = sfence_pending_t0 && rob_commit0_valid &&
+                            (rob_commit0_order_id == sfence_pending_order_t0);
+wire sfence_commit_hit_t1 = sfence_pending_t1 && rob_commit1_valid &&
+                            (rob_commit1_order_id == sfence_pending_order_t1);
+wire sfence_ready_t0 = sfence_pending_t0 &&
+                       (sfence_commit_seen_t0 || sfence_commit_hit_t0) &&
+                       lsu_debug_store_buffer_empty;
+wire sfence_ready_t1 = sfence_pending_t1 &&
+                       (sfence_commit_seen_t1 || sfence_commit_hit_t1) &&
+                       lsu_debug_store_buffer_empty;
+wire sfence_clear_t0 = sfence_ready_t0 && !combined_flush_any;
+wire sfence_clear_t1 = sfence_ready_t1 && !combined_flush_any;
+wire sfence_vma_flush = sfence_clear_t0 || sfence_clear_t1;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -2292,6 +2316,12 @@ always @(posedge clk or negedge rstn) begin
         fence_i_dcache_flush_active_t1 <= 1'b0;
         fence_i_pending_order_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
         fence_i_pending_order_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
+        sfence_pending_t0       <= 1'b0;
+        sfence_pending_t1       <= 1'b0;
+        sfence_commit_seen_t0   <= 1'b0;
+        sfence_commit_seen_t1   <= 1'b0;
+        sfence_pending_order_t0 <= {`METADATA_ORDER_ID_W{1'b0}};
+        sfence_pending_order_t1 <= {`METADATA_ORDER_ID_W{1'b0}};
     end else begin
         if (combined_flush_any) begin
             if (!flush_is_order_based) begin
@@ -2301,12 +2331,16 @@ always @(posedge clk or negedge rstn) begin
                     fence_i_pending_t0 <= 1'b0;
                     fence_i_commit_seen_t0 <= 1'b0;
                     fence_i_dcache_flush_active_t0 <= 1'b0;
+                    sfence_pending_t0 <= 1'b0;
+                    sfence_commit_seen_t0 <= 1'b0;
                 end else begin
                     mret_pending_t1 <= 1'b0;
                     csr_pending_t1  <= 1'b0;
                     fence_i_pending_t1 <= 1'b0;
                     fence_i_commit_seen_t1 <= 1'b0;
                     fence_i_dcache_flush_active_t1 <= 1'b0;
+                    sfence_pending_t1 <= 1'b0;
+                    sfence_commit_seen_t1 <= 1'b0;
                 end
             end else begin
                 if (mret_pending_t0 && flush_tid_mux == 1'b0 &&
@@ -2333,6 +2367,16 @@ always @(posedge clk or negedge rstn) begin
                     fence_i_commit_seen_t1 <= 1'b0;
                     fence_i_dcache_flush_active_t1 <= 1'b0;
                 end
+                if (sfence_pending_t0 && flush_tid_mux == 1'b0 &&
+                    sfence_pending_order_t0 > flush_order_id_mux) begin
+                    sfence_pending_t0 <= 1'b0;
+                    sfence_commit_seen_t0 <= 1'b0;
+                end
+                if (sfence_pending_t1 && flush_tid_mux == 1'b1 &&
+                    sfence_pending_order_t1 > flush_order_id_mux) begin
+                    sfence_pending_t1 <= 1'b0;
+                    sfence_commit_seen_t1 <= 1'b0;
+                end
             end
         end
 
@@ -2355,6 +2399,19 @@ always @(posedge clk or negedge rstn) begin
             fence_i_commit_seen_t0 <= 1'b1;
         if (fence_i_commit_hit_t1 && !fence_i_clear_t1)
             fence_i_commit_seen_t1 <= 1'b1;
+
+        if (sfence_clear_t0) begin
+            sfence_pending_t0 <= 1'b0;
+            sfence_commit_seen_t0 <= 1'b0;
+        end
+        if (sfence_clear_t1) begin
+            sfence_pending_t1 <= 1'b0;
+            sfence_commit_seen_t1 <= 1'b0;
+        end
+        if (sfence_commit_hit_t0 && !sfence_clear_t0)
+            sfence_commit_seen_t0 <= 1'b1;
+        if (sfence_commit_hit_t1 && !sfence_clear_t1)
+            sfence_commit_seen_t1 <= 1'b1;
 
         if (pipe0_mret_valid || pipe0_sret_valid || pipe0_exc_valid) begin
             if (p0_pre_ro_tid == 1'b0)
@@ -2434,6 +2491,29 @@ always @(posedge clk or negedge rstn) begin
                 fence_i_pending_order_t1 <= disp1_order_id;
             end
         end
+
+        if (disp0_accepted && dec0_is_sfence_vma) begin
+            if (dec0_tid == 1'b0) begin
+                sfence_pending_t0       <= 1'b1;
+                sfence_commit_seen_t0   <= 1'b0;
+                sfence_pending_order_t0 <= disp0_order_id;
+            end else begin
+                sfence_pending_t1       <= 1'b1;
+                sfence_commit_seen_t1   <= 1'b0;
+                sfence_pending_order_t1 <= disp0_order_id;
+            end
+        end
+        if (disp1_accepted && dec1_is_sfence_vma) begin
+            if (dec1_tid == 1'b0) begin
+                sfence_pending_t0       <= 1'b1;
+                sfence_commit_seen_t0   <= 1'b0;
+                sfence_pending_order_t0 <= disp1_order_id;
+            end else begin
+                sfence_pending_t1       <= 1'b1;
+                sfence_commit_seen_t1   <= 1'b0;
+                sfence_pending_order_t1 <= disp1_order_id;
+            end
+        end
     end
 end
 
@@ -2453,6 +2533,8 @@ wire trap_pc_speculative = sb_branch_pending_any ||
                            csr_pending_t1 ||
                            fence_i_pending_t0 ||
                            fence_i_pending_t1 ||
+                           sfence_pending_t0 ||
+                           sfence_pending_t1 ||
                            (p0_pre_ro_valid && (p0_pre_ro_is_mret || p0_pre_ro_is_sret ||
                                                 p0_pre_ro_is_ecall || p0_pre_ro_is_ebreak)) ||
                            pipe0_mret_valid ||
@@ -2493,6 +2575,7 @@ wire precise_interrupt_ready =
     !csr_pending_t0 &&
     !mret_pending_t0 &&
     !fence_i_pending_t0 &&
+    !sfence_pending_t0 &&
     !rob_recover_walk_active;
 wire csr_ext_timer_irq    = ext_timer_irq && precise_interrupt_ready;
 wire csr_ext_external_irq = ext_external_irq && precise_interrupt_ready;
@@ -4311,7 +4394,7 @@ mmu_sv32 u_mmu_sv32 (
     .priv_mode       (csr_priv_mode),
     .mstatus_mxr     (csr_mstatus_mxr),
     .mstatus_sum     (csr_mstatus_sum),
-    .sfence_valid    (1'b0),
+    .sfence_valid    (sfence_vma_flush),
     .sfence_vaddr    (32'd0),
     .sfence_asid     (9'd0),
     .itlb_req_valid  (mmu_itlb_req_valid),

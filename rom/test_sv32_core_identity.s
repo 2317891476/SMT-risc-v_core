@@ -11,6 +11,8 @@
 #   clear, forcing the PTW writeback path. A/D is verified in the standalone
 #   MMU test; this core test avoids reading the PTE back through L2 because the
 #   integrated cache-coherence policy for PTW writeback is not finished yet.
+# - Execute SFENCE.VMA in M-mode and S-mode to smoke the commit-ordered TLB
+#   flush path.
 # - Write PASS through an identity-mapped 0x1300_0000 MMIO megapage.
 
 .equ L0_PT_BASE,      0x00002000
@@ -49,6 +51,7 @@ _start:
 
     li x4, SATP_SV32_ROOT3
     csrw satp, x4
+    .word 0x12000073      # sfence.vma x0, x0
 
     la x5, supervisor_entry
     csrw mepc, x5
@@ -64,6 +67,7 @@ supervisor_entry:
     sw x11, 0(x10)
     lw x12, 0(x10)
     bne x11, x12, fail_data
+    .word 0x12000073      # sfence.vma x0, x0
 
     li x16, 0x04
     li x17, TUBE_ADDR

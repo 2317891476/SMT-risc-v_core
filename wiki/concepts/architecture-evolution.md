@@ -32,7 +32,8 @@ Implemented foundation:
 - `mmu_sv32` now has a simple physical PTW request/response port, 4KB and 4MB Sv32 walking, U/S/SUM/MXR permission checks, hardware A/D PTE writeback, page-fault cause/tval outputs, and full-flush `sfence.vma` coverage in module-level tests.
 - The top core now exposes `satp`, `priv_mode`, `mstatus.MXR`, and `mstatus.SUM` from `csr_unit`. I-side fetch queries the MMU with the virtual PC and sends the translated physical address to `inst_memory/icache`; D-side LSU queries the MMU and uses the translated physical address for store-buffer lookup/enqueue and M1 requests.
 - `mem_subsys` now services the MMU PTW physical port. Low physical addresses access the shared 16KB backing RAM below the L2 RAM write port; high physical addresses arbitrate into the DDR3 bridge below normal I/D traffic, with an aging counter so PTW is not starved indefinitely.
-- A core-level Sv32 identity test now installs page tables in local RAM, enters S-mode with Sv32 enabled, fetches through the I-side MMU, performs D-side translated store/load, and writes PASS through an identity-mapped MMIO megapage.
+- `sfence.vma` is now tracked as a serializing SYSTEM instruction. The first integrated version waits for ROB commit and an empty store buffer, then issues a full TLB flush to `mmu_sv32`; selective ASID/VPN operands are intentionally ignored for v1.
+- A core-level Sv32 identity test now installs page tables in local RAM, executes `sfence.vma` in M-mode and S-mode, enters S-mode with Sv32 enabled, fetches through the I-side MMU, performs D-side translated store/load, and writes PASS through an identity-mapped MMIO megapage.
 
 Known architecture gaps before Linux can boot:
 

@@ -112,7 +112,7 @@ Linux work is staged:
    Passing requires UART tokens `OpenSBI`, `Boot HART ID: 0`, `Linux version`, `Run /init as init process`, and `SIFANGCORE LINUX PASS`, with no trap/stuck/unexpected UART.
 5. Only after `linux-preload` passes may AX7203 Linux board validation start. Use Vivado 2023.2 JTAG and COM5 UART, and fall back to Verilator traces on failure instead of iterating blindly in Vivado.
 
-Current Linux blockers to keep visible until fixed: precise fetch/load/store page faults are not fully plumbed to CSR at ROB commit, `sfence.vma` is not yet wired to committed system instructions in the core, and PTW hardware A/D writeback needs a CPU-cache coherence policy before Linux can rely on reading updated PTEs through cached paths.
+Current Linux blockers to keep visible until fixed: precise fetch/load/store page faults are not fully plumbed to CSR at ROB commit, and PTW hardware A/D writeback needs a CPU-cache coherence policy before Linux can rely on reading updated PTEs through cached paths.
 
 Do not run `verification/run_all_tests.py`, `verification/run_riscv_tests.py`, or other ROM-generating simulations in parallel unless their output directories are isolated. The current runners rewrite shared `rom/inst.hex` and `rom/data.hex`; parallel runs can create false regressions.
 
