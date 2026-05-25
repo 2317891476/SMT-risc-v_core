@@ -31,10 +31,12 @@ Implemented foundation:
 - OpenSBI-style supervisor timer injection is supported by writable `mip/sip` supervisor interrupt bits and S-mode delegated timer delivery.
 - `mmu_sv32` now has a simple physical PTW request/response port, 4KB and 4MB Sv32 walking, U/S/SUM/MXR permission checks, hardware A/D PTE writeback, page-fault cause/tval outputs, and full-flush `sfence.vma` coverage in module-level tests.
 - The top core now exposes `satp`, `priv_mode`, `mstatus.MXR`, and `mstatus.SUM` from `csr_unit`. I-side fetch queries the MMU with the virtual PC and sends the translated physical address to `inst_memory/icache`; D-side LSU queries the MMU and uses the translated physical address for store-buffer lookup/enqueue and M1 requests.
+- `mem_subsys` now services the MMU PTW physical port. Low physical addresses access the shared 16KB backing RAM below the L2 RAM write port; high physical addresses arbitrate into the DDR3 bridge below normal I/D traffic, with an aging counter so PTW is not starved indefinitely.
+- A core-level Sv32 identity test now installs page tables in local RAM, enters S-mode with Sv32 enabled, fetches through the I-side MMU, performs D-side translated store/load, and writes PASS through an identity-mapped MMIO megapage.
 
 Known architecture gaps before Linux can boot:
 
-- The PTW simple physical port is still tied off at the top level and needs an integrated endpoint in `mem_subsys` with correct arbitration against DDR3/cache traffic.
 - Precise instruction/load/store page-fault causes and `tval` must be carried into CSR at the right ROB point.
+- PTW A/D writeback currently updates the physical backing store/DDR3 path, but it does not invalidate or update CPU cache lines that may already contain the same PTE. The standalone MMU test verifies hardware A/D behavior at the PTW memory interface; OS-visible PTE coherence still needs a shared cache path or invalidation policy before Linux can rely on A/D bits under cached page-table reads.
 - The current no-page-table privilege smoke writes `satp.MODE=0`; actual MODE=1 execution is intentionally covered by Sv32/MMU tests that install page tables first.
 - The current S-mode work is single hart only; SMP, FPU, compressed instructions, and device storage are intentionally out of scope for the first Linux pass.

@@ -17,6 +17,7 @@ This wiki is the required living record for the AX7203 single-thread bring-up. K
 - Linux first execution gate is WSL Verilator `--mode linux-preload` with `build\linux\fw_payload.bin`; board validation comes only after UART shows OpenSBI, Linux, `/init`, and `SIFANGCORE LINUX PASS`.
 - Wiki and documentation updates must be included in the same GitHub commit/PR as the related code or debug change; if no commit/push is authorized, list the pending documentation files explicitly.
 - Generated output policy: `build/`, `.Xil/`, VCDs, Vivado logs/journals, crash dumps, and bitstreams are generated and should not be committed.
+- Do not run ROM-generating regressions in parallel unless their output paths are isolated; current runners share `rom/inst.hex` and `rom/data.hex`.
 
 ## Current Debug Stage
 
@@ -24,9 +25,9 @@ Status as of 2026-05-25 +08:00:
 
 - Linux bring-up has started. Implemented and tested prerequisites: S-mode CSR/trap/delegation, SRET/MRET privilege transitions, RV32A AMO/LRSC, PLIC UART source 2 through S-context, and OpenSBI-style STIP injection into S-mode timer interrupt.
 - New Linux staging files live under `software/linux/`: AX7203 DTB, minimal initramfs `/init`, and a WSL build script that currently emits DTB/initramfs staging artifacts and intentionally gates full `fw_payload.bin` generation until OpenSBI/Linux/BusyBox source/configs are ready.
-- Current Linux blockers: I-side fetch and D-side LSU now query `mmu_sv32` and use translated physical addresses in bare/M-mode-compatible operation, but the PTW port is still tied off instead of arbitrated through `mem_subsys`, and precise fetch/load/store page faults are not yet carried into CSR at ROB commit.
-- Verification on 2026-05-25: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma` pass under `--fpga-config`; `--basic` and `--basic --fpga-config` both pass 41/41 after I/D MMU insertion; `rv32ua` riscv-tests pass 10/10; `python verification\run_all_tests.py --riscv-tests` passes with RV32I/M/A categories.
-- Board-equivalent WSL Verilator Dhrystone after I/D MMU insertion passes in both 5000-run modes: preload has `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap/stuck/unexpected UART; loader-semantic has `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, `DHRYSTONE DONE`, no trap/stuck/unexpected UART.
+- Current Linux blockers: I/D translation and the `mem_subsys` PTW endpoint are integrated, including local RAM and low-priority DDR3 PTW service. Precise fetch/load/store page faults are not yet carried into CSR at ROB commit, and PTW A/D writeback is not coherent with CPU cache lines if software reads the same PTE through L2/L1 after the hardware update.
+- Verification on 2026-05-25 after PTW endpoint integration: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma` pass under `--fpga-config`; the new core-level `test_sv32_core_identity` passes; `--basic` and `--basic --fpga-config` both pass 42/42; `rv32ua` riscv-tests pass 10/10.
+- Board-equivalent WSL Verilator Dhrystone after PTW endpoint integration passes in both 5000-run modes: preload has `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap/stuck/unexpected UART, and `Cycles=28837429`; loader-semantic has `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, `DHRYSTONE DONE`, no trap/stuck/unexpected UART, and `Cycles=166376270`.
 - The repository is being fully renamed to SifangCore. RTL, FPGA top modules, RISCOF plugin names, Tcl/Python default stems, documentation, and UART boot banners now use `sifang_core` / `SifangCore`.
 - SMT removal/single-thread RTL debugging is past the basic simulation bring-up stage.
 - Basic Icarus regressions and FPGA-config directed tests have passed in the current debug line, including UART16550/PLIC source 2 and long store-buffer tests.
@@ -45,7 +46,7 @@ Status as of 2026-05-25 +08:00:
 ```powershell
 python verification\run_all_tests.py --basic
 python verification\run_all_tests.py --basic --fpga-config
-python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection test_sv32_core_identity --fpga-config
 python verification\run_all_tests.py --tests test_sv32_translation test_sv32_page_faults test_sfence_vma --fpga-config -v
 python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
 python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
@@ -90,6 +91,7 @@ python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5
 
 ## Timeline
 
+- 2026-05-25: `mem_subsys` gained the integrated Sv32 PTW physical endpoint, with local RAM service and low-priority DDR3 arbitration. Core-level Sv32 identity execution now passes, and board-equivalent WSL Verilator Dhrystone remains green.
 - 2026-05-25: `mmu_sv32` was rewritten around a simple physical PTW port, hardware A/D update, U/S/SUM/MXR permission checks, page-fault metadata, and full-flush `sfence.vma`; module-level Sv32 tests pass and the MMU is instantiated in the core as a bare-mode scaffold.
 - 2026-05-25: Linux MMU bring-up started: S-mode CSR/trap, RV32A, PLIC S-context UART IRQ, and SBI timer-injection directed tests pass; Linux DTB/initramfs staging flow and Verilator `linux-preload` entry were added. Full Linux boot remains blocked on Sv32/MMU/PTW/page-fault integration.
 - 2026-05-24: WSL Verilator became available after Ubuntu-22.04 was started externally; preload and full loader-semantic Dhrystone now pass with board ROM profile and board-safe host pacing.

@@ -72,7 +72,7 @@ Required Linux sequence:
 1. Keep the existing Dhrystone board-equivalent Verilator gates green after Linux-related RTL edits.
 2. Run directed prerequisite tests:
    ```powershell
-   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection test_sv32_core_identity --fpga-config
    python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
    ```
 3. Build Linux staging artifacts only through WSL:
@@ -86,7 +86,9 @@ Required Linux sequence:
    Required UART tokens are `OpenSBI`, `Boot HART ID: 0`, `Linux version`, `Run /init as init process`, and `SIFANGCORE LINUX PASS`.
 5. AX7203 Linux board validation comes only after `linux-preload` passes, using Vivado 2023.2 JTAG and COM5 UART.
 
-Current blockers: I/D Sv32 translation is not wired into fetch/LSU, PTW has no memory-system port, precise page faults are not fully plumbed, and PTE A/D update behavior is not integrated.
+Current blockers: precise fetch/load/store page faults are not fully plumbed to CSR at ROB commit, `sfence.vma` is not yet wired to committed system instructions in the core, and PTW hardware A/D writeback needs a CPU-cache coherence policy before Linux can rely on reading updated PTEs through cached paths.
+
+Do not run `verification/run_all_tests.py`, `verification/run_riscv_tests.py`, or other ROM-generating simulations in parallel unless their output directories are isolated. The current runners rewrite shared `rom/inst.hex` and `rom/data.hex`; parallel runs can create false regressions.
 
 ## Current Repository State
 

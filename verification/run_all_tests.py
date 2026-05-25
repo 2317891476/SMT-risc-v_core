@@ -87,6 +87,7 @@ BASIC_TEST_IDS = {
     "test_amo_lrsc": 36,
     "test_plic_s_context_uart_irq": 37,
     "test_sbi_timer_injection": 38,
+    "test_sv32_core_identity": 39,
 }
 
 MODULE_TESTS = {
@@ -342,6 +343,7 @@ class TestRunner:
                 "test_amo_lrsc.s",
                 "test_plic_s_context_uart_irq.s",
                 "test_sbi_timer_injection.s",
+                "test_sv32_core_identity.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
@@ -406,7 +408,7 @@ class TestRunner:
             
             # Build ROM
             # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
-            march_flag = "rv32ia_zicsr" if "amo" in test_name or "lrsc" in test_name else "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name or "timer" in test_name or "sbi" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
+            march_flag = "rv32ia_zicsr" if "amo" in test_name or "lrsc" in test_name else "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name or "timer" in test_name or "sbi" in test_name or "sv32" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
             ret, out, err = self.build_basic_rom(test, test_name, march_flag)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))

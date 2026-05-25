@@ -62,10 +62,11 @@ As of 2026-05-22 10:03 +08:00, the boundary matrix above passed after two consec
 - Directed UART16550 and PLIC source 2 tests have passed.
 - Linux prerequisite directed tests now pass: `test_priv_mret_sret_delegation`, `test_amo_lrsc`, `test_plic_s_context_uart_irq`, and `test_sbi_timer_injection`.
 - Sv32 module-level tests now pass through the unified runner: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma`. These cover bare/M-mode bypass, 4KB and 4MB translations, U/S/SUM/MXR permission checks, load/store/fetch page-fault metadata, hardware A/D PTE updates, and full-flush `sfence.vma`.
+- The core-level Sv32 integration smoke `test_sv32_core_identity` passes under `--fpga-config`. It installs local page tables, enters S-mode with Sv32 enabled, exercises I-side and D-side translation, and writes PASS through an MMIO megapage. It deliberately does not read back hardware-updated A/D bits through the CPU cache hierarchy because PTW writeback cache coherence is still an open Linux blocker.
 - Classic `riscv-tests` now includes `rv32ua`; `python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua` passes 10/10 after extending the riscv-tests testbench timeout for the long LR/SC loop.
 - Store-buffer stress tests for long stream and long drain/poll patterns have passed.
 - Loader long simulation with 32-byte blocks passed after the branch-complete duplicate-pulse fix.
-- After I/D MMU insertion, board-equivalent 5000-run Verilator Dhrystone still passes in both preload and loader-semantic modes. The loader-semantic run reported `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, benchmark START/DONE, no trap, no unexpected UART, and no stuck PC.
+- After PTW endpoint integration, board-equivalent 5000-run Verilator Dhrystone still passes in both preload and loader-semantic modes. Preload reported `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, `Cycles=28837429`, no trap, no unexpected UART, and no stuck PC. Loader-semantic reported `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, `Cycles=166376270`, benchmark START/DONE, no trap, no unexpected UART, and no stuck PC.
 - Verilator wrapper WSL stderr/stdout decoding is now tolerant of localized UTF-16LE WSL errors, so missing-distro or missing-tool failures are visible as environment blockers instead of Python decode exceptions.
 
 ## Linux Preload Gate
@@ -84,7 +85,7 @@ This mode preloads `fw_payload.bin` at `0x80000000`, starts the core at DDR3, di
 - `Run /init as init process`
 - `SIFANGCORE LINUX PASS`
 
-As of 2026-05-25, the mode is wired into the wrapper/harness but cannot pass because `build\linux\fw_payload.bin` is not produced yet and the MMU still needs a `mem_subsys` PTW endpoint plus ROB-precise page-fault delivery. The command correctly fails early with a missing-payload message when the image is absent.
+As of 2026-05-25, the mode is wired into the wrapper/harness but cannot pass because `build\linux\fw_payload.bin` is not produced yet, ROB-precise fetch/load/store page-fault delivery is not implemented, and PTW A/D writeback still needs a CPU-cache coherence policy. The command correctly fails early with a missing-payload message when the image is absent.
 
 ## Recording Rule
 

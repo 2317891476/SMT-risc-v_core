@@ -502,6 +502,14 @@ wire        mmu_dtlb_resp_fault;
 wire [4:0]  mmu_dtlb_resp_cause;
 wire [31:0] mmu_dtlb_resp_tval;
 wire        mmu_dtlb_busy;
+wire        mmu_ptw_req_valid;
+wire        mmu_ptw_req_ready;
+wire        mmu_ptw_req_write;
+wire [31:0] mmu_ptw_req_addr;
+wire [31:0] mmu_ptw_req_wdata;
+wire [3:0]  mmu_ptw_req_wen;
+wire        mmu_ptw_resp_valid;
+wire [31:0] mmu_ptw_resp_rdata;
 wire        rob_commit0_valid, rob_commit1_valid;
 wire [4:0]  rob_commit0_rd, rob_commit1_rd;
 wire [RS_TAG_W_CFG-1:0]  rob_commit0_tag, rob_commit1_tag;
@@ -4294,14 +4302,8 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .ext_supervisor_external_irq(csr_ext_supervisor_external_irq)
 );
 
-// Sv32 MMU. I-side translation feeds stage_if/inst_memory. D-side translation
-// and PTW memory arbitration are still staged off until LSU integration.
-wire        mmu_ptw_req_valid_unused;
-wire        mmu_ptw_req_write_unused;
-wire [31:0] mmu_ptw_req_addr_unused;
-wire [31:0] mmu_ptw_req_wdata_unused;
-wire [3:0]  mmu_ptw_req_wen_unused;
-
+// Sv32 MMU. I/D translations feed physical memory requests while fetch/ROB
+// continue to track virtual PCs for precise architectural state.
 mmu_sv32 u_mmu_sv32 (
     .clk             (clk),
     .rstn            (rstn),
@@ -4329,14 +4331,14 @@ mmu_sv32 u_mmu_sv32 (
     .dtlb_resp_cause (mmu_dtlb_resp_cause),
     .dtlb_resp_tval  (mmu_dtlb_resp_tval),
     .dtlb_busy       (mmu_dtlb_busy),
-    .ptw_req_valid   (mmu_ptw_req_valid_unused),
-    .ptw_req_ready   (1'b0),
-    .ptw_req_write   (mmu_ptw_req_write_unused),
-    .ptw_req_addr    (mmu_ptw_req_addr_unused),
-    .ptw_req_wdata   (mmu_ptw_req_wdata_unused),
-    .ptw_req_wen     (mmu_ptw_req_wen_unused),
-    .ptw_resp_valid  (1'b0),
-    .ptw_resp_rdata  (32'd0)
+    .ptw_req_valid   (mmu_ptw_req_valid),
+    .ptw_req_ready   (mmu_ptw_req_ready),
+    .ptw_req_write   (mmu_ptw_req_write),
+    .ptw_req_addr    (mmu_ptw_req_addr),
+    .ptw_req_wdata   (mmu_ptw_req_wdata),
+    .ptw_req_wen     (mmu_ptw_req_wen),
+    .ptw_resp_valid  (mmu_ptw_resp_valid),
+    .ptw_resp_rdata  (mmu_ptw_resp_rdata)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4525,6 +4527,16 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .m2_resp_valid     (m2_resp_valid),
         .m2_resp_data      (m2_resp_data),
 
+        // Sv32 PTW physical port
+        .ptw_req_valid     (mmu_ptw_req_valid),
+        .ptw_req_ready     (mmu_ptw_req_ready),
+        .ptw_req_write     (mmu_ptw_req_write),
+        .ptw_req_addr      (mmu_ptw_req_addr),
+        .ptw_req_wdata     (mmu_ptw_req_wdata),
+        .ptw_req_wen       (mmu_ptw_req_wen),
+        .ptw_resp_valid    (mmu_ptw_resp_valid),
+        .ptw_resp_rdata    (mmu_ptw_resp_rdata),
+
         // Testbench observation
         .tube_status       (mem_subsys_tube_status),
 
@@ -4586,6 +4598,9 @@ end else begin : gen_mem_subsys_tieoff
     assign m2_req_ready              = 1'b0;
     assign m2_resp_valid             = 1'b0;
     assign m2_resp_data              = 32'd0;
+    assign mmu_ptw_req_ready         = 1'b0;
+    assign mmu_ptw_resp_valid        = 1'b0;
+    assign mmu_ptw_resp_rdata        = 32'd0;
     assign mem_subsys_tube_status    = 8'd0;
     assign mem_subsys_ext_timer_irq  = 1'b0;
     assign mem_subsys_ext_external_irq = 1'b0;

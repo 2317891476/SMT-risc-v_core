@@ -49,6 +49,17 @@ module mem_subsys (
     output wire        m2_resp_valid,
     output wire [31:0] m2_resp_data,
 
+    // Sv32 page-table walker physical port. PTW bypasses virtual translation
+    // and is serviced at lower priority than normal I/D memory traffic.
+    input  wire        ptw_req_valid,
+    output wire        ptw_req_ready,
+    input  wire        ptw_req_write,
+    input  wire [31:0] ptw_req_addr,
+    input  wire [31:0] ptw_req_wdata,
+    input  wire [3:0]  ptw_req_wen,
+    output wire        ptw_resp_valid,
+    output wire [31:0] ptw_resp_rdata,
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Testbench observation interface
     // ═══════════════════════════════════════════════════════════════════════════
@@ -174,6 +185,11 @@ wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT
 wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_S_CLAIM_COMPLETE);
 wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_plic_m1;
 
+wire ptw_ddr3_req = ptw_req_valid && ptw_req_addr[31];
+wire ptw_ddr3_req_ready_w;
+wire ptw_ddr3_resp_valid_w;
+wire [31:0] ptw_ddr3_resp_data_w;
+
 // DDR3 region: address bit 31 set (0x8000_0000 - 0xFFFF_FFFF)
 `ifdef ENABLE_DDR3
 wire addr_is_ddr3_m0 = m0_req_addr[31];
@@ -246,6 +262,9 @@ wire [31:0] m1_ddr3_resp_data = 32'd0;
 wire        m1_ddr3_resp_l1d_hit = 1'b0;
 wire        ddr3_calib_done_w = 1'b0;
 wire        ddr3_bridge_idle_w = 1'b1;
+assign ptw_ddr3_req_ready_w = 1'b0;
+assign ptw_ddr3_resp_valid_w = 1'b0;
+assign ptw_ddr3_resp_data_w = 32'd0;
 assign dcache_flush_busy = 1'b0;
 assign dcache_flush_done = dcache_flush_all;
 // synthesis translate_off
@@ -392,6 +411,33 @@ assign ram_rdata = ram[ram_addr[13:2]];
 // shared mem_subsys RAM instead of a separate inst_backing_store image.
 assign m0_bypass_data = m0_bypass_addr[31] ? 32'd0 : ram[m0_bypass_addr[13:2]];
 
+function [31:0] apply_wen32;
+    input [31:0] old_word;
+    input [31:0] new_word;
+    input [3:0]  wen;
+    begin
+        apply_wen32 = old_word;
+        if (wen[0]) apply_wen32[7:0]   = new_word[7:0];
+        if (wen[1]) apply_wen32[15:8]  = new_word[15:8];
+        if (wen[2]) apply_wen32[23:16] = new_word[23:16];
+        if (wen[3]) apply_wen32[31:24] = new_word[31:24];
+    end
+endfunction
+
+wire        ptw_local_req = ptw_req_valid && !ptw_req_addr[31];
+wire [31:0] ptw_local_read_word = ram[ptw_req_addr[13:2]];
+wire [31:0] ptw_local_write_word = apply_wen32(ptw_local_read_word,
+                                                ptw_req_wdata,
+                                                ptw_req_wen);
+reg         ptw_local_resp_valid_r;
+reg [31:0]  ptw_local_resp_data_r;
+wire        ptw_local_req_ready_w = ptw_local_req && !ram_write && !ptw_local_resp_valid_r;
+
+assign ptw_req_ready = ptw_req_valid
+                     ? (ptw_req_addr[31] ? ptw_ddr3_req_ready_w : ptw_local_req_ready_w)
+                     : 1'b0;
+assign ptw_resp_valid = ptw_ddr3_resp_valid_w ? 1'b1 : ptw_local_resp_valid_r;
+assign ptw_resp_rdata = ptw_ddr3_resp_valid_w ? ptw_ddr3_resp_data_w : ptw_local_resp_data_r;
 
 l2_cache u_l2_cache (
     .clk            (clk),
@@ -424,10 +470,26 @@ l2_cache u_l2_cache (
     .cache_miss     (cache_miss)
 );
 
-// RAM write handling
-always @(posedge clk) begin
-    if (ram_write) begin
-        ram[ram_addr[13:2]] <= ram_wdata;
+// RAM write handling. PTW local requests are intentionally lower priority than
+// the L2 cache RAM port to avoid same-cycle multi-driver/write conflicts.
+always @(posedge clk or negedge rstn) begin
+    if (!rstn) begin
+        ptw_local_resp_valid_r <= 1'b0;
+        ptw_local_resp_data_r  <= 32'd0;
+    end else begin
+        ptw_local_resp_valid_r <= 1'b0;
+
+        if (ram_write) begin
+            ram[ram_addr[13:2]] <= ram_wdata;
+        end
+
+        if (ptw_local_req_ready_w) begin
+            ptw_local_resp_valid_r <= 1'b1;
+            ptw_local_resp_data_r  <= ptw_req_write ? ptw_local_write_word : ptw_local_read_word;
+            if (ptw_req_write) begin
+                ram[ptw_req_addr[13:2]] <= ptw_local_write_word;
+            end
+        end
     end
 end
 
@@ -1313,12 +1375,13 @@ localparam DDR3_ARB_IDLE      = 2'd0;
 localparam DDR3_ARB_M0_SEND   = 2'd1;
 localparam DDR3_ARB_WAIT_RESP = 2'd2;
 
-localparam DDR3_OWNER_M0 = 1'b0;
-localparam DDR3_OWNER_M1 = 1'b1;
+localparam DDR3_OWNER_M0  = 2'd0;
+localparam DDR3_OWNER_M1  = 2'd1;
+localparam DDR3_OWNER_PTW = 2'd2;
 
 reg [1:0]  ddr3_arb_state;
-reg        ddr3_owner_r;
-reg        ddr3_last_owner_r;
+reg [1:0]  ddr3_owner_r;
+reg [1:0]  ddr3_last_owner_r;
 reg [2:0]  ddr3_m0_word_idx_r;
 reg [31:0] ddr3_m0_line_base_r;
 
@@ -1334,6 +1397,10 @@ reg        m0_ddr3_resp_last_r;
 reg        m1_ddr3_req_ready_r;
 reg        m1_ddr3_resp_valid_r;
 reg [31:0] m1_ddr3_resp_data_r;
+reg        ptw_ddr3_req_ready_r;
+reg        ptw_ddr3_resp_valid_r;
+reg [31:0] ptw_ddr3_resp_data_r;
+reg [4:0]  ptw_ddr3_wait_count_r;
 reg        debug_m0_req_seen_r;
 reg [7:0]  debug_m0_req_count_r;
 reg [7:0]  debug_m0_accept_count_r;
@@ -1343,11 +1410,15 @@ reg [31:0] debug_m0_last_req_addr_r;
 reg [31:0] debug_m0_last_resp_data_r;
 reg [7:0]  debug_m1_accept_count_r;
 
-wire ddr3_select_m0 = m0_ddr3_req && (!dc_m1_req_valid || ddr3_last_owner_r == DDR3_OWNER_M1);
-wire ddr3_select_m1 = dc_m1_req_valid && (!m0_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M0);
+wire ddr3_select_ptw = ptw_ddr3_req &&
+                       ((!m0_ddr3_req && !dc_m1_req_valid) || ptw_ddr3_wait_count_r[4]);
+wire ddr3_select_m0 = !ddr3_select_ptw && m0_ddr3_req &&
+                      (!dc_m1_req_valid || ddr3_last_owner_r == DDR3_OWNER_M1);
+wire ddr3_select_m1 = !ddr3_select_ptw && dc_m1_req_valid &&
+                      (!m0_ddr3_req || ddr3_last_owner_r == DDR3_OWNER_M0);
 wire [7:0] debug_m0_flags = {
     ddr3_arb_state,
-    ddr3_owner_r,
+    ddr3_owner_r[0],
     ddr3_m0_word_idx_r,
     ddr3_req_valid_r,
     ddr3_req_ready
@@ -1367,6 +1438,9 @@ assign m0_ddr3_resp_last  = m0_ddr3_resp_last_r;
 assign dc_m1_req_ready  = m1_ddr3_req_ready_r;
 assign dc_m1_resp_valid = m1_ddr3_resp_valid_r;
 assign dc_m1_resp_data  = m1_ddr3_resp_data_r;
+assign ptw_ddr3_req_ready_w = ptw_ddr3_req_ready_r;
+assign ptw_ddr3_resp_valid_w = ptw_ddr3_resp_valid_r;
+assign ptw_ddr3_resp_data_w = ptw_ddr3_resp_data_r;
 assign debug_ddr3_m0_bus = {
     debug_uart_flags,
     debug_uart_tx_write_count_r,
@@ -1399,6 +1473,10 @@ always @(posedge clk or negedge rstn) begin
         m1_ddr3_req_ready_r   <= 1'b0;
         m1_ddr3_resp_valid_r  <= 1'b0;
         m1_ddr3_resp_data_r   <= 32'd0;
+        ptw_ddr3_req_ready_r  <= 1'b0;
+        ptw_ddr3_resp_valid_r <= 1'b0;
+        ptw_ddr3_resp_data_r  <= 32'd0;
+        ptw_ddr3_wait_count_r <= 5'd0;
         debug_m0_req_seen_r       <= 1'b0;
         debug_m0_req_count_r      <= 8'd0;
         debug_m0_accept_count_r   <= 8'd0;
@@ -1413,7 +1491,15 @@ always @(posedge clk or negedge rstn) begin
         m0_ddr3_resp_last_r  <= 1'b0;
         m1_ddr3_req_ready_r  <= 1'b0;
         m1_ddr3_resp_valid_r <= 1'b0;
+        ptw_ddr3_req_ready_r <= 1'b0;
+        ptw_ddr3_resp_valid_r <= 1'b0;
         debug_m0_req_seen_r  <= m0_ddr3_req;
+
+        if (!ptw_ddr3_req || ptw_ddr3_req_ready_r) begin
+            ptw_ddr3_wait_count_r <= 5'd0;
+        end else if (ptw_ddr3_wait_count_r != 5'h1f) begin
+            ptw_ddr3_wait_count_r <= ptw_ddr3_wait_count_r + 5'd1;
+        end
 
         if (m0_ddr3_req && !debug_m0_req_seen_r) begin
             debug_m0_req_count_r     <= debug_m0_req_count_r + 8'd1;
@@ -1439,6 +1525,13 @@ always @(posedge clk or negedge rstn) begin
                     ddr3_req_wdata_r    <= dc_m1_req_wdata;
                     ddr3_req_wen_r      <= dc_m1_req_wen;
                     ddr3_arb_state      <= DDR3_ARB_M0_SEND;
+                end else if (ddr3_select_ptw) begin
+                    ddr3_owner_r        <= DDR3_OWNER_PTW;
+                    ddr3_req_addr_r     <= {2'b0, ptw_req_addr[29:0]};
+                    ddr3_req_write_r    <= ptw_req_write;
+                    ddr3_req_wdata_r    <= ptw_req_wdata;
+                    ddr3_req_wen_r      <= ptw_req_wen;
+                    ddr3_arb_state      <= DDR3_ARB_M0_SEND;
                 end
             end
 
@@ -1459,6 +1552,8 @@ always @(posedge clk or negedge rstn) begin
                     end else if (ddr3_owner_r == DDR3_OWNER_M1) begin
                         m1_ddr3_req_ready_r <= 1'b1;
                         debug_m1_accept_count_r <= debug_m1_accept_count_r + 8'd1;
+                    end else if (ddr3_owner_r == DDR3_OWNER_PTW) begin
+                        ptw_ddr3_req_ready_r <= 1'b1;
                     end
                     ddr3_arb_state <= DDR3_ARB_WAIT_RESP;
                 end
@@ -1481,11 +1576,15 @@ always @(posedge clk or negedge rstn) begin
                             ddr3_m0_word_idx_r <= ddr3_m0_word_idx_r + 3'd1;
                             ddr3_arb_state     <= DDR3_ARB_M0_SEND;
                         end
-                    end else begin
+                    end else if (ddr3_owner_r == DDR3_OWNER_M1) begin
                         m1_ddr3_resp_valid_r <= 1'b1;
                         m1_ddr3_resp_data_r  <= ddr3_resp_data;
                         ddr3_last_owner_r    <= DDR3_OWNER_M1;
                         ddr3_arb_state       <= DDR3_ARB_IDLE;
+                    end else begin
+                        ptw_ddr3_resp_valid_r <= 1'b1;
+                        ptw_ddr3_resp_data_r  <= ddr3_resp_data;
+                        ddr3_arb_state        <= DDR3_ARB_IDLE;
                     end
                 end
             end

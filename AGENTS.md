@@ -97,7 +97,7 @@ Linux work is staged:
 1. Keep Dhrystone green first. After any RTL change made for Linux, rerun the relevant Icarus directed tests, `--basic`, `--basic --fpga-config`, and the board-equivalent WSL Verilator Dhrystone gates before attempting Linux-specific Verilator runs.
 2. Validate Linux prerequisites with directed tests before building images:
    ```powershell
-   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection test_sv32_core_identity --fpga-config
    python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
    ```
 3. Build Linux staging artifacts through WSL only:
@@ -112,7 +112,9 @@ Linux work is staged:
    Passing requires UART tokens `OpenSBI`, `Boot HART ID: 0`, `Linux version`, `Run /init as init process`, and `SIFANGCORE LINUX PASS`, with no trap/stuck/unexpected UART.
 5. Only after `linux-preload` passes may AX7203 Linux board validation start. Use Vivado 2023.2 JTAG and COM5 UART, and fall back to Verilator traces on failure instead of iterating blindly in Vivado.
 
-Current Linux blockers to keep visible until fixed: I/D-side Sv32 translation is not wired into fetch/LSU, PTW has no memory-system port, precise fetch/load/store page faults are not fully plumbed to CSR, and hardware PTE A/D update behavior is not integrated.
+Current Linux blockers to keep visible until fixed: precise fetch/load/store page faults are not fully plumbed to CSR at ROB commit, `sfence.vma` is not yet wired to committed system instructions in the core, and PTW hardware A/D writeback needs a CPU-cache coherence policy before Linux can rely on reading updated PTEs through cached paths.
+
+Do not run `verification/run_all_tests.py`, `verification/run_riscv_tests.py`, or other ROM-generating simulations in parallel unless their output directories are isolated. The current runners rewrite shared `rom/inst.hex` and `rom/data.hex`; parallel runs can create false regressions.
 
 ## Commit & Pull Request Guidelines
 
