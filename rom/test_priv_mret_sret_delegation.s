@@ -36,7 +36,9 @@ supervisor_entry:
     csrr x6, sscratch
     bne x5, x6, test_fail
 
-    li x7, 0x80000001
+    # Keep satp.MODE=0 in this privilege smoke. Sv32 MODE=1 is covered by
+    # dedicated MMU tests that install page tables before enabling translation.
+    li x7, 0x00000001
     csrw satp, x7
     csrr x8, satp
     bne x7, x8, test_fail

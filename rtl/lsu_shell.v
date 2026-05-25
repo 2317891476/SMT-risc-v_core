@@ -69,6 +69,18 @@ module lsu_shell #(
     input  wire [2:0]         req_fu,            // FU type (FU_LOAD/FU_STORE)
     input  wire               req_mem2reg,       // Load to register
 
+    // Sv32 D-side translation. Store buffer and mem_subsys see physical
+    // addresses; fault delivery is plumbed to ROB in the next stage.
+    output wire               mmu_dtlb_req_valid,
+    output wire [31:0]        mmu_dtlb_req_vaddr,
+    output wire               mmu_dtlb_req_store,
+    input  wire               mmu_dtlb_resp_hit,
+    input  wire [31:0]        mmu_dtlb_resp_paddr,
+    input  wire               mmu_dtlb_resp_fault,
+    input  wire [4:0]         mmu_dtlb_resp_cause,
+    input  wire [31:0]        mmu_dtlb_resp_tval,
+    input  wire               mmu_dtlb_busy,
+
     // ROB head query: side-effecting MMIO loads may only issue at ROB head.
     input  wire               rob_head_valid_t0,
     input  wire [ORDER_ID_W-1:0] rob_head_order_id_t0,
@@ -198,12 +210,22 @@ wire is_load  = req_valid && !req_wen && !req_amo;
 wire is_store = req_valid && req_wen && !req_amo;
 wire store_enqueue_fire;
 wire legacy_load_issue_fire;
+wire req_flush_kill =
+    req_valid && flush &&
+    (!flush_order_valid || (req_order_id > flush_order_id));
+wire req_amo_is_store_side = req_amo && (req_amo_op != `AMO_LR);
+assign mmu_dtlb_req_valid = req_valid && !req_flush_kill;
+assign mmu_dtlb_req_vaddr = req_addr;
+assign mmu_dtlb_req_store = req_wen || req_amo_is_store_side;
+wire req_translation_ready = mmu_dtlb_resp_hit && !mmu_dtlb_resp_fault;
+wire [31:0] req_paddr = req_translation_ready ? mmu_dtlb_resp_paddr : req_addr;
+wire _unused_mmu_dtlb_meta = |{mmu_dtlb_resp_cause, mmu_dtlb_resp_tval, mmu_dtlb_busy};
 
-wire req_addr_is_mmio_0x13 = (req_addr[31:16] == 16'h1300);
-wire req_addr_is_clint     = (req_addr >= `CLINT_BASE) && (req_addr <= `CLINT_MTIME_HI);
-wire req_addr_is_plic      = (req_addr >= `PLIC_BASE) && (req_addr <= `PLIC_CLAIM_COMPLETE);
+wire req_addr_is_mmio_0x13 = (req_paddr[31:16] == 16'h1300);
+wire req_addr_is_clint     = (req_paddr >= `CLINT_BASE) && (req_paddr <= `CLINT_MTIME_HI);
+wire req_addr_is_plic      = (req_paddr >= `PLIC_BASE) && (req_paddr <= `PLIC_CLAIM_COMPLETE);
 wire req_addr_is_mmio      = req_addr_is_mmio_0x13 || req_addr_is_clint || req_addr_is_plic;
-wire req_is_mmio_load      = is_load && req_addr_is_mmio;
+wire req_is_mmio_load      = is_load && req_translation_ready && req_addr_is_mmio;
 
 wire req_at_rob_head_t0 =
     rob_head_valid_t0 && !rob_head_flushed_t0 &&
@@ -215,9 +237,6 @@ wire req_at_rob_head = req_at_rob_head_t0;
 wire mmio_load_spec_block = req_is_mmio_load && !req_at_rob_head;
 wire mmio_load_older_store_block =
     req_is_mmio_load && req_at_rob_head && sb_older_store_pending_for_load;
-wire req_flush_kill =
-    req_valid && flush &&
-    (!flush_order_valid || (req_order_id > flush_order_id));
 
 
 
@@ -258,18 +277,21 @@ wire m1_drain_holdoff = m1_cooldown_r && sb_has_pending_stores;
 // Accept stores when store buffer has space and the state machine is idle.
 // In mem_subsys mode, a committed store-buffer drain takes priority over new
 // requests so the LSU cannot acknowledge a request while capturing a drain.
-wire store_accept = sb_store_accept && state_machine_idle &&
+wire store_accept = req_translation_ready &&
+                    sb_store_accept && state_machine_idle &&
                     !sb_drain_ready_to_issue && !req_flush_kill;
 
 // Accept loads when no hazard is detected from store buffer and state machine idle
 // The hazard check is combinational based on current SB state
-wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
+wire load_accept = req_translation_ready &&
+                   !sb_load_hazard && !m1_drain_holdoff &&
                    !sb_drain_ready_to_issue &&
                    !req_flush_kill &&
                    !mmio_load_spec_block && !mmio_load_older_store_block &&
                    (state_machine_idle ||
                     (load_resp_accept_slot && !sb_forward_valid));
-wire amo_accept = use_mem_subsys && state_machine_idle &&
+wire amo_accept = req_translation_ready &&
+                  use_mem_subsys && state_machine_idle &&
                   !sb_drain_ready_to_issue &&
                   !req_flush_kill &&
                   req_at_rob_head &&
@@ -312,7 +334,7 @@ store_buffer #(
     .store_req_accept       (sb_store_accept),
     .store_order_id         (req_order_id),
     .store_epoch            (req_epoch),
-    .store_addr             (req_addr),
+    .store_addr             (req_paddr),
     .store_data             (req_wdata),
     .store_func3            (req_func3),
 
@@ -332,7 +354,7 @@ store_buffer #(
     // Load query interface (for store-to-load forwarding)
     .load_query_valid       (is_load || is_amo),
     .load_query_order_id    (req_order_id),
-    .load_query_addr        (req_addr),
+    .load_query_addr        (req_paddr),
     .load_query_func3       (req_func3),
 
     .forward_data           (sb_forward_data),
@@ -428,7 +450,7 @@ wire store_accept_resp_fire =
 assign m1_req_valid = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
                       1'b1 : m1_req_valid_r;
 assign m1_req_addr  = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
-                      req_addr : m1_req_addr_r;
+                      req_paddr : m1_req_addr_r;
 assign m1_req_write = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
                       1'b0 : m1_req_write_r;
 assign m1_req_wdata = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
@@ -514,7 +536,7 @@ always @(posedge clk or negedge rstn) begin
             lsu_wait_watchdog_r <= 20'd0;
         if (!sb_has_pending_stores)
             m1_cooldown_r <= 1'b0;
-        if (!(req_valid && !req_accept && is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR))) begin
+        if (!(req_valid && !req_accept && is_store && (req_paddr == `DEBUG_BEACON_EVT_ADDR))) begin
             dbg_beacon_block_reported_r <= 1'b0;
         end
         if (!m1_txn_is_drain && pending_flush_kill) begin
@@ -567,7 +589,7 @@ always @(posedge clk or negedge rstn) begin
                     lr_reservation_valid_r <= 1'b0;
                 end else if (req_valid && req_accept) begin
 `ifdef VERBOSE_SIM_LOGS
-                    if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
+                    if (is_store && (req_paddr == `DEBUG_BEACON_EVT_ADDR)) begin
                         $display("[DBG_LSU_ACCEPT] t=%0t order=%0d tag=%0d addr=%h wdata=%h func3=%0d tid=%0d",
                                  $time, req_order_id, req_tag, req_addr, req_wdata, req_func3, req_tid);
                     end
@@ -591,7 +613,7 @@ always @(posedge clk or negedge rstn) begin
                     pending_wen           <= req_wen;
                     pending_amo           <= req_amo;
                     pending_amo_op        <= req_amo_op;
-                    pending_addr          <= req_addr;
+                    pending_addr          <= req_paddr;
                     pending_wdata         <= req_wdata;
                     pending_forward_valid <= is_load && sb_forward_valid;
                     pending_forward_data  <= sb_forward_data;
@@ -606,7 +628,7 @@ always @(posedge clk or negedge rstn) begin
                         end else begin
                             lsu_state      <= LSU_REQ;
                             m1_req_valid_r <= 1'b1;
-                            m1_req_addr_r  <= req_addr;
+                            m1_req_addr_r  <= req_paddr;
                             m1_req_write_r <= 1'b0;
                             m1_req_wdata_r <= 32'd0;
                             m1_req_wen_r   <= 4'b0000;
@@ -620,7 +642,7 @@ always @(posedge clk or negedge rstn) begin
                         end else begin
                             lsu_state      <= LSU_REQ;
                             m1_req_valid_r <= 1'b1;
-                            m1_req_addr_r  <= req_addr;
+                            m1_req_addr_r  <= req_paddr;
                             m1_req_write_r <= 1'b0;  // Read
                             m1_req_wdata_r <= 32'd0;
                             m1_req_wen_r   <= 4'b0000;
@@ -777,7 +799,7 @@ always @(posedge clk or negedge rstn) begin
                         pending_wen           <= req_wen;
                         pending_amo           <= 1'b0;
                         pending_amo_op        <= 5'd0;
-                        pending_addr          <= req_addr;
+                        pending_addr          <= req_paddr;
                         pending_wdata         <= req_wdata;
                         pending_forward_valid <= 1'b0;
                         pending_forward_data  <= 32'd0;
@@ -790,7 +812,7 @@ always @(posedge clk or negedge rstn) begin
                         end else begin
                             lsu_state      <= LSU_REQ;
                             m1_req_valid_r <= 1'b1;
-                            m1_req_addr_r  <= req_addr;
+                            m1_req_addr_r  <= req_paddr;
                             m1_req_write_r <= 1'b0;
                             m1_req_wdata_r <= 32'd0;
                             m1_req_wen_r   <= 4'b0000;
@@ -880,7 +902,7 @@ always @(posedge clk or negedge rstn) begin
 end
 
 // Legacy memory interface (for use_mem_subsys=0)
-assign mem_addr = legacy_load_issue_fire ? req_addr : pending_addr;
+assign mem_addr = legacy_load_issue_fire ? req_paddr : pending_addr;
 assign mem_read = legacy_load_issue_fire ? 4'b1111 : 4'b0000;
 
 // =============================================================================

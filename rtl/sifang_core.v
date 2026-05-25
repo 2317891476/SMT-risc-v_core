@@ -485,6 +485,23 @@ wire        m0_resp_last;
 wire        m0_resp_ready;
 wire [31:0] m0_bypass_addr;
 wire [31:0] m0_bypass_data;
+wire        mmu_itlb_req_valid;
+wire [31:0] mmu_itlb_req_vaddr;
+wire        mmu_itlb_resp_hit;
+wire [31:0] mmu_itlb_resp_paddr;
+wire        mmu_itlb_resp_fault;
+wire [4:0]  mmu_itlb_resp_cause;
+wire [31:0] mmu_itlb_resp_tval;
+wire        mmu_itlb_busy;
+wire        mmu_dtlb_req_valid;
+wire [31:0] mmu_dtlb_req_vaddr;
+wire        mmu_dtlb_req_store;
+wire        mmu_dtlb_resp_hit;
+wire [31:0] mmu_dtlb_resp_paddr;
+wire        mmu_dtlb_resp_fault;
+wire [4:0]  mmu_dtlb_resp_cause;
+wire [31:0] mmu_dtlb_resp_tval;
+wire        mmu_dtlb_busy;
 wire        rob_commit0_valid, rob_commit1_valid;
 wire [4:0]  rob_commit0_rd, rob_commit1_rd;
 wire [RS_TAG_W_CFG-1:0]  rob_commit0_tag, rob_commit1_tag;
@@ -661,6 +678,14 @@ stage_if #(
     .if_pc            (if_pc            ),
     .if_pred_taken    (if_pred_taken    ),
     .if_pred_target   (if_pred_target   ),
+    .mmu_itlb_req_valid(mmu_itlb_req_valid),
+    .mmu_itlb_req_vaddr(mmu_itlb_req_vaddr),
+    .mmu_itlb_resp_hit (mmu_itlb_resp_hit),
+    .mmu_itlb_resp_paddr(mmu_itlb_resp_paddr),
+    .mmu_itlb_resp_fault(mmu_itlb_resp_fault),
+    .mmu_itlb_resp_cause(mmu_itlb_resp_cause),
+    .mmu_itlb_resp_tval(mmu_itlb_resp_tval),
+    .mmu_itlb_busy    (mmu_itlb_busy    ),
 
     // Task 5: External refill interface to mem_subsys M0
     .ext_mem_req_valid  (m0_req_valid),
@@ -3672,6 +3697,15 @@ lsu_shell #(
     .req_regs_write     (p1_mem_req_regs_write),
     .req_fu             (p1_mem_req_fu        ),
     .req_mem2reg        (p1_mem_req_mem2reg   ),
+    .mmu_dtlb_req_valid (mmu_dtlb_req_valid   ),
+    .mmu_dtlb_req_vaddr (mmu_dtlb_req_vaddr   ),
+    .mmu_dtlb_req_store (mmu_dtlb_req_store   ),
+    .mmu_dtlb_resp_hit  (mmu_dtlb_resp_hit    ),
+    .mmu_dtlb_resp_paddr(mmu_dtlb_resp_paddr  ),
+    .mmu_dtlb_resp_fault(mmu_dtlb_resp_fault  ),
+    .mmu_dtlb_resp_cause(mmu_dtlb_resp_cause  ),
+    .mmu_dtlb_resp_tval (mmu_dtlb_resp_tval   ),
+    .mmu_dtlb_busy      (mmu_dtlb_busy        ),
     .rob_head_valid_t0  (rob_head_valid_t0),
     .rob_head_order_id_t0(rob_head_order_id_t0),
     .rob_head_flushed_t0(rob_head_flushed_t0),
@@ -4260,22 +4294,8 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .ext_supervisor_external_irq(csr_ext_supervisor_external_irq)
 );
 
-// Sv32 MMU scaffold. This stage keeps fetch/LSU on the existing physical
-// address paths while making CSR state and the PTW interface visible in top
-// simulation/synthesis. I/D translation is connected after standalone MMU
-// behavior is stable.
-wire        mmu_itlb_resp_hit_unused;
-wire [31:0] mmu_itlb_resp_paddr_unused;
-wire        mmu_itlb_resp_fault_unused;
-wire [4:0]  mmu_itlb_resp_cause_unused;
-wire [31:0] mmu_itlb_resp_tval_unused;
-wire        mmu_itlb_busy_unused;
-wire        mmu_dtlb_resp_hit_unused;
-wire [31:0] mmu_dtlb_resp_paddr_unused;
-wire        mmu_dtlb_resp_fault_unused;
-wire [4:0]  mmu_dtlb_resp_cause_unused;
-wire [31:0] mmu_dtlb_resp_tval_unused;
-wire        mmu_dtlb_busy_unused;
+// Sv32 MMU. I-side translation feeds stage_if/inst_memory. D-side translation
+// and PTW memory arbitration are still staged off until LSU integration.
 wire        mmu_ptw_req_valid_unused;
 wire        mmu_ptw_req_write_unused;
 wire [31:0] mmu_ptw_req_addr_unused;
@@ -4292,23 +4312,23 @@ mmu_sv32 u_mmu_sv32 (
     .sfence_valid    (1'b0),
     .sfence_vaddr    (32'd0),
     .sfence_asid     (9'd0),
-    .itlb_req_valid  (1'b0),
-    .itlb_req_vaddr  (32'd0),
-    .itlb_resp_hit   (mmu_itlb_resp_hit_unused),
-    .itlb_resp_paddr (mmu_itlb_resp_paddr_unused),
-    .itlb_resp_fault (mmu_itlb_resp_fault_unused),
-    .itlb_resp_cause (mmu_itlb_resp_cause_unused),
-    .itlb_resp_tval  (mmu_itlb_resp_tval_unused),
-    .itlb_busy       (mmu_itlb_busy_unused),
-    .dtlb_req_valid  (1'b0),
-    .dtlb_req_vaddr  (32'd0),
-    .dtlb_req_store  (1'b0),
-    .dtlb_resp_hit   (mmu_dtlb_resp_hit_unused),
-    .dtlb_resp_paddr (mmu_dtlb_resp_paddr_unused),
-    .dtlb_resp_fault (mmu_dtlb_resp_fault_unused),
-    .dtlb_resp_cause (mmu_dtlb_resp_cause_unused),
-    .dtlb_resp_tval  (mmu_dtlb_resp_tval_unused),
-    .dtlb_busy       (mmu_dtlb_busy_unused),
+    .itlb_req_valid  (mmu_itlb_req_valid),
+    .itlb_req_vaddr  (mmu_itlb_req_vaddr),
+    .itlb_resp_hit   (mmu_itlb_resp_hit),
+    .itlb_resp_paddr (mmu_itlb_resp_paddr),
+    .itlb_resp_fault (mmu_itlb_resp_fault),
+    .itlb_resp_cause (mmu_itlb_resp_cause),
+    .itlb_resp_tval  (mmu_itlb_resp_tval),
+    .itlb_busy       (mmu_itlb_busy),
+    .dtlb_req_valid  (mmu_dtlb_req_valid),
+    .dtlb_req_vaddr  (mmu_dtlb_req_vaddr),
+    .dtlb_req_store  (mmu_dtlb_req_store),
+    .dtlb_resp_hit   (mmu_dtlb_resp_hit),
+    .dtlb_resp_paddr (mmu_dtlb_resp_paddr),
+    .dtlb_resp_fault (mmu_dtlb_resp_fault),
+    .dtlb_resp_cause (mmu_dtlb_resp_cause),
+    .dtlb_resp_tval  (mmu_dtlb_resp_tval),
+    .dtlb_busy       (mmu_dtlb_busy),
     .ptw_req_valid   (mmu_ptw_req_valid_unused),
     .ptw_req_ready   (1'b0),
     .ptw_req_write   (mmu_ptw_req_write_unused),

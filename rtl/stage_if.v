@@ -45,6 +45,17 @@ module stage_if #(
     output wire        if_pred_taken,  // BPU prediction for this instruction
     output wire [31:0] if_pred_target,
 
+    // Sv32 I-side translation. Metadata keeps virtual PCs; inst_memory sees
+    // translated physical addresses.
+    output wire        mmu_itlb_req_valid,
+    output wire [31:0] mmu_itlb_req_vaddr,
+    input  wire        mmu_itlb_resp_hit,
+    input  wire [31:0] mmu_itlb_resp_paddr,
+    input  wire        mmu_itlb_resp_fault,
+    input  wire [4:0]  mmu_itlb_resp_cause,
+    input  wire [31:0] mmu_itlb_resp_tval,
+    input  wire        mmu_itlb_busy,
+
     // ─── External refill interface to mem_subsys (Task 5) ───────
     output wire        ext_mem_req_valid,
     input  wire        ext_mem_req_ready,
@@ -119,9 +130,13 @@ wire                     meta_slot_available;
 wire                     response_credit_available;
 wire                     response_stale;
 wire                     response_flushed;
+wire                     fetch_candidate;
+wire                     fetch_translation_ready;
+wire [31:0]              fetch_phys_addr;
 wire [FETCH_Q_IDX_W+1:0] fetch_credits_used =
     {1'b0, meta_count} + {1'b0, resp_count};
 wire [31:0] fetch_pc_pending;
+wire        _unused_mmu_itlb_fault_meta = |{mmu_itlb_resp_cause, mmu_itlb_resp_tval};
 
 // Keep request metadata in order so ICache hits can be pipelined.  The
 // response FIFO absorbs fetch-buffer backpressure without losing one-cycle
@@ -135,12 +150,18 @@ assign response_fifo_push = response_keep && (!resp_full || response_buffer_pop)
 assign response_credit_available =
     (fetch_credits_used < FETCH_Q_DEPTH[FETCH_Q_IDX_W+1:0]) ||
     response_buffer_pop || (fetch_resp_done && !response_keep);
+assign fetch_candidate = rstn && !pc_stall && meta_slot_available &&
+                         response_credit_available && !if_flush &&
+                         !icache_invalidate;
+assign mmu_itlb_req_valid = fetch_candidate;
+assign mmu_itlb_req_vaddr = pc_out;
+assign fetch_translation_ready = mmu_itlb_resp_hit && !mmu_itlb_resp_fault;
+assign fetch_phys_addr = fetch_translation_ready ? mmu_itlb_resp_paddr : pc_out;
 assign pc_stall_combined = pc_stall || !meta_slot_available ||
-                           !response_credit_available || !req_ready_from_mem ||
-                           if_flush || icache_invalidate;
-wire fetch_req_launch = rstn && !pc_stall && meta_slot_available &&
-                        response_credit_available && req_ready_from_mem &&
-                        !if_flush && !icache_invalidate;
+                           !response_credit_available || !fetch_translation_ready ||
+                           !req_ready_from_mem || if_flush || icache_invalidate;
+wire fetch_req_launch = fetch_candidate && fetch_translation_ready &&
+                        req_ready_from_mem;
 wire pc_advance = fetch_req_launch;
 wire pred_ctrl  = fetch_req_launch ? bpu_pred_taken : 1'b0;
 
@@ -188,7 +209,7 @@ inst_memory #(
     .rstn           (rstn              ),
     .req_valid      (fetch_req_launch   ),
     .req_ready      (req_ready_from_mem ),
-    .inst_addr      (pc_out            ),
+    .inst_addr      (fetch_phys_addr    ),
     .inst_o         (inst_from_mem     ),
     .resp_epoch     (resp_epoch_from_mem),
     .resp_valid     (resp_valid_from_mem),
@@ -297,7 +318,7 @@ always @(posedge clk or negedge rstn) begin
                 meta_pred_target[meta_tail_idx] <= bpu_pred_target;
                 meta_valid[meta_tail_idx]       <= 1'b1;
                 meta_tail <= meta_tail + {{FETCH_Q_IDX_W{1'b0}}, 1'b1};
-                fetch_bypass_addr_r <= pc_out;
+                fetch_bypass_addr_r <= fetch_phys_addr;
             end
 
             meta_count <= meta_count +
@@ -355,7 +376,7 @@ assign debug_pc_out           = pc_out;
 assign debug_if_inst          = if_inst;
 assign debug_if_flags         = {!meta_empty, fetch_req_launch, resp_valid_from_mem,
                                  if_valid_r, response_stale, use_external_refill,
-                                 fetch_pc_pending[31], pc_out[31]};
+                                 mmu_itlb_busy, mmu_itlb_resp_fault};
 assign debug_ic_high_miss_count = ic_high_miss_count_dbg;
 assign debug_ic_mem_req_count   = ic_mem_req_count_dbg;
 assign debug_ic_mem_resp_count  = ic_mem_resp_count_dbg;
