@@ -98,6 +98,11 @@ def board_config_for_args(args: argparse.Namespace) -> dict[str, object]:
         "BENCHMARK_RUNTIME_PROFILE": BOARD_BENCHMARK_RUNTIME_PROFILE,
         "VERILATOR_FAST_UART": 1,
     }
+    if str(args.mode) == "linux-preload":
+        actual.pop("DHRYSTONE_RUNS", None)
+        actual.pop("BENCHMARK_RUNTIME_PROFILE", None)
+        expected.pop("DHRYSTONE_RUNS", None)
+        expected.pop("BENCHMARK_RUNTIME_PROFILE", None)
     if str(args.mode) == "loader-semantic":
         actual.update(
             {
@@ -495,11 +500,12 @@ def format_summary(
             and not bool(summary.get("UnexpectedUartSeen", False))
             and int(summary.get("SpecMmioLoadViolationCount", 0) or 0) == 0
         )
-    mode_pass_line = (
-        f"PreloadBenchmarkPass: {preload_benchmark_pass}"
-        if mode == "preload"
-        else f"LoaderSemanticPass: {summary.get('LoaderSemanticPass', False)}"
-    )
+    if mode == "preload":
+        mode_pass_line = f"PreloadBenchmarkPass: {preload_benchmark_pass}"
+    elif mode == "linux-preload":
+        mode_pass_line = f"LinuxPreloadPass: {summary.get('LinuxPreloadPass', False)}"
+    else:
+        mode_pass_line = f"LoaderSemanticPass: {summary.get('LoaderSemanticPass', False)}"
     board_expected = summary.get("BoardConfigExpected", {})
     board_actual = summary.get("BoardConfigActual", {})
     board_mismatches = summary.get("BoardConfigMismatches", [])
@@ -557,6 +563,11 @@ def format_summary(
         f"BenchmarkStartSeen: {summary.get('BenchmarkStartSeen', False)}",
         f"BenchmarkDoneSeen: {summary.get('BenchmarkDoneSeen', False)}",
         mode_pass_line,
+        f"LinuxOpenSBISeen: {summary.get('LinuxOpenSBISeen', False)}",
+        f"LinuxBootHartSeen: {summary.get('LinuxBootHartSeen', False)}",
+        f"LinuxKernelSeen: {summary.get('LinuxKernelSeen', False)}",
+        f"LinuxInitSeen: {summary.get('LinuxInitSeen', False)}",
+        f"LinuxPassSeen: {summary.get('LinuxPassSeen', False)}",
         f"LoaderPrefixPass: {summary.get('LoaderPrefixPass', False)}",
         f"LoaderBlocksAcked: {summary.get('LoaderBlocksAcked', 0)}",
         f"TrapSeen: {summary.get('TrapSeen', False)}",
@@ -780,8 +791,14 @@ def format_summary(
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("preload", "loader-semantic"), default="preload")
+    parser.add_argument("--mode", choices=("preload", "loader-semantic", "linux-preload"), default="preload")
     parser.add_argument("--benchmark", choices=("dhrystone",), default="dhrystone")
+    parser.add_argument(
+        "--linux-payload",
+        type=Path,
+        default=REPO_ROOT / "build" / "linux" / "fw_payload.bin",
+        help="fw_payload.bin for linux-preload mode.",
+    )
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--cpu-hz", type=int, default=None)
     parser.add_argument("--core-clk-mhz", type=float, default=None)
@@ -926,19 +943,34 @@ def main() -> int:
     which_required("wsl")
     which_required_wsl("verilator", "make", "g++")
 
-    manifest = build_benchmark_image(
-        args.benchmark,
-        args.runs,
-        args.cpu_hz,
-        run_dir,
-        runtime_profile=args.benchmark_runtime_profile,
-    )
-    build_rom_image(args.mode, args.loader_rom_profile)
+    if args.mode == "linux-preload":
+        linux_payload = Path(args.linux_payload)
+        if not linux_payload.exists():
+            raise SystemExit(
+                f"Linux payload not found: {linux_payload}. "
+                "Build it with software/linux/scripts/build_linux_payload.sh after Linux/OpenSBI sources are ready."
+            )
+        manifest = {
+            "elf": str(run_dir / "fw_payload.elf"),
+            "bin": str(linux_payload),
+            "entry": 0x80000000,
+            "load_addr": 0x80000000,
+        }
+        build_rom_image("preload", args.loader_rom_profile)
+    else:
+        manifest = build_benchmark_image(
+            args.benchmark,
+            args.runs,
+            args.cpu_hz,
+            run_dir,
+            runtime_profile=args.benchmark_runtime_profile,
+        )
+        build_rom_image(args.mode, args.loader_rom_profile)
 
     if (args.trace or args.trace_on_stuck) and trace_path.exists():
         trace_path.unlink()
 
-    if args.mode == "preload":
+    if args.mode in ("preload", "linux-preload"):
         write_preload_hex(Path(str(manifest["bin"])), preload_hex)
         preload_hex_wsl = to_wsl_path(preload_hex)
     else:
@@ -961,7 +993,7 @@ def main() -> int:
         cpu_hz=args.cpu_hz,
         uart_baud=args.uart_baud,
         smt_mode=args.smt_mode,
-        preload_direct_boot=(args.mode == "preload"),
+        preload_direct_boot=(args.mode in ("preload", "linux-preload")),
         enable_trace=(args.trace or args.trace_on_stuck),
     )
     if args.print_wsl_cmd:
@@ -1059,7 +1091,7 @@ def main() -> int:
         sim_args.extend(["--trace-stop-cycle", shlex.quote(str(args.trace_stop_cycle))])
     if args.trace_after_stuck_cycles:
         sim_args.extend(["--trace-after-stuck-cycles", shlex.quote(str(args.trace_after_stuck_cycles))])
-    if args.mode == "preload":
+    if args.mode in ("preload", "linux-preload"):
         sim_args.append(f"+MOCK_DDR3_PRELOAD_HEX={quote_wsl(preload_hex_wsl)}")
     sim_cmd = " ".join(sim_args)
     if args.print_wsl_cmd:

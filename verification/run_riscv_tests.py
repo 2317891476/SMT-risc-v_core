@@ -39,8 +39,8 @@ TEST_SUITES = {
     "riscv-tests": {
         "url": "https://github.com/riscv-software-src/riscv-tests/archive/refs/heads/master.zip",
         "dir": RISCV_TESTS_DIR,
-        "categories": ["rv32ui", "rv32um"],
-        "description": "Classic RISC-V tests (RV32I/M)",
+        "categories": ["rv32ui", "rv32um", "rv32ua"],
+        "description": "Classic RISC-V tests (RV32I/M/A)",
     },
     "riscv-arch-test": {
         "url": "https://github.com/riscv/riscv-arch-test/archive/refs/heads/main.zip",
@@ -228,9 +228,9 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
     if suite_name == "riscv-tests":
         suite_dir = RISCV_TESTS_DIR
         # Include original riscv-tests headers
-        # Use rv32im_zifencei to support fence.i instruction
+        # Use RV32IMA so the same adapter can build the A-extension category.
         cmd = [
-            GCC, "-march=rv32im_zifencei", "-mabi=ilp32", "-static",
+            GCC, "-march=rv32ima_zifencei", "-mabi=ilp32", "-static",
             "-mcmodel=medany", "-fvisibility=hidden",
             "-nostdlib", "-nostartfiles", "-g",
             f"-I{adapter_dir}",
@@ -301,6 +301,7 @@ def run_simulation():
     compile_cmd = (
         "iverilog -g2012 -s tb -o out_iverilog/bin/tb_riscv_test.out "
         f"{extra_defines}"
+        "-DTB_TIMEOUT_US=10000 "
         "-DTEST_ID=0 "
         "-I ../rtl ../rtl/*.v "
         "../libs/REG_ARRAY/SRAM/ram_bfm.v tb.sv"

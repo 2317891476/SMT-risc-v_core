@@ -1,34 +1,10 @@
 // =============================================================================
 // Module : csr_unit
-// Description: RISC-V Control and Status Register (CSR) unit.
-//   Implements a subset of Machine-mode CSRs needed for basic exception
-//   handling and virtual memory support (satp):
-//
-//   Supported CSRs:
-//     Machine Information:
-//       - mvendorid  (0xF11) — read-only 0
-//       - marchid    (0xF12) — read-only 0
-//       - mimpid     (0xF13) — read-only 0
-//       - mhartid    (0xF14) — read-only, from parameter
-//     Machine Trap Setup:
-//       - mstatus    (0x300) — MIE, MPIE, MPP, MXR, SUM
-//       - misa       (0x301) — read-only, RV32I
-//       - mie        (0x304) — interrupt enable
-//       - mtvec      (0x305) — trap vector base
-//     Machine Trap Handling:
-//       - mscratch   (0x340)
-//       - mepc       (0x341) — exception PC
-//       - mcause     (0x342) — exception cause
-//       - mtval      (0x343) — exception value
-//       - mip        (0x344) — interrupt pending
-//     Machine Counters:
-//       - mcycle     (0xB00) — cycle counter
-//       - minstret   (0xB02) — instruction retired counter
-//     Supervisor (for VM):
-//       - satp       (0x180) — address translation mode + PPN
-//
-//   CSR instructions: CSRRW, CSRRS, CSRRC, CSRRWI, CSRRSI, CSRRCI
-//   Opcode: SYSTEM (7'b1110011), funct3 selects operation
+// Description:
+//   CSR and privilege-state block for the single-hart SifangCore bring-up path.
+//   This block keeps the existing M-mode CSR/MRET behavior and adds the first
+//   Linux-critical S-mode state: supervisor CSR aliases, delegation registers,
+//   SRET, satp exposure, and delegated interrupt/exception routing.
 // =============================================================================
 `include "define.v"
 
@@ -38,42 +14,38 @@ module csr_unit #(
     input  wire               clk,
     input  wire               rstn,
 
-    // ─── CSR Read/Write Request (from WB or dedicated CSR stage) ─
-    input  wire               csr_valid,       // CSR instruction valid
-    input  wire [11:0]        csr_addr,        // CSR address (12-bit)
-    input  wire [2:0]         csr_op,          // funct3: 001=CSRRW,010=CSRRS,011=CSRRC
-                                               //         101=CSRRWI,110=CSRRSI,111=CSRRCI
-    input  wire [31:0]        csr_wdata,       // write data (rs1 value or zimm)
-    output reg  [31:0]        csr_rdata,       // read data (to rd)
+    input  wire               csr_valid,
+    input  wire [11:0]        csr_addr,
+    input  wire [2:0]         csr_op,
+    input  wire [31:0]        csr_wdata,
+    output reg  [31:0]        csr_rdata,
 
-    // ─── Exception Interface ────────────────────────────────────
-    input  wire               exc_valid,       // exception occurred
-    input  wire [31:0]        exc_cause,       // exception cause code
-    input  wire [31:0]        exc_pc,          // PC of faulting instruction
-    input  wire [31:0]        exc_tval,        // trap value (e.g. faulting address)
+    input  wire               exc_valid,
+    input  wire [31:0]        exc_cause,
+    input  wire [31:0]        exc_pc,
+    input  wire [31:0]        exc_tval,
 
-    // ─── MRET ───────────────────────────────────────────────────
-    input  wire               mret_valid,      // MRET instruction executed (exec time — redirect)
-    input  wire               mret_commit,     // MRET committed from ROB (for mstatus update)
+    input  wire               mret_valid,
+    input  wire               mret_commit,
+    input  wire               sret_valid,
+    input  wire               sret_commit,
 
-    // ─── Trap Entry / Return signals (to pipeline control) ──────
-    output wire               trap_enter,      // take trap this cycle
-    output wire [31:0]        trap_target,     // where to redirect PC
-    output wire               trap_return,     // returning from trap (MRET)
-    output wire [31:0]        mepc_out,        // MEPC value for MRET return address
+    output wire               trap_enter,
+    output wire [31:0]        trap_target,
+    output wire               trap_return,
+    output wire [31:0]        trap_return_target,
+    output wire [31:0]        mepc_out,
+    output wire [31:0]        sepc_out,
 
-    // ─── Output CSRs to other modules ───────────────────────────
-    output wire [31:0]        satp_out,        // to MMU
-    output wire [1:0]         priv_mode_out,   // current privilege mode
-    output wire               mstatus_mxr,     // MXR bit
-    output wire               mstatus_sum,     // SUM bit
-    output wire               global_int_en,   // MIE (global interrupt enable)
+    output wire [31:0]        satp_out,
+    output wire [1:0]         priv_mode_out,
+    output wire               mstatus_mxr,
+    output wire               mstatus_sum,
+    output wire               global_int_en,
 
-    // ─── Performance Counters ───────────────────────────────────
-    input  wire               instr_retired,   // pulse: 1 instruction retired this cycle
-    input  wire               instr_retired_1, // pulse: second instruction retired (dual-issue)
+    input  wire               instr_retired,
+    input  wire               instr_retired_1,
 
-    // ─── HPM Event Inputs ──────────────────────────────────────
     input  wire               hpm_branch_mispredict,
     input  wire               hpm_icache_miss,
     input  wire               hpm_dcache_miss,
@@ -82,69 +54,150 @@ module csr_unit #(
     input  wire               hpm_issue_bubble,
     input  wire               hpm_rocc_busy,
 
-    // ─── External Interrupt Inputs ──────────────────────────────
-    input  wire               ext_timer_irq,   // CLINT timer interrupt (MTIP)
-    input  wire               ext_external_irq // PLIC external interrupt (MEIP)
+    input  wire               ext_timer_irq,
+    input  wire               ext_external_irq,
+    input  wire               ext_supervisor_external_irq
 );
 
-// ─── CSR Storage ────────────────────────────────────────────────────────────
-reg [31:0] mstatus;    // 0x300
-reg [31:0] mie;        // 0x304
-reg [31:0] mtvec;      // 0x305
-reg [31:0] mscratch;   // 0x340
-reg [31:0] mepc;       // 0x341
-reg [31:0] mcause;     // 0x342
-reg [31:0] mtval;      // 0x343
-reg [31:0] mip;        // 0x344
-reg [63:0] mcycle;     // 0xB00 (64-bit)
-reg [63:0] minstret;   // 0xB02 (64-bit)
-reg [63:0] mhpmcounter3; // 0xB03 branch_mispredict
-reg [63:0] mhpmcounter4; // 0xB04 icache_miss
-reg [63:0] mhpmcounter5; // 0xB05 dcache_miss (placeholder)
-reg [63:0] mhpmcounter6; // 0xB06 l2_miss (placeholder)
-reg [63:0] mhpmcounter7; // 0xB07 sb_stall
-reg [63:0] mhpmcounter8; // 0xB08 issue_bubble
-reg [63:0] mhpmcounter9; // 0xB09 rocc_busy (placeholder)
-reg [31:0] satp;       // 0x180
-reg [1:0]  priv_mode;  // current privilege: 2'b11=M, 2'b01=S, 2'b00=U
+localparam [1:0] PRIV_U = 2'b00;
+localparam [1:0] PRIV_S = 2'b01;
+localparam [1:0] PRIV_M = 2'b11;
 
-// ─── misa: fixed RV32I ──────────────────────────────────────────────────────
-localparam [31:0] MISA = {2'b01,             // MXL = 32-bit
-                          4'd0,              // reserved
-                          26'b00000000000000000100000000}; // I extension (bit 8)
+localparam integer CSR_MSTATUS = 12'h300;
+localparam integer CSR_MISA    = 12'h301;
+localparam integer CSR_MEDELEG = 12'h302;
+localparam integer CSR_MIDELEG = 12'h303;
+localparam integer CSR_MIE     = 12'h304;
+localparam integer CSR_MTVEC   = 12'h305;
+localparam integer CSR_MCOUNTEREN = 12'h306;
+localparam integer CSR_MSCRATCH = 12'h340;
+localparam integer CSR_MEPC    = 12'h341;
+localparam integer CSR_MCAUSE  = 12'h342;
+localparam integer CSR_MTVAL   = 12'h343;
+localparam integer CSR_MIP     = 12'h344;
 
-// ─── mstatus field positions ────────────────────────────────────────────────
-// [3]=MIE, [7]=MPIE, [12:11]=MPP, [19]=MXR, [18]=SUM
-wire mstatus_MIE  = mstatus[3];
-wire mstatus_MPIE = mstatus[7];
-wire [1:0] mstatus_MPP = mstatus[12:11];
+localparam integer CSR_SSTATUS = 12'h100;
+localparam integer CSR_SIE     = 12'h104;
+localparam integer CSR_STVEC   = 12'h105;
+localparam integer CSR_SCOUNTEREN = 12'h106;
+localparam integer CSR_SSCRATCH = 12'h140;
+localparam integer CSR_SEPC    = 12'h141;
+localparam integer CSR_SCAUSE  = 12'h142;
+localparam integer CSR_STVAL   = 12'h143;
+localparam integer CSR_SIP     = 12'h144;
+localparam integer CSR_SATP    = 12'h180;
 
-// ─── Output wiring ─────────────────────────────────────────────────────────
-assign satp_out      = satp;
+localparam [31:0] MSTATUS_SIE  = 32'h0000_0002;
+localparam [31:0] MSTATUS_MIE  = 32'h0000_0008;
+localparam [31:0] MSTATUS_SPIE = 32'h0000_0020;
+localparam [31:0] MSTATUS_MPIE = 32'h0000_0080;
+localparam [31:0] MSTATUS_SPP  = 32'h0000_0100;
+localparam [31:0] MSTATUS_MPP  = 32'h0000_1800;
+localparam [31:0] MSTATUS_SUM  = 32'h0004_0000;
+localparam [31:0] MSTATUS_MXR  = 32'h0008_0000;
+localparam [31:0] SSTATUS_MASK = MSTATUS_SIE | MSTATUS_SPIE | MSTATUS_SPP |
+                                  MSTATUS_SUM | MSTATUS_MXR;
+localparam [31:0] SIE_MASK     = 32'h0000_0222; // SSIE, STIE, SEIE
+localparam [31:0] MIE_MASK     = 32'h0000_0AAA; // S/M software, timer, external
+localparam [31:0] MIP_WR_MASK  = 32'h0000_0222; // OpenSBI can inject supervisor IRQs
+localparam [31:0] MISA_VALUE   = 32'h4000_1101; // RV32IMA
+
+reg [31:0] mstatus;
+reg [31:0] mie;
+reg [31:0] mtvec;
+reg [31:0] mscratch;
+reg [31:0] mepc;
+reg [31:0] mcause;
+reg [31:0] mtval;
+reg [31:0] mip;
+reg [31:0] medeleg;
+reg [31:0] mideleg;
+reg [31:0] mcounteren;
+
+reg [31:0] stvec;
+reg [31:0] sscratch;
+reg [31:0] sepc;
+reg [31:0] scause;
+reg [31:0] stval;
+reg [31:0] scounteren;
+reg [31:0] satp;
+
+reg [63:0] mcycle;
+reg [63:0] minstret;
+reg [63:0] mhpmcounter3;
+reg [63:0] mhpmcounter4;
+reg [63:0] mhpmcounter5;
+reg [63:0] mhpmcounter6;
+reg [63:0] mhpmcounter7;
+reg [63:0] mhpmcounter8;
+reg [63:0] mhpmcounter9;
+
+reg [1:0]  priv_mode;
+
+wire mstatus_sie = mstatus[1];
+wire mstatus_mie = mstatus[3];
+wire mstatus_spie = mstatus[5];
+wire mstatus_mpie = mstatus[7];
+wire mstatus_spp = mstatus[8];
+wire [1:0] mstatus_mpp = mstatus[12:11];
+
+wire [31:0] mip_effective = (mip & ~(32'h0000_0A80)) |
+                            (ext_timer_irq ? 32'h0000_0080 : 32'd0) |
+                            (ext_supervisor_external_irq ? 32'h0000_0200 : 32'd0) |
+                            (ext_external_irq ? 32'h0000_0800 : 32'd0);
+wire [31:0] pending_enabled = mip_effective & mie;
+wire [31:0] pending_m_irq = pending_enabled & ~mideleg;
+wire [31:0] pending_s_irq = pending_enabled & mideleg & SIE_MASK;
+
+wire m_irq_global_en = (priv_mode != PRIV_M) || mstatus_mie;
+wire s_irq_global_en = (priv_mode == PRIV_U) || ((priv_mode == PRIV_S) && mstatus_sie);
+
+wire take_m_ext   = m_irq_global_en && pending_m_irq[11];
+wire take_m_timer = m_irq_global_en && !take_m_ext && pending_m_irq[7];
+wire take_m_soft  = m_irq_global_en && !take_m_ext && !take_m_timer && pending_m_irq[3];
+wire take_s_ext   = s_irq_global_en && pending_s_irq[9];
+wire take_s_timer = s_irq_global_en && !take_s_ext && pending_s_irq[5];
+wire take_s_soft  = s_irq_global_en && !take_s_ext && !take_s_timer && pending_s_irq[1];
+
+wire take_m_irq = take_m_ext || take_m_timer || take_m_soft;
+wire take_s_irq = !take_m_irq && (take_s_ext || take_s_timer || take_s_soft);
+wire irq_valid = take_m_irq || take_s_irq;
+
+wire [31:0] irq_cause =
+    take_m_ext   ? 32'h8000_000B :
+    take_m_timer ? 32'h8000_0007 :
+    take_m_soft  ? 32'h8000_0003 :
+    take_s_ext   ? 32'h8000_0009 :
+    take_s_timer ? 32'h8000_0005 :
+    take_s_soft  ? 32'h8000_0001 :
+                   32'd0;
+
+wire exc_delegated = exc_valid && (priv_mode != PRIV_M) &&
+                     (exc_cause[31] == 1'b0) &&
+                     medeleg[exc_cause[4:0]];
+wire trap_to_s = take_s_irq || exc_delegated;
+
+assign trap_enter = exc_valid || irq_valid;
+assign trap_target = trap_to_s ? {stvec[31:2], 2'b00} :
+                                  {mtvec[31:2], 2'b00};
+assign trap_return = mret_valid || sret_valid;
+assign trap_return_target = sret_valid ? sepc : mepc;
+assign mepc_out = mepc;
+assign sepc_out = sepc;
+assign satp_out = satp;
 assign priv_mode_out = priv_mode;
-assign mstatus_mxr   = mstatus[19];
-assign mstatus_sum   = mstatus[18];
-assign global_int_en = mstatus_MIE;
-assign mepc_out      = mepc;
+assign mstatus_mxr = mstatus[19];
+assign mstatus_sum = mstatus[18];
+assign global_int_en = mstatus_mie;
 
-// ─── Trap logic ─────────────────────────────────────────────────────────────
-wire mtip_pending = mip[7]  | ext_timer_irq;
-wire meip_pending = mip[11] | ext_external_irq;
-wire take_meip    = mstatus_MIE && mie[11] && meip_pending;
-wire take_mtip    = mstatus_MIE && !take_meip && mie[7] && mtip_pending;
-wire irq_valid    = take_meip || take_mtip;
-wire [31:0] irq_cause = take_meip ? 32'h8000000B : 32'h80000007;
-
-assign trap_enter  = exc_valid || irq_valid;
-assign trap_target = {mtvec[31:2], 2'b00};  // Direct mode (MODE=0)
-assign trap_return = mret_valid;
-
-// ─── CSR Write-Read Bypass (for back-to-back CSR ops) ───────────────────────
-// When a CSR write is in progress, subsequent reads should see the new value
 reg        csr_write_pending;
 reg [11:0] csr_write_addr;
 reg [31:0] csr_write_value;
-reg [31:0] csr_wval;  // computed write value
+reg [31:0] csr_wval;
+
+wire [31:0] sstatus_value = mstatus & SSTATUS_MASK;
+wire [31:0] sie_value = mie & SIE_MASK;
+wire [31:0] sip_value = mip_effective & SIE_MASK;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -158,87 +211,94 @@ always @(posedge clk or negedge rstn) begin
     end
 end
 
-// ─── CSR Read (combinational with bypass) ───────────────────────────────────
 always @(*) begin
     csr_rdata = 32'd0;
-    // Bypass: if there's a pending write to this CSR, return the write value
     if (csr_write_pending && (csr_addr == csr_write_addr)) begin
         csr_rdata = csr_write_value;
     end else begin
-    case (csr_addr)
-        12'hF11: csr_rdata = 32'd0;              // mvendorid
-        12'hF12: csr_rdata = 32'd0;              // marchid
-        12'hF13: csr_rdata = 32'd0;              // mimpid
-        12'hF14: csr_rdata = HART_ID;            // mhartid
-        12'h300: csr_rdata = mstatus;            // mstatus
-        12'h301: csr_rdata = MISA;               // misa (read-only)
-        12'h304: csr_rdata = mie;                // mie
-        12'h305: csr_rdata = mtvec;              // mtvec
-        12'h340: csr_rdata = mscratch;           // mscratch
-        12'h341: csr_rdata = mepc;               // mepc
-        12'h342: csr_rdata = mcause;             // mcause
-        12'h343: csr_rdata = mtval;              // mtval
-        12'h344: csr_rdata = mip;                // mip
-        12'hB00: csr_rdata = mcycle[31:0];       // mcycle
-        12'hB80: csr_rdata = mcycle[63:32];      // mcycleh
-        12'hB02: csr_rdata = minstret[31:0];     // minstret
-        12'hB82: csr_rdata = minstret[63:32];    // minstreth
-        12'hB03: csr_rdata = mhpmcounter3[31:0]; // branch_mispredict
-        12'hB83: csr_rdata = mhpmcounter3[63:32];
-        12'hB04: csr_rdata = mhpmcounter4[31:0]; // icache_miss
-        12'hB84: csr_rdata = mhpmcounter4[63:32];
-        12'hB05: csr_rdata = mhpmcounter5[31:0]; // dcache_miss
-        12'hB85: csr_rdata = mhpmcounter5[63:32];
-        12'hB06: csr_rdata = mhpmcounter6[31:0]; // l2_miss
-        12'hB86: csr_rdata = mhpmcounter6[63:32];
-        12'hB07: csr_rdata = mhpmcounter7[31:0]; // sb_stall
-        12'hB87: csr_rdata = mhpmcounter7[63:32];
-        12'hB08: csr_rdata = mhpmcounter8[31:0]; // issue_bubble
-        12'hB88: csr_rdata = mhpmcounter8[63:32];
-        12'hB09: csr_rdata = mhpmcounter9[31:0]; // rocc_busy
-        12'hB89: csr_rdata = mhpmcounter9[63:32];
-        12'hC00: csr_rdata = mcycle[31:0];       // cycle (user-mode alias)
-        12'hC80: csr_rdata = mcycle[63:32];      // cycleh
-        12'hC02: csr_rdata = minstret[31:0];     // instret (user-mode alias)
-        12'hC82: csr_rdata = minstret[63:32];    // instreth
-        12'hC03: csr_rdata = mhpmcounter3[31:0]; // user alias
-        12'hC83: csr_rdata = mhpmcounter3[63:32];
-        12'hC04: csr_rdata = mhpmcounter4[31:0];
-        12'hC84: csr_rdata = mhpmcounter4[63:32];
-        12'hC05: csr_rdata = mhpmcounter5[31:0];
-        12'hC85: csr_rdata = mhpmcounter5[63:32];
-        12'hC06: csr_rdata = mhpmcounter6[31:0];
-        12'hC86: csr_rdata = mhpmcounter6[63:32];
-        12'hC07: csr_rdata = mhpmcounter7[31:0];
-        12'hC87: csr_rdata = mhpmcounter7[63:32];
-        12'hC08: csr_rdata = mhpmcounter8[31:0];
-        12'hC88: csr_rdata = mhpmcounter8[63:32];
-        12'hC09: csr_rdata = mhpmcounter9[31:0];
-        12'hC89: csr_rdata = mhpmcounter9[63:32];
-        12'h180: csr_rdata = satp;               // satp
-        default: csr_rdata = 32'd0;
+        case (csr_addr)
+            12'hF11: csr_rdata = 32'd0;
+            12'hF12: csr_rdata = 32'd0;
+            12'hF13: csr_rdata = 32'd0;
+            12'hF14: csr_rdata = HART_ID;
+            CSR_MSTATUS: csr_rdata = mstatus;
+            CSR_MISA:    csr_rdata = MISA_VALUE;
+            CSR_MEDELEG: csr_rdata = medeleg;
+            CSR_MIDELEG: csr_rdata = mideleg;
+            CSR_MIE:     csr_rdata = mie;
+            CSR_MTVEC:   csr_rdata = mtvec;
+            CSR_MCOUNTEREN: csr_rdata = mcounteren;
+            CSR_MSCRATCH: csr_rdata = mscratch;
+            CSR_MEPC:    csr_rdata = mepc;
+            CSR_MCAUSE:  csr_rdata = mcause;
+            CSR_MTVAL:   csr_rdata = mtval;
+            CSR_MIP:     csr_rdata = mip_effective;
+            CSR_SSTATUS: csr_rdata = sstatus_value;
+            CSR_SIE:     csr_rdata = sie_value;
+            CSR_STVEC:   csr_rdata = stvec;
+            CSR_SCOUNTEREN: csr_rdata = scounteren;
+            CSR_SSCRATCH: csr_rdata = sscratch;
+            CSR_SEPC:    csr_rdata = sepc;
+            CSR_SCAUSE:  csr_rdata = scause;
+            CSR_STVAL:   csr_rdata = stval;
+            CSR_SIP:     csr_rdata = sip_value;
+            CSR_SATP:    csr_rdata = satp;
+            12'hB00: csr_rdata = mcycle[31:0];
+            12'hB80: csr_rdata = mcycle[63:32];
+            12'hB02: csr_rdata = minstret[31:0];
+            12'hB82: csr_rdata = minstret[63:32];
+            12'hB03: csr_rdata = mhpmcounter3[31:0];
+            12'hB83: csr_rdata = mhpmcounter3[63:32];
+            12'hB04: csr_rdata = mhpmcounter4[31:0];
+            12'hB84: csr_rdata = mhpmcounter4[63:32];
+            12'hB05: csr_rdata = mhpmcounter5[31:0];
+            12'hB85: csr_rdata = mhpmcounter5[63:32];
+            12'hB06: csr_rdata = mhpmcounter6[31:0];
+            12'hB86: csr_rdata = mhpmcounter6[63:32];
+            12'hB07: csr_rdata = mhpmcounter7[31:0];
+            12'hB87: csr_rdata = mhpmcounter7[63:32];
+            12'hB08: csr_rdata = mhpmcounter8[31:0];
+            12'hB88: csr_rdata = mhpmcounter8[63:32];
+            12'hB09: csr_rdata = mhpmcounter9[31:0];
+            12'hB89: csr_rdata = mhpmcounter9[63:32];
+            12'hC00: csr_rdata = mcycle[31:0];
+            12'hC80: csr_rdata = mcycle[63:32];
+            12'hC02: csr_rdata = minstret[31:0];
+            12'hC82: csr_rdata = minstret[63:32];
+            12'hC03: csr_rdata = mhpmcounter3[31:0];
+            12'hC83: csr_rdata = mhpmcounter3[63:32];
+            12'hC04: csr_rdata = mhpmcounter4[31:0];
+            12'hC84: csr_rdata = mhpmcounter4[63:32];
+            12'hC05: csr_rdata = mhpmcounter5[31:0];
+            12'hC85: csr_rdata = mhpmcounter5[63:32];
+            12'hC06: csr_rdata = mhpmcounter6[31:0];
+            12'hC86: csr_rdata = mhpmcounter6[63:32];
+            12'hC07: csr_rdata = mhpmcounter7[31:0];
+            12'hC87: csr_rdata = mhpmcounter7[63:32];
+            12'hC08: csr_rdata = mhpmcounter8[31:0];
+            12'hC88: csr_rdata = mhpmcounter8[63:32];
+            12'hC09: csr_rdata = mhpmcounter9[31:0];
+            12'hC89: csr_rdata = mhpmcounter9[63:32];
+            default: csr_rdata = 32'd0;
         endcase
     end
 end
 
-// ─── CSR Write Logic ────────────────────────────────────────────────────────
 always @(*) begin
-    csr_wval = 32'd0;
     case (csr_op)
-        3'b001: csr_wval = csr_wdata;                          // CSRRW
-        3'b010: csr_wval = csr_rdata | csr_wdata;              // CSRRS
-        3'b011: csr_wval = csr_rdata & ~csr_wdata;             // CSRRC
-        3'b101: csr_wval = csr_wdata;                          // CSRRWI (zimm)
-        3'b110: csr_wval = csr_rdata | csr_wdata;              // CSRRSI
-        3'b111: csr_wval = csr_rdata & ~csr_wdata;             // CSRRCI
+        3'b001: csr_wval = csr_wdata;
+        3'b010: csr_wval = csr_rdata | csr_wdata;
+        3'b011: csr_wval = csr_rdata & ~csr_wdata;
+        3'b101: csr_wval = csr_wdata;
+        3'b110: csr_wval = csr_rdata | csr_wdata;
+        3'b111: csr_wval = csr_rdata & ~csr_wdata;
         default: csr_wval = csr_wdata;
     endcase
 end
 
-// ─── Sequential update ─────────────────────────────────────────────────────
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
-        mstatus   <= 32'h00001800;  // MPP=M-mode (2'b11)
+        mstatus   <= 32'h0000_1800;
         mie       <= 32'd0;
         mtvec     <= 32'd0;
         mscratch  <= 32'd0;
@@ -246,6 +306,16 @@ always @(posedge clk or negedge rstn) begin
         mcause    <= 32'd0;
         mtval     <= 32'd0;
         mip       <= 32'd0;
+        medeleg   <= 32'd0;
+        mideleg   <= 32'd0;
+        mcounteren <= 32'd0;
+        stvec     <= 32'd0;
+        sscratch  <= 32'd0;
+        sepc      <= 32'd0;
+        scause    <= 32'd0;
+        stval     <= 32'd0;
+        scounteren <= 32'd0;
+        satp      <= 32'd0;
         mcycle    <= 64'd0;
         minstret  <= 64'd0;
         mhpmcounter3 <= 64'd0;
@@ -255,17 +325,10 @@ always @(posedge clk or negedge rstn) begin
         mhpmcounter7 <= 64'd0;
         mhpmcounter8 <= 64'd0;
         mhpmcounter9 <= 64'd0;
-        satp      <= 32'd0;         // Bare mode (MODE=0)
-        priv_mode <= 2'b11;         // Boot in Machine mode
-    end
-    else begin
-        // ── Cycle counter (always runs) ─────────────────────────
+        priv_mode <= PRIV_M;
+    end else begin
         mcycle <= mcycle + 64'd1;
-
-        // ── Instruction retired counter ─────────────────────────
         minstret <= minstret + {63'd0, instr_retired} + {63'd0, instr_retired_1};
-
-        // ── HPM event counters ──────────────────────────────────
         mhpmcounter3 <= mhpmcounter3 + {63'd0, hpm_branch_mispredict};
         mhpmcounter4 <= mhpmcounter4 + {63'd0, hpm_icache_miss};
         mhpmcounter5 <= mhpmcounter5 + {63'd0, hpm_dcache_miss};
@@ -274,71 +337,70 @@ always @(posedge clk or negedge rstn) begin
         mhpmcounter8 <= mhpmcounter8 + {63'd0, hpm_issue_bubble};
         mhpmcounter9 <= mhpmcounter9 + {63'd0, hpm_rocc_busy};
 
-        // ── Update mip from external interrupt sources ──────────
-        // mip[7] = MTIP (timer interrupt pending)
-        // mip[11] = MEIP (external interrupt pending)
         mip[7]  <= ext_timer_irq;
+        mip[9]  <= ext_supervisor_external_irq;
         mip[11] <= ext_external_irq;
 
-        // ── Exception entry ─────────────────────────────────────
-        if (exc_valid) begin
-            mepc      <= exc_pc;
-            mcause    <= exc_cause;
-            mtval     <= exc_tval;
-            // Save MIE to MPIE, clear MIE, save current mode to MPP
-            mstatus[7]     <= mstatus[3];    // MPIE = MIE
-            mstatus[3]     <= 1'b0;          // MIE = 0
-            mstatus[12:11] <= priv_mode;     // MPP = current mode
-            priv_mode      <= 2'b11;         // Enter M-mode
-        end
-        // ── Interrupt entry ─────────────────────────────────────
-        else if (irq_valid) begin
-            mepc      <= exc_pc;
-            mcause    <= irq_cause;
-            mtval     <= 32'd0;
-            mstatus[7]     <= mstatus[3];    // MPIE = MIE
-            mstatus[3]     <= 1'b0;          // MIE = 0
-            mstatus[12:11] <= priv_mode;     // MPP = current mode
-            priv_mode      <= 2'b11;         // Enter M-mode
-        end
-        // ── MRET (execute-time: removed from priority chain) ─────
-        // mstatus restore is deferred to commit time below.
-        // mret_valid still drives trap_return for the PC redirect
-        // and order-based flush, but mstatus MIE is NOT restored
-        // here.  This prevents the interrupt from re-firing before
-        // the handler's stores have drained.
-        // ── CSR write ───────────────────────────────────────────
-        else if (csr_valid) begin
+        if (trap_enter) begin
+            if (trap_to_s) begin
+                sepc   <= exc_pc;
+                scause <= irq_valid ? irq_cause : exc_cause;
+                stval  <= irq_valid ? 32'd0 : exc_tval;
+                mstatus[5] <= mstatus[1];          // SPIE = SIE
+                mstatus[1] <= 1'b0;                // SIE = 0
+                mstatus[8] <= (priv_mode == PRIV_S); // SPP
+                priv_mode  <= PRIV_S;
+            end else begin
+                mepc   <= exc_pc;
+                mcause <= irq_valid ? irq_cause : exc_cause;
+                mtval  <= irq_valid ? 32'd0 : exc_tval;
+                mstatus[7]     <= mstatus[3];      // MPIE = MIE
+                mstatus[3]     <= 1'b0;            // MIE = 0
+                mstatus[12:11] <= priv_mode;       // MPP
+                priv_mode      <= PRIV_M;
+            end
+        end else if (csr_valid) begin
             case (csr_addr)
-                12'h300: mstatus  <= csr_wval;
-                12'h304: mie      <= csr_wval;
-                12'h305: mtvec    <= csr_wval;
-                12'h340: mscratch <= csr_wval;
-                12'h341: mepc     <= csr_wval;
-                12'h342: mcause   <= csr_wval;
-                12'h343: mtval    <= csr_wval;
-                12'hB00: mcycle[31:0]   <= csr_wval;
-                12'hB80: mcycle[63:32]  <= csr_wval;
+                CSR_MSTATUS: mstatus <= csr_wval;
+                CSR_MEDELEG: medeleg <= csr_wval;
+                CSR_MIDELEG: mideleg <= csr_wval & MIE_MASK;
+                CSR_MIE:     mie <= csr_wval & MIE_MASK;
+                CSR_MTVEC:   mtvec <= {csr_wval[31:2], 2'b00};
+                CSR_MCOUNTEREN: mcounteren <= csr_wval;
+                CSR_MSCRATCH: mscratch <= csr_wval;
+                CSR_MEPC:    mepc <= {csr_wval[31:1], 1'b0};
+                CSR_MCAUSE:  mcause <= csr_wval;
+                CSR_MTVAL:   mtval <= csr_wval;
+                CSR_MIP:     mip <= (mip & ~MIP_WR_MASK) | (csr_wval & MIP_WR_MASK);
+                CSR_SSTATUS: mstatus <= (mstatus & ~SSTATUS_MASK) | (csr_wval & SSTATUS_MASK);
+                CSR_SIE:     mie <= (mie & ~SIE_MASK) | (csr_wval & SIE_MASK);
+                CSR_STVEC:   stvec <= {csr_wval[31:2], 2'b00};
+                CSR_SCOUNTEREN: scounteren <= csr_wval;
+                CSR_SSCRATCH: sscratch <= csr_wval;
+                CSR_SEPC:    sepc <= {csr_wval[31:1], 1'b0};
+                CSR_SCAUSE:  scause <= csr_wval;
+                CSR_STVAL:   stval <= csr_wval;
+                CSR_SIP:     mip <= (mip & ~SIE_MASK) | (csr_wval & SIE_MASK);
+                CSR_SATP:    satp <= csr_wval;
+                12'hB00: mcycle[31:0] <= csr_wval;
+                12'hB80: mcycle[63:32] <= csr_wval;
                 12'hB02: minstret[31:0] <= csr_wval;
-                12'hB82: minstret[63:32]<= csr_wval;
-                /* HPM counters are read-only from CSR write path;
-                 * they are updated by the event counter logic above.
-                 * Avoid conflict where csrr (CSRRS x0,csr,x0) would rewrite back. */
-                12'h180: satp     <= csr_wval;
-                default: ;  // read-only or unimplemented
+                12'hB82: minstret[63:32] <= csr_wval;
+                default: ;
             endcase
         end
 
-        // ── MRET commit-time mstatus restore ────────────────────
-        // Fires when the MRET instruction commits from the ROB.
-        // Placed outside the exc/irq/csr priority chain.
-        // No conflict possible: MIE=0 during handler → irq_valid=0,
-        // and MRET commits alone (one commit per cycle).
-        if (mret_commit && !exc_valid && !irq_valid) begin
-            mstatus[3]     <= mstatus[7];    // MIE = MPIE
-            mstatus[7]     <= 1'b1;          // MPIE = 1
-            priv_mode      <= mstatus[12:11]; // mode = MPP
-            mstatus[12:11] <= 2'b00;         // MPP = U-mode
+        if (mret_commit && !trap_enter) begin
+            mstatus[3]     <= mstatus[7];
+            mstatus[7]     <= 1'b1;
+            priv_mode      <= mstatus_mpp;
+            mstatus[12:11] <= PRIV_U;
+        end
+        if (sret_commit && !trap_enter) begin
+            mstatus[1] <= mstatus[5];
+            mstatus[5] <= 1'b1;
+            priv_mode  <= mstatus_spp ? PRIV_S : PRIV_U;
+            mstatus[8] <= 1'b0;
         end
     end
 end

@@ -13,13 +13,20 @@ This wiki is the required living record for the AX7203 single-thread bring-up. K
 - Board-equivalent Verilator Dhrystone runs must report `BoardConfigMatch: True` against the AX7203 board-test baseline: RS depth 48, fetch buffer depth 16, 25 MHz, 115200 UART, SMT disabled, DDR3 enabled, read-only dcache, loader ROM profile `board`, benchmark runtime profile `board`, Dhrystone 5000 runs, and loader-semantic host pacing `2500/2500/40000`.
 - Required debug order after RTL edits: Icarus first, WSL Verilator second, Vivado/JTAG/COM5 board validation last.
 - Current Dhrystone target uses a stricter loop: WSL Verilator Dhrystone first, then Vivado 2023.2 incremental implementation. Two consecutive incremental failures force a return to the Verilator boundary matrix.
+- Linux target: MMU Linux through `RV32IMA_Zicsr_Zifencei`, S-mode, Sv32, OpenSBI, Linux, and BusyBox initramfs. NoMMU Linux and bare-metal Dhrystone are not Linux support evidence.
+- Linux first execution gate is WSL Verilator `--mode linux-preload` with `build\linux\fw_payload.bin`; board validation comes only after UART shows OpenSBI, Linux, `/init`, and `SIFANGCORE LINUX PASS`.
 - Wiki and documentation updates must be included in the same GitHub commit/PR as the related code or debug change; if no commit/push is authorized, list the pending documentation files explicitly.
 - Generated output policy: `build/`, `.Xil/`, VCDs, Vivado logs/journals, crash dumps, and bitstreams are generated and should not be committed.
 
 ## Current Debug Stage
 
-Status as of 2026-05-24 +08:00:
+Status as of 2026-05-25 +08:00:
 
+- Linux bring-up has started. Implemented and tested prerequisites: S-mode CSR/trap/delegation, SRET/MRET privilege transitions, RV32A AMO/LRSC, PLIC UART source 2 through S-context, and OpenSBI-style STIP injection into S-mode timer interrupt.
+- New Linux staging files live under `software/linux/`: AX7203 DTB, minimal initramfs `/init`, and a WSL build script that currently emits DTB/initramfs staging artifacts and intentionally gates full `fw_payload.bin` generation until OpenSBI/Linux/BusyBox source/configs are ready.
+- Current Linux blockers: `mmu_sv32` is still not wired into I-side fetch or D-side LSU paths, PTW does not yet have an integrated memory-system port, precise fetch/load/store page faults are not fully plumbed to CSR, and PTE A/D update behavior is not integrated.
+- Verification on 2026-05-25: `--basic` and `--basic --fpga-config` both pass 41/41; `rv32ua` riscv-tests pass 10/10; `python verification\run_all_tests.py --riscv-tests` passes with RV32I/M/A categories.
+- Board-equivalent WSL Verilator Dhrystone preload after the Linux prerequisite changes passes with `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap, no stuck PC, and no unexpected UART. Loader-semantic 5000-run board-equivalent Dhrystone also passed earlier in the same debug session before the linux-preload harness extension; rerun it after the next RTL change before Vivado.
 - The repository is being fully renamed to SifangCore. RTL, FPGA top modules, RISCOF plugin names, Tcl/Python default stems, documentation, and UART boot banners now use `sifang_core` / `SifangCore`.
 - SMT removal/single-thread RTL debugging is past the basic simulation bring-up stage.
 - Basic Icarus regressions and FPGA-config directed tests have passed in the current debug line, including UART16550/PLIC source 2 and long store-buffer tests.
@@ -38,9 +45,11 @@ Status as of 2026-05-24 +08:00:
 ```powershell
 python verification\run_all_tests.py --basic
 python verification\run_all_tests.py --basic --fpga-config
-python verification\run_all_tests.py --tests test_uart16550_polling test_uart16550_plic_irq test_store_buffer_simple --fpga-config
+python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
 python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
 python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 2000000000 --require-board-config-match
+python fpga\scripts\run_verilator_mainline.py --mode linux-preload --linux-payload build\linux\fw_payload.bin --dcache-mode read-only --mock-latency 1 --require-board-config-match
 python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5 --rs-depth 48 --fetch-buffer-depth 16 --core-clk-mhz 25.0 --fpga-impl-mode incremental --capture-seconds 240
 ```
 
@@ -80,6 +89,7 @@ python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5
 
 ## Timeline
 
+- 2026-05-25: Linux MMU bring-up started: S-mode CSR/trap, RV32A, PLIC S-context UART IRQ, and SBI timer-injection directed tests pass; Linux DTB/initramfs staging flow and Verilator `linux-preload` entry were added. Full Linux boot remains blocked on Sv32/MMU/PTW/page-fault integration.
 - 2026-05-24: WSL Verilator became available after Ubuntu-22.04 was started externally; preload and full loader-semantic Dhrystone now pass with board ROM profile and board-safe host pacing.
 - 2026-05-24: Verilator board-config checking was tightened to include loader ROM profile `board` and loader-semantic host pacing; `SIM_FAST_STORE_DRAIN`/`sim-fast` or fast-pacing loader runs are not board-equivalent evidence, and config mismatch summaries are written before WSL tool probing.
 - 2026-05-22: Verilator wrapper gained board-config checking; board-equivalent Dhrystone gates must show `BoardConfigMatch: True` before Vivado implementation.

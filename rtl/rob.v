@@ -42,6 +42,7 @@ module rob #(
     input  wire [4:0]                  disp0_rd,
     input  wire                        disp0_is_store,
     input  wire                        disp0_is_mret,
+    input  wire                        disp0_is_sret,
     input  wire [PHYS_REG_W-1:0]       disp0_prd_new,    // New phys dest (from freelist)
     input  wire [PHYS_REG_W-1:0]       disp0_prd_old,    // Old phys mapping (to free at commit)
     input  wire                        disp0_is_branch,
@@ -58,6 +59,7 @@ module rob #(
     input  wire [4:0]                  disp1_rd,
     input  wire                        disp1_is_store,
     input  wire                        disp1_is_mret,
+    input  wire                        disp1_is_sret,
     input  wire [PHYS_REG_W-1:0]       disp1_prd_new,
     input  wire [PHYS_REG_W-1:0]       disp1_prd_old,
     input  wire                        disp1_is_branch,
@@ -102,6 +104,8 @@ module rob #(
     output wire                        commit1_is_store,
     output wire                        commit0_is_mret,
     output wire                        commit1_is_mret,
+    output wire                        commit0_is_sret,
+    output wire                        commit1_is_sret,
     output wire                        commit0_is_branch,
     output wire                        commit1_is_branch,
 
@@ -146,6 +150,7 @@ reg  [`METADATA_EPOCH_W-1:0]    rob_epoch    [0:ROB_DEPTH-1];
 reg  [4:0]              rob_rd         [0:ROB_DEPTH-1];
 reg                     rob_is_store   [0:ROB_DEPTH-1];
 reg                     rob_is_mret    [0:ROB_DEPTH-1];
+reg                     rob_is_sret    [0:ROB_DEPTH-1];
 reg                     rob_has_result [0:ROB_DEPTH-1];
 reg  [31:0]             rob_result     [0:ROB_DEPTH-1];
 
@@ -196,6 +201,7 @@ reg  [`METADATA_ORDER_ID_W-1:0] commit0_order_id_r, commit1_order_id_r;
 reg  [31:0]             commit0_pc_r, commit1_pc_r;
 reg                     commit0_is_store_r, commit1_is_store_r;
 reg                     commit0_is_mret_r,  commit1_is_mret_r;
+reg                     commit0_is_sret_r,  commit1_is_sret_r;
 reg                     commit0_is_branch_r, commit1_is_branch_r;
 reg  [PHYS_REG_W-1:0]  commit0_prd_old_r, commit1_prd_old_r;
 reg  [PHYS_REG_W-1:0]  commit0_prd_new_r, commit1_prd_new_r;
@@ -277,6 +283,8 @@ assign commit0_is_store   = commit0_is_store_r;
 assign commit1_is_store   = commit1_is_store_r;
 assign commit0_is_mret    = commit0_is_mret_r;
 assign commit1_is_mret    = commit1_is_mret_r;
+assign commit0_is_sret    = commit0_is_sret_r;
+assign commit1_is_sret    = commit1_is_sret_r;
 assign commit0_is_branch  = commit0_is_branch_r;
 assign commit1_is_branch  = commit1_is_branch_r;
 assign commit0_prd_old    = commit0_prd_old_r;
@@ -331,6 +339,8 @@ always @(posedge clk or negedge rstn) begin
         commit1_is_store_r <= 1'b0;
         commit0_is_mret_r  <= 1'b0;
         commit1_is_mret_r  <= 1'b0;
+        commit0_is_sret_r  <= 1'b0;
+        commit1_is_sret_r  <= 1'b0;
         commit0_is_branch_r <= 1'b0;
         commit1_is_branch_r <= 1'b0;
         commit0_prd_old_r  <= {PHYS_REG_W{1'b0}};
@@ -363,6 +373,7 @@ always @(posedge clk or negedge rstn) begin
             rob_rd[j]         <= 5'd0;
             rob_is_store[j]   <= 1'b0;
             rob_is_mret[j]    <= 1'b0;
+            rob_is_sret[j]    <= 1'b0;
             rob_has_result[j] <= 1'b0;
             rob_result[j]     <= 32'd0;
             rob_prd_new[j]    <= {PHYS_REG_W{1'b0}};
@@ -376,6 +387,8 @@ always @(posedge clk or negedge rstn) begin
         commit1_valid_r <= 1'b0;
         commit0_is_mret_r <= 1'b0;
         commit1_is_mret_r <= 1'b0;
+        commit0_is_sret_r <= 1'b0;
+        commit1_is_sret_r <= 1'b0;
         commit0_is_branch_r <= 1'b0;
         commit1_is_branch_r <= 1'b0;
         recover_en_r    <= 1'b0;
@@ -438,7 +451,7 @@ always @(posedge clk or negedge rstn) begin
                 if (rob_valid[j] &&
                     (!flush_order_valid ||
                      (rob_order_id[j] > flush_order_id) ||
-                     (!rob_is_mret[j] &&
+                     (!(rob_is_mret[j] || rob_is_sret[j]) &&
                       !rob_complete[j] &&
                       (rob_order_id[j] == flush_order_id)))) begin
                     rob_flushed[j] <= 1'b1;
@@ -514,6 +527,7 @@ always @(posedge clk or negedge rstn) begin
                     commit0_pc_r         <= rob_pc[rob_head];
                     commit0_is_store_r   <= rob_is_store[rob_head];
                     commit0_is_mret_r    <= rob_is_mret[rob_head];
+                    commit0_is_sret_r    <= rob_is_sret[rob_head];
                     commit0_is_branch_r  <= rob_is_branch[rob_head];
                     commit0_prd_old_r    <= rob_prd_old[rob_head];
                     commit0_prd_new_r    <= rob_prd_new[rob_head];
@@ -541,6 +555,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_rd[next_tail]         <= disp0_rd;
                 rob_is_store[next_tail]   <= disp0_is_store;
                 rob_is_mret[next_tail]    <= disp0_is_mret;
+                rob_is_sret[next_tail]    <= disp0_is_sret;
                 rob_has_result[next_tail] <= 1'b0;
                 rob_result[next_tail]     <= 32'd0;
                 rob_prd_new[next_tail]    <= disp0_prd_new;
@@ -562,6 +577,7 @@ always @(posedge clk or negedge rstn) begin
                 rob_rd[next_tail]         <= disp1_rd;
                 rob_is_store[next_tail]   <= disp1_is_store;
                 rob_is_mret[next_tail]    <= disp1_is_mret;
+                rob_is_sret[next_tail]    <= disp1_is_sret;
                 rob_has_result[next_tail] <= 1'b0;
                 rob_result[next_tail]     <= 32'd0;
                 rob_prd_new[next_tail]    <= disp1_prd_new;

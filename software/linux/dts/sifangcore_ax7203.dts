@@ -1,0 +1,74 @@
+/dts-v1/;
+
+/ {
+    #address-cells = <1>;
+    #size-cells = <1>;
+    compatible = "sifangcore,ax7203";
+    model = "SifangCore AX7203";
+
+    chosen {
+        stdout-path = "serial0:115200n8";
+        bootargs = "console=ttyS0,115200 earlycon=sbi root=/dev/ram0 rw";
+    };
+
+    cpus {
+        #address-cells = <1>;
+        #size-cells = <0>;
+        timebase-frequency = <25000000>;
+
+        cpu@0 {
+            device_type = "cpu";
+            reg = <0>;
+            status = "okay";
+            compatible = "riscv";
+            riscv,isa = "rv32ima_zicsr_zifencei";
+            mmu-type = "riscv,sv32";
+
+            cpu0_intc: interrupt-controller {
+                #interrupt-cells = <1>;
+                #address-cells = <0>;
+                interrupt-controller;
+                compatible = "riscv,cpu-intc";
+            };
+        };
+    };
+
+    memory@80000000 {
+        device_type = "memory";
+        reg = <0x80000000 0x08000000>;
+    };
+
+    soc {
+        #address-cells = <1>;
+        #size-cells = <1>;
+        compatible = "simple-bus";
+        ranges;
+
+        clint@2000000 {
+            compatible = "riscv,clint0";
+            reg = <0x02000000 0x00010000>;
+            interrupts-extended = <&cpu0_intc 3>, <&cpu0_intc 7>;
+        };
+
+        plic: plic@c000000 {
+            compatible = "riscv,plic0";
+            reg = <0x0c000000 0x00400000>;
+            #interrupt-cells = <1>;
+            #address-cells = <0>;
+            interrupt-controller;
+            riscv,ndev = <2>;
+            interrupts-extended = <&cpu0_intc 11>, <&cpu0_intc 9>;
+        };
+
+        serial0: serial@13001000 {
+            compatible = "ns16550a";
+            reg = <0x13001000 0x00000100>;
+            reg-shift = <0>;
+            reg-io-width = <1>;
+            clock-frequency = <25000000>;
+            current-speed = <115200>;
+            interrupts = <2>;
+            interrupt-parent = <&plic>;
+        };
+    };
+};

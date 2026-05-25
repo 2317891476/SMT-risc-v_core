@@ -43,8 +43,12 @@ module exec_pipe0 #(
     // ─── CSR/MRET inputs ────────────────────────────────────────
     input  wire               in_is_csr,     // CSR instruction
     input  wire               in_is_mret,    // MRET instruction
+    input  wire               in_is_sret,    // SRET instruction
+    input  wire               in_is_ecall,   // ECALL instruction
+    input  wire               in_is_ebreak,  // EBREAK instruction
     input  wire [11:0]        in_csr_addr,   // CSR address
     input  wire [31:0]        csr_rdata,     // CSR read data from csr_unit
+    input  wire [1:0]         in_priv_mode,  // current privilege for ECALL cause
 
     // ─── ALU result output (to WB and bypass network) ───────────
     output wire               out_valid,
@@ -62,6 +66,12 @@ module exec_pipe0 #(
     output wire [11:0]        csr_addr,      // CSR address
     output wire               mret_valid,    // MRET executed
     output wire [`METADATA_ORDER_ID_W-1:0] mret_order_id, // MRET order ID for flush
+    output wire               sret_valid,    // SRET executed
+    output wire [`METADATA_ORDER_ID_W-1:0] sret_order_id, // SRET order ID for flush
+    output wire               exc_valid,     // synchronous exception executed
+    output wire [31:0]        exc_cause,
+    output wire [31:0]        exc_pc,
+    output wire [31:0]        exc_tval,
 
     // ─── Branch resolution (to IF stage via top-level) ──────────
     output wire               br_ctrl,       // branch taken
@@ -120,6 +130,12 @@ reg [2:0]         out_fu_r;
 reg [`METADATA_ORDER_ID_W-1:0] out_order_id_r;
 reg               mret_valid_r;
 reg [`METADATA_ORDER_ID_W-1:0] mret_order_id_r;
+reg               sret_valid_r;
+reg [`METADATA_ORDER_ID_W-1:0] sret_order_id_r;
+reg               exc_valid_r;
+reg [31:0]        exc_cause_r;
+reg [31:0]        exc_pc_r;
+reg [31:0]        exc_tval_r;
 reg               br_ctrl_r;
 reg [31:0]        br_addr_r;
 reg [`METADATA_ORDER_ID_W-1:0] br_order_id_r;
@@ -157,6 +173,10 @@ wire stored_flush_kill =
     flush &&
     (!flush_order_valid || (stored_order_id > flush_order_id));
 wire input_valid = in_valid && !incoming_flush_kill;
+wire [31:0] ecall_cause =
+    (in_priv_mode == `PRIV_M) ? 32'd11 :
+    (in_priv_mode == `PRIV_S) ? 32'd9  :
+                                32'd8;
 
 wire [31:0] branch_actual_target = (stored_br_addr_mode == `J_REG) ?
                                    (stored_op_a + stored_imm) :
@@ -190,6 +210,12 @@ always @(posedge clk or negedge rstn) begin
         out_order_id_r      <= {`METADATA_ORDER_ID_W{1'b0}};
         mret_valid_r        <= 1'b0;
         mret_order_id_r     <= {`METADATA_ORDER_ID_W{1'b0}};
+        sret_valid_r        <= 1'b0;
+        sret_order_id_r     <= {`METADATA_ORDER_ID_W{1'b0}};
+        exc_valid_r         <= 1'b0;
+        exc_cause_r         <= 32'd0;
+        exc_pc_r            <= 32'd0;
+        exc_tval_r          <= 32'd0;
         br_ctrl_r           <= 1'b0;
         br_addr_r           <= 32'd0;
         br_order_id_r       <= {`METADATA_ORDER_ID_W{1'b0}};
@@ -243,6 +269,12 @@ always @(posedge clk or negedge rstn) begin
         out_order_id_r   <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
         mret_valid_r     <= input_valid && in_is_mret;
         mret_order_id_r  <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
+        sret_valid_r     <= input_valid && in_is_sret;
+        sret_order_id_r  <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
+        exc_valid_r      <= input_valid && (in_is_ecall || in_is_ebreak);
+        exc_cause_r      <= in_is_ebreak ? 32'd3 : ecall_cause;
+        exc_pc_r         <= input_valid ? in_pc : 32'd0;
+        exc_tval_r       <= 32'd0;
 
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= redirect_needed && !stored_flush_kill;
@@ -272,6 +304,12 @@ assign csr_op     = in_func3;    // funct3 encodes CSR operation
 assign csr_addr   = in_csr_addr;
 assign mret_valid    = mret_valid_r;
 assign mret_order_id = mret_order_id_r;
+assign sret_valid    = sret_valid_r;
+assign sret_order_id = sret_order_id_r;
+assign exc_valid     = exc_valid_r;
+assign exc_cause     = exc_cause_r;
+assign exc_pc        = exc_pc_r;
+assign exc_tval      = exc_tval_r;
 
 assign br_ctrl     = br_ctrl_r;
 assign br_addr     = br_addr_r;

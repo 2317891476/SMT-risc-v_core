@@ -60,6 +60,8 @@ module exec_pipe1 #(
     output wire [31:0]        mem_req_addr,    // effective address
     output wire [31:0]        mem_req_wdata,   // store data
     output wire [2:0]         mem_req_func3,   // LB/LH/LW/SB/SH/SW
+    output wire               mem_req_amo,     // RV32A atomic memory op
+    output wire [4:0]         mem_req_amo_op,  // AMO funct5 from inst[31:27]
     output wire [TAG_W-1:0]   mem_req_tag,
     output wire [4:0]         mem_req_rd,
     output wire               mem_req_regs_write,
@@ -90,6 +92,7 @@ module exec_pipe1 #(
 
 // ─── Routing logic ──────────────────────────────────────────────────────────
 wire is_mem_op = in_mem_read || in_mem_write;
+wire is_amo_op = in_mem_read && in_mem_write;
 wire is_mul_op = (in_fu == `FU_MUL);
 wire is_div_op = (in_fu == `FU_DIV);
 wire is_alu_op = in_valid && !is_mem_op && !is_mul_op && !is_div_op;
@@ -128,7 +131,7 @@ alu u_alu (
 );
 
 // ─── AGU (Address Generation Unit) ──────────────────────────────────────────
-wire [31:0] eff_addr = in_op_a + in_imm;  // base + offset
+wire [31:0] eff_addr = is_amo_op ? in_op_a : (in_op_a + in_imm);  // AMO has no offset
 
 // ─── MUL Unit ───────────────────────────────────────────────────────────────
 mul_unit #(.TAG_W(TAG_W)) u_mul (
@@ -193,6 +196,8 @@ reg        mem_req_wen_r;
 reg [31:0] mem_req_addr_r;
 reg [31:0] mem_req_wdata_r;
 reg [2:0]  mem_req_func3_r;
+reg        mem_req_amo_r;
+reg [4:0]  mem_req_amo_op_r;
 reg [TAG_W-1:0] mem_req_tag_r;
 reg [4:0]  mem_req_rd_r;
 reg        mem_req_regs_write_r;
@@ -224,6 +229,8 @@ always @(posedge clk or negedge rstn) begin
         mem_req_addr_r       <= 32'd0;
         mem_req_wdata_r      <= 32'd0;
         mem_req_func3_r      <= 3'd0;
+        mem_req_amo_r        <= 1'b0;
+        mem_req_amo_op_r     <= 5'd0;
         mem_req_tag_r        <= {TAG_W{1'b0}};
         mem_req_rd_r         <= 5'd0;
         mem_req_regs_write_r <= 1'b0;
@@ -245,10 +252,14 @@ always @(posedge clk or negedge rstn) begin
         if (held_mem_req_flush_kill) begin
             mem_req_valid_r <= 1'b0;
             mem_req_rd_r <= 5'd0;
+            mem_req_amo_r <= 1'b0;
+            mem_req_amo_op_r <= 5'd0;
             dbg_beacon_wait_reported_r <= 1'b0;
         end else if (mem_req_valid_r && mem_req_accept) begin
             mem_req_valid_r <= 1'b0;
             mem_req_rd_r <= 5'd0;
+            mem_req_amo_r <= 1'b0;
+            mem_req_amo_op_r <= 5'd0;
             dbg_beacon_wait_reported_r <= 1'b0;
         end
 
@@ -265,6 +276,8 @@ always @(posedge clk or negedge rstn) begin
             mem_req_addr_r       <= eff_addr;
             mem_req_wdata_r      <= in_op_b;
             mem_req_func3_r      <= in_func3;
+            mem_req_amo_r        <= is_amo_op;
+            mem_req_amo_op_r     <= in_imm[31:27];
             mem_req_tag_r        <= in_tag;
             mem_req_rd_r         <= in_mem_read ? in_rd : 5'd0;
             mem_req_regs_write_r <= in_regs_write;
@@ -308,6 +321,8 @@ assign mem_req_wen        = mem_req_wen_r;
 assign mem_req_addr       = mem_req_addr_r;
 assign mem_req_wdata      = mem_req_wdata_r;
 assign mem_req_func3      = mem_req_func3_r;
+assign mem_req_amo        = mem_req_amo_r;
+assign mem_req_amo_op     = mem_req_amo_op_r;
 assign mem_req_tag        = mem_req_tag_r;
 assign mem_req_rd         = mem_req_rd_r;
 assign mem_req_regs_write = mem_req_regs_write_r;

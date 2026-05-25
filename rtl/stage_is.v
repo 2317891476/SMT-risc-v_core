@@ -27,6 +27,9 @@ module stage_is(
     output wire         is_system,       // SYSTEM opcode detected
     output wire         is_csr,          // CSR instruction (CSRRW/S/C/WI/SI/CI)
     output wire         is_mret,         // MRET instruction
+    output wire         is_sret,         // SRET instruction
+    output wire         is_ecall,        // ECALL instruction
+    output wire         is_ebreak,       // EBREAK instruction
     output wire [11:0]  csr_addr,        // CSR address from instruction
     // RoCC extension outputs
     output wire         is_rocc,         // RoCC CUSTOM0 instruction detected
@@ -37,6 +40,7 @@ wire[6:0] opcode;
 wire[2:0] func3;
 wire      func7_code;
 wire      ctrl_regs_write;
+wire      is_amo_op;
 
 assign opcode        = is_inst[6:0];
 assign func3         = is_inst[14:12];
@@ -47,12 +51,16 @@ assign is_func7_code = func7_code;
 assign is_rd         = is_inst[11:7];
 assign is_rs1        = is_inst[19:15];
 assign is_rs2        = is_inst[24:20];
+assign is_amo_op     = (opcode == `AMO_OP);
 
 // CSR/SYSTEM decode
 assign is_system = (opcode == `SYSTEM);
-// CSR instructions have funct3 != 0, MRET is funct3=0 and bits[31:20]=0x302
+// CSR instructions have funct3 != 0. xRET uses funct3=0 and bits[31:20].
 assign is_csr    = is_system && (func3 != 3'b000);
 assign is_mret   = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h302);
+assign is_sret   = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h102);
+assign is_ecall  = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h000);
+assign is_ebreak = is_system && (func3 == 3'b000) && (is_inst[31:20] == 12'h001);
 assign csr_addr  = is_inst[31:20];
 
 // RoCC decode
@@ -99,6 +107,7 @@ always @(*) begin
         end
         `ItypeA: is_fu = `FU_INT1;  // ALU immediate -> Pipe 1
         `ItypeL: is_fu = `FU_LOAD;  // Load -> Pipe 1 (MEM)
+        `AMO_OP: is_fu = `FU_LOAD;  // AMO/LR/SC -> Pipe 1 (serialized in LSU)
         `Stype : is_fu = `FU_STORE; // Store -> Pipe 1 (MEM)
         `UtypeL: is_fu = `FU_INT0;  // LUI -> Pipe 0
         `UtypeU: is_fu = `FU_INT0;  // AUIPC -> Pipe 0
@@ -127,6 +136,7 @@ always @(*) begin
             is_rs2_used = 1'b0;
         end
         `Stype,
+        `AMO_OP,
         `Btype: begin
             is_rs1_used = 1'b1;
             is_rs2_used = 1'b1;

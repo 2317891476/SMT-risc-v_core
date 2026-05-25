@@ -338,6 +338,12 @@ wire [2:0] pipe0_csr_op;
 wire [11:0] pipe0_csr_addr_unused;
 wire       pipe0_mret_valid;
 wire [`METADATA_ORDER_ID_W-1:0] pipe0_mret_order_id;
+wire       pipe0_sret_valid;
+wire [`METADATA_ORDER_ID_W-1:0] pipe0_sret_order_id;
+wire       pipe0_exc_valid;
+wire [31:0] pipe0_exc_cause;
+wire [31:0] pipe0_exc_pc;
+wire [31:0] pipe0_exc_tval;
 
 // CSR read data from csr_unit
 wire [31:0] csr_rdata;
@@ -375,8 +381,11 @@ wire        rocc_interrupt;
 wire        trap_enter;
 wire [31:0] trap_target;
 wire        trap_return;
+wire [31:0] trap_return_target;
 wire [31:0] mepc_out;
+wire [31:0] sepc_out;
 wire        global_int_en;
+wire [1:0]  csr_priv_mode;
 
 assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
@@ -482,6 +491,7 @@ wire [`METADATA_ORDER_ID_W-1:0] rob_commit0_order_id, rob_commit1_order_id;
 wire [31:0] rob_commit0_pc, rob_commit1_pc;
 wire        rob_commit0_is_store, rob_commit1_is_store;
 wire        rob_commit0_is_mret,  rob_commit1_is_mret;
+wire        rob_commit0_is_sret,  rob_commit1_is_sret;
 wire        rob_commit0_is_branch, rob_commit1_is_branch;
 wire [1:0]  rob_instr_retired;
 // Expanded ROB rename support outputs (Stage A: unused, wired to defaults)
@@ -527,6 +537,9 @@ reg [6:0]  phys_src_refcnt [0:NUM_PHYS_REG_CFG-1];
 `endif
 wire        iss0_is_csr;
 wire        iss0_is_mret;
+wire        iss0_is_sret;
+wire        iss0_is_ecall;
+wire        iss0_is_ebreak;
 wire [11:0] iss0_csr_addr;
 wire        iss0_is_rocc;
 wire [6:0]  iss0_rocc_funct7;
@@ -588,11 +601,13 @@ wire [31:0] m1_resp_data;
 wire        m1_resp_l1d_hit;
 wire        mem_subsys_ext_timer_irq;
 wire        mem_subsys_ext_external_irq;
+wire        mem_subsys_ext_supervisor_external_irq;
 wire        mem_subsys_debug_uart_tx_byte_valid;
 wire        mem_subsys_dcache_flush_busy;
 wire        mem_subsys_dcache_flush_done;
 wire        ext_timer_irq;
 wire        ext_external_irq;
+wire        ext_supervisor_external_irq;
 
 // Fetch buffer backpressure
 wire fb_push_ready;
@@ -601,14 +616,16 @@ wire fb_push_ready;
 // Trap Redirect Mux: Prioritize trap entry > MRET > Branch > Normal flow
 // ════════════════════════════════════════════════════════════════════════════
 wire        trap_redirect_valid = trap_enter || trap_return;
-wire [31:0] trap_redirect_pc    = trap_enter ? trap_target : 
-                                   trap_return ? mepc_out : 32'd0;
+wire [31:0] trap_redirect_pc    = trap_enter ? trap_target :
+                                   trap_return ? trap_return_target : 32'd0;
 wire [0:0]  trap_redirect_tid   = 1'b0;  // M-mode only, single context
 wire [0:0]  flush_tid_mux       = trap_redirect_valid ? trap_redirect_tid : pipe0_br_tid;
 
 // flush_order_valid: order-based flush for branches and MRET (not trap_enter)
 wire flush_is_order_based = (!trap_redirect_valid && pipe0_br_ctrl) || (trap_return && !trap_enter);
-wire [`METADATA_ORDER_ID_W-1:0] flush_order_id_mux = (trap_return && !trap_enter) ? pipe0_mret_order_id : pipe0_br_order_id;
+wire [`METADATA_ORDER_ID_W-1:0] pipe0_xret_order_id = pipe0_sret_valid ? pipe0_sret_order_id :
+                                                      pipe0_mret_order_id;
+wire [`METADATA_ORDER_ID_W-1:0] flush_order_id_mux = (trap_return && !trap_enter) ? pipe0_xret_order_id : pipe0_br_order_id;
 
 // Combine flush signals: trap_redirect overrides branch
 wire [1:0]  combined_flush      = trap_redirect_valid ? {trap_redirect_tid == 1'b1, 
@@ -726,6 +743,13 @@ wire [2:0]  dec0_fu,    dec1_fu;
 wire [0:0]  dec0_tid = 1'b0, dec1_tid = 1'b0;
 wire        dec0_is_csr, dec1_is_csr;
 wire        dec0_is_mret, dec1_is_mret;
+wire        dec0_is_sret, dec1_is_sret;
+wire        dec0_is_ecall, dec1_is_ecall;
+wire        dec0_is_ebreak, dec1_is_ebreak;
+wire        dec0_is_xret = dec0_is_mret || dec0_is_sret;
+wire        dec1_is_xret = dec1_is_mret || dec1_is_sret;
+wire        dec0_is_trap = dec0_is_ecall || dec0_is_ebreak;
+wire        dec1_is_trap = dec1_is_ecall || dec1_is_ebreak;
 wire [11:0] dec0_csr_addr, dec1_csr_addr;
 wire        dec0_is_rocc, dec1_is_rocc;
 wire [6:0]  dec0_rocc_funct7, dec1_rocc_funct7;
@@ -761,6 +785,9 @@ decoder_dual u_decoder_dual(
     .dec0_fu         (dec0_fu          ),
     .dec0_is_csr     (dec0_is_csr      ),
     .dec0_is_mret    (dec0_is_mret     ),
+    .dec0_is_sret    (dec0_is_sret     ),
+    .dec0_is_ecall   (dec0_is_ecall    ),
+    .dec0_is_ebreak  (dec0_is_ebreak   ),
     .dec0_csr_addr   (dec0_csr_addr    ),
     .dec1_valid      (dec1_valid       ),
     .dec1_pc         (dec1_pc          ),
@@ -784,6 +811,9 @@ decoder_dual u_decoder_dual(
     .dec1_fu         (dec1_fu          ),
     .dec1_is_csr     (dec1_is_csr     ),
     .dec1_is_mret    (dec1_is_mret    ),
+    .dec1_is_sret    (dec1_is_sret    ),
+    .dec1_is_ecall   (dec1_is_ecall   ),
+    .dec1_is_ebreak  (dec1_is_ebreak  ),
     .dec1_csr_addr   (dec1_csr_addr   ),
     .dec0_is_rocc    (dec0_is_rocc    ),
     .dec0_rocc_funct7(dec0_rocc_funct7),
@@ -852,7 +882,7 @@ wire dec1_system_pending = dec1_tid ? (mret_pending_t1 || csr_pending_t1 || fenc
 wire dec0_blocked_by_pending_system = dec0_system_pending;
 wire dec1_blocked_by_pending_system =
     dec1_system_pending ||
-    (disp0_valid_pre_rob && (dec0_is_mret || dec0_is_csr || dec0_is_fence_i) && (dec0_tid == dec1_tid));
+    (disp0_valid_pre_rob && (dec0_is_xret || dec0_is_trap || dec0_is_csr || dec0_is_fence_i) && (dec0_tid == dec1_tid));
 assign sys_disp_stall = disp0_valid_pre_rob && dec0_blocked_by_pending_system;
 wire disp0_valid_gated = disp0_valid_pre_rob && !rob_disp_stall && !fl_disp_stall &&
                          !combined_flush_any && !dec0_blocked_by_pending_system;
@@ -1194,7 +1224,7 @@ dispatch_unit #(
     .disp0_rs1_used    (dec0_rs1_used     ),
     .disp0_rs2_used    (dec0_rs2_used     ),
     .disp0_fu          (dec0_fu           ),
-    .disp0_is_mret     (dec0_is_mret      ),
+    .disp0_is_mret     (dec0_is_xret || dec0_is_trap),
     .disp0_is_csr      (dec0_is_csr       ),
     .disp0_is_rocc     (dec0_is_rocc      ),
 
@@ -1220,7 +1250,7 @@ dispatch_unit #(
     .disp1_rs1_used    (dec1_rs1_used     ),
     .disp1_rs2_used    (dec1_rs2_used     ),
     .disp1_fu          (dec1_fu           ),
-    .disp1_is_mret     (dec1_is_mret      ),
+    .disp1_is_mret     (dec1_is_xret || dec1_is_trap),
     .disp1_is_csr      (dec1_is_csr       ),
     .disp1_is_rocc     (dec1_is_rocc      ),
 
@@ -1442,6 +1472,9 @@ wire disp1_is_store = (dec1_fu == `FU_STORE);
 // Per-tag SYSTEM metadata (decoder → scoreboard issue sideband)
 reg        rs_is_csr  [0:RS_TAG_DEPTH_CFG];
 reg        rs_is_mret [0:RS_TAG_DEPTH_CFG];
+reg        rs_is_sret [0:RS_TAG_DEPTH_CFG];
+reg        rs_is_ecall[0:RS_TAG_DEPTH_CFG];
+reg        rs_is_ebreak[0:RS_TAG_DEPTH_CFG];
 reg [11:0] rs_csr_addr[0:RS_TAG_DEPTH_CFG];
 reg        rs_pred_taken [0:RS_TAG_DEPTH_CFG];
 reg [31:0] rs_pred_target[0:RS_TAG_DEPTH_CFG];
@@ -1475,6 +1508,7 @@ rob #(
     .disp0_rd           (dec0_rd),
     .disp0_is_store     (disp0_is_store),
     .disp0_is_mret      (dec0_is_mret),
+    .disp0_is_sret      (dec0_is_sret),
     .disp0_prd_new      (shadow_alloc0_valid ? fl_alloc0_prd : {PHYS_REG_W_CFG{1'b0}}),
     .disp0_prd_old      (rmt_prd0_old),
     .disp0_is_branch    (dec0_br),
@@ -1491,6 +1525,7 @@ rob #(
     .disp1_rd           (dec1_rd),
     .disp1_is_store     (disp1_is_store),
     .disp1_is_mret      (dec1_is_mret),
+    .disp1_is_sret      (dec1_is_sret),
     .disp1_prd_new      (shadow_alloc1_valid ? fl_alloc1_prd : {PHYS_REG_W_CFG{1'b0}}),
     .disp1_prd_old      (rmt_prd1_old),
     .disp1_is_branch    (dec1_br),
@@ -1535,6 +1570,8 @@ rob #(
     .commit1_is_store   (rob_commit1_is_store),
     .commit0_is_mret    (rob_commit0_is_mret),
     .commit1_is_mret    (rob_commit1_is_mret),
+    .commit0_is_sret    (rob_commit0_is_sret),
+    .commit1_is_sret    (rob_commit1_is_sret),
     .commit0_is_branch  (rob_commit0_is_branch),
     .commit1_is_branch  (rob_commit1_is_branch),
 
@@ -1835,7 +1872,8 @@ reg  [`METADATA_EPOCH_W-1:0]    p0_pre_ro_epoch;
 reg         p0_pre_ro_pred_taken;
 reg  [31:0] p0_pre_ro_pred_target;
 reg  [PHYS_REG_W_CFG-1:0]  p0_pre_ro_prs1, p0_pre_ro_prs2;
-reg         p0_pre_ro_is_csr, p0_pre_ro_is_mret;
+reg         p0_pre_ro_is_csr, p0_pre_ro_is_mret, p0_pre_ro_is_sret;
+reg         p0_pre_ro_is_ecall, p0_pre_ro_is_ebreak;
 reg  [11:0] p0_pre_ro_csr_addr;
 reg         p0_pre_ro_is_rocc;
 reg  [6:0]  p0_pre_ro_rocc_funct7;
@@ -1865,7 +1903,7 @@ wire mret_order_flush_active = trap_return && !trap_enter;
 wire branch_order_flush_active = !trap_redirect_valid && pipe0_br_ctrl;
 wire ordered_flush_active = mret_order_flush_active || branch_order_flush_active;
 wire [`METADATA_ORDER_ID_W-1:0] ordered_flush_order_id =
-    mret_order_flush_active ? pipe0_mret_order_id : pipe0_br_order_id;
+    mret_order_flush_active ? pipe0_xret_order_id : pipe0_br_order_id;
 
 assign iss0_flush_kill =
     trap_enter ||
@@ -1919,6 +1957,9 @@ always @(posedge clk or negedge rstn) begin
         p0_pre_ro_prs2 <= {PHYS_REG_W_CFG{1'b0}};
         p0_pre_ro_is_csr <= 1'b0;
         p0_pre_ro_is_mret <= 1'b0;
+        p0_pre_ro_is_sret <= 1'b0;
+        p0_pre_ro_is_ecall <= 1'b0;
+        p0_pre_ro_is_ebreak <= 1'b0;
         p0_pre_ro_csr_addr <= 12'd0;
         p0_pre_ro_is_rocc <= 1'b0;
         p0_pre_ro_rocc_funct7 <= 7'd0;
@@ -1983,6 +2024,9 @@ always @(posedge clk or negedge rstn) begin
             p0_pre_ro_prs2         <= tag_prs2_map[iss0_tag];
             p0_pre_ro_is_csr       <= iss0_is_csr;
             p0_pre_ro_is_mret      <= iss0_is_mret;
+            p0_pre_ro_is_sret      <= iss0_is_sret;
+            p0_pre_ro_is_ecall     <= iss0_is_ecall;
+            p0_pre_ro_is_ebreak    <= iss0_is_ebreak;
             p0_pre_ro_csr_addr     <= iss0_csr_addr;
             p0_pre_ro_is_rocc      <= iss0_is_rocc;
             p0_pre_ro_rocc_funct7  <= iss0_rocc_funct7;
@@ -2018,6 +2062,9 @@ always @(posedge clk or negedge rstn) begin
             p0_pre_ro_prs2         <= {PHYS_REG_W_CFG{1'b0}};
             p0_pre_ro_is_csr       <= 1'b0;
             p0_pre_ro_is_mret      <= 1'b0;
+            p0_pre_ro_is_sret      <= 1'b0;
+            p0_pre_ro_is_ecall     <= 1'b0;
+            p0_pre_ro_is_ebreak    <= 1'b0;
             p0_pre_ro_csr_addr     <= 12'd0;
             p0_pre_ro_is_rocc      <= 1'b0;
             p0_pre_ro_rocc_funct7  <= 7'd0;
@@ -2273,7 +2320,7 @@ always @(posedge clk or negedge rstn) begin
         if (fence_i_commit_hit_t1 && !fence_i_clear_t1)
             fence_i_commit_seen_t1 <= 1'b1;
 
-        if (pipe0_mret_valid) begin
+        if (pipe0_mret_valid || pipe0_sret_valid || pipe0_exc_valid) begin
             if (p0_pre_ro_tid == 1'b0)
                 mret_pending_t0 <= 1'b0;
             else
@@ -2287,7 +2334,7 @@ always @(posedge clk or negedge rstn) begin
                 csr_pending_t1 <= 1'b0;
         end
 
-        if (disp0_accepted && dec0_is_mret) begin
+        if (disp0_accepted && (dec0_is_xret || dec0_is_trap)) begin
             if (dec0_tid == 1'b0) begin
                 mret_pending_t0       <= 1'b1;
                 mret_pending_order_t0 <= disp0_order_id;
@@ -2296,7 +2343,7 @@ always @(posedge clk or negedge rstn) begin
                 mret_pending_order_t1 <= disp0_order_id;
             end
         end
-        if (disp1_accepted && dec1_is_mret) begin
+        if (disp1_accepted && (dec1_is_xret || dec1_is_trap)) begin
             if (dec1_tid == 1'b0) begin
                 mret_pending_t0       <= 1'b1;
                 mret_pending_order_t0 <= disp1_order_id;
@@ -2370,8 +2417,11 @@ wire trap_pc_speculative = sb_branch_pending_any ||
                            csr_pending_t1 ||
                            fence_i_pending_t0 ||
                            fence_i_pending_t1 ||
-                           (p0_pre_ro_valid && p0_pre_ro_is_mret) ||
-                           pipe0_mret_valid;
+                           (p0_pre_ro_valid && (p0_pre_ro_is_mret || p0_pre_ro_is_sret ||
+                                                p0_pre_ro_is_ecall || p0_pre_ro_is_ebreak)) ||
+                           pipe0_mret_valid ||
+                           pipe0_sret_valid ||
+                           pipe0_exc_valid;
 wire trap_pc_fetch_safe = !trap_pc_speculative && !dec0_br && !dec1_br;
 
 always @(posedge clk or negedge rstn) begin
@@ -2402,18 +2452,24 @@ wire precise_interrupt_ready =
     !pipe0_br_ctrl &&
     !(p0_pre_ro_valid && p0_pre_ro_is_csr) &&
     !pipe0_mret_valid &&
+    !pipe0_sret_valid &&
+    !pipe0_exc_valid &&
     !csr_pending_t0 &&
     !mret_pending_t0 &&
     !fence_i_pending_t0 &&
     !rob_recover_walk_active;
 wire csr_ext_timer_irq    = ext_timer_irq && precise_interrupt_ready;
 wire csr_ext_external_irq = ext_external_irq && precise_interrupt_ready;
+wire csr_ext_supervisor_external_irq = ext_supervisor_external_irq && precise_interrupt_ready;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         for (sys_meta_idx = 0; sys_meta_idx <= RS_TAG_DEPTH_CFG; sys_meta_idx = sys_meta_idx + 1) begin
             rs_is_csr[sys_meta_idx]   <= 1'b0;
             rs_is_mret[sys_meta_idx]  <= 1'b0;
+            rs_is_sret[sys_meta_idx]  <= 1'b0;
+            rs_is_ecall[sys_meta_idx] <= 1'b0;
+            rs_is_ebreak[sys_meta_idx] <= 1'b0;
             rs_csr_addr[sys_meta_idx] <= 12'd0;
             rs_pred_taken[sys_meta_idx]  <= 1'b0;
             rs_pred_target[sys_meta_idx] <= 32'd0;
@@ -2426,6 +2482,9 @@ always @(posedge clk or negedge rstn) begin
         if (disp0_accepted) begin
             rs_is_csr[sb_disp0_tag]   <= dec0_is_csr;
             rs_is_mret[sb_disp0_tag]  <= dec0_is_mret;
+            rs_is_sret[sb_disp0_tag]  <= dec0_is_sret;
+            rs_is_ecall[sb_disp0_tag] <= dec0_is_ecall;
+            rs_is_ebreak[sb_disp0_tag] <= dec0_is_ebreak;
             rs_csr_addr[sb_disp0_tag] <= dec0_csr_addr;
             rs_pred_taken[sb_disp0_tag]  <= fb_pop0_pred_taken;
             rs_pred_target[sb_disp0_tag] <= fb_pop0_pred_target;
@@ -2435,6 +2494,9 @@ always @(posedge clk or negedge rstn) begin
         if (disp1_accepted) begin
             rs_is_csr[sb_disp1_tag]   <= dec1_is_csr;
             rs_is_mret[sb_disp1_tag]  <= dec1_is_mret;
+            rs_is_sret[sb_disp1_tag]  <= dec1_is_sret;
+            rs_is_ecall[sb_disp1_tag] <= dec1_is_ecall;
+            rs_is_ebreak[sb_disp1_tag] <= dec1_is_ebreak;
             rs_csr_addr[sb_disp1_tag] <= dec1_csr_addr;
             rs_pred_taken[sb_disp1_tag]  <= fb_pop1_pred_taken;
             rs_pred_target[sb_disp1_tag] <= fb_pop1_pred_target;
@@ -2453,6 +2515,12 @@ assign iss0_is_csr  = iss0_tag_hits_disp0 ? dec0_is_csr  :
                       iss0_tag_hits_disp1 ? dec1_is_csr  : rs_is_csr[iss0_tag];
 assign iss0_is_mret = iss0_tag_hits_disp0 ? dec0_is_mret :
                       iss0_tag_hits_disp1 ? dec1_is_mret : rs_is_mret[iss0_tag];
+assign iss0_is_sret = iss0_tag_hits_disp0 ? dec0_is_sret :
+                      iss0_tag_hits_disp1 ? dec1_is_sret : rs_is_sret[iss0_tag];
+assign iss0_is_ecall = iss0_tag_hits_disp0 ? dec0_is_ecall :
+                       iss0_tag_hits_disp1 ? dec1_is_ecall : rs_is_ecall[iss0_tag];
+assign iss0_is_ebreak = iss0_tag_hits_disp0 ? dec0_is_ebreak :
+                        iss0_tag_hits_disp1 ? dec1_is_ebreak : rs_is_ebreak[iss0_tag];
 assign iss0_csr_addr = iss0_tag_hits_disp0 ? dec0_csr_addr :
                        iss0_tag_hits_disp1 ? dec1_csr_addr : rs_csr_addr[iss0_tag];
 assign iss0_pred_taken = iss0_tag_hits_disp0 ? fb_pop0_pred_taken :
@@ -2700,8 +2768,12 @@ exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .flush_order_id   (flush_order_id_mux),
     .in_is_csr        (p0_pre_ro_is_csr ),
     .in_is_mret       (p0_pre_ro_is_mret),
+    .in_is_sret       (p0_pre_ro_is_sret),
+    .in_is_ecall      (p0_pre_ro_is_ecall),
+    .in_is_ebreak     (p0_pre_ro_is_ebreak),
     .in_csr_addr      (p0_pre_ro_csr_addr),
     .csr_rdata        (csr_rdata        ),
+    .in_priv_mode     (csr_priv_mode    ),
     .out_valid        (p0_ex_valid      ),
     .out_tag          (p0_ex_tag        ),
     .out_result       (p0_ex_result     ),
@@ -2715,6 +2787,12 @@ exec_pipe0 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe0(
     .csr_addr         (pipe0_csr_addr_unused),
     .mret_valid       (pipe0_mret_valid ),
     .mret_order_id    (pipe0_mret_order_id),
+    .sret_valid       (pipe0_sret_valid ),
+    .sret_order_id    (pipe0_sret_order_id),
+    .exc_valid        (pipe0_exc_valid  ),
+    .exc_cause        (pipe0_exc_cause  ),
+    .exc_pc           (pipe0_exc_pc     ),
+    .exc_tval         (pipe0_exc_tval   ),
     .br_ctrl          (pipe0_br_ctrl    ),
     .br_addr          (pipe0_br_addr    ),
     .br_order_id      (pipe0_br_order_id),
@@ -2733,6 +2811,8 @@ wire        p1_mem_req_wen;
 wire [31:0] p1_mem_req_addr;
 wire [31:0] p1_mem_req_wdata;
 wire [2:0]  p1_mem_req_func3;
+wire        p1_mem_req_amo;
+wire [4:0]  p1_mem_req_amo_op;
 wire [RS_TAG_W_CFG-1:0]  p1_mem_req_tag;
 wire [4:0]  p1_mem_req_rd;
 wire        p1_mem_req_regs_write;
@@ -3499,6 +3579,8 @@ exec_pipe1 #(.TAG_W(RS_TAG_W_CFG)) u_exec_pipe1(
     .mem_req_addr       (p1_mem_req_addr      ),
     .mem_req_wdata      (p1_mem_req_wdata     ),
     .mem_req_func3      (p1_mem_req_func3     ),
+    .mem_req_amo        (p1_mem_req_amo       ),
+    .mem_req_amo_op     (p1_mem_req_amo_op    ),
     .mem_req_tag        (p1_mem_req_tag       ),
     .mem_req_rd         (p1_mem_req_rd        ),
     .mem_req_regs_write (p1_mem_req_regs_write),
@@ -3579,6 +3661,8 @@ lsu_shell #(
     .req_tag            (p1_mem_req_tag       ),
     .req_rd             (p1_mem_req_rd        ),
     .req_func3          (p1_mem_req_func3     ),
+    .req_amo            (p1_mem_req_amo       ),
+    .req_amo_op         (p1_mem_req_amo_op    ),
     .req_wen            (p1_mem_req_wen       ),
     .req_addr           (p1_mem_req_addr      ),
     .req_wdata          (p1_mem_req_wdata     ),
@@ -4140,18 +4224,22 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .csr_op          (pipe0_csr_op      ),
     .csr_wdata       (pipe0_csr_wdata   ),
     .csr_rdata       (csr_rdata         ),
-    .exc_valid       (1'b0              ),
-    .exc_cause       (32'd0             ),
-    .exc_pc          (trap_entry_pc     ),
-    .exc_tval        (32'd0             ),
+    .exc_valid       (pipe0_exc_valid   ),
+    .exc_cause       (pipe0_exc_cause   ),
+    .exc_pc          (pipe0_exc_valid ? pipe0_exc_pc : trap_entry_pc),
+    .exc_tval        (pipe0_exc_tval    ),
     .mret_valid      (pipe0_mret_valid  ),
     .mret_commit     (rob_commit0_is_mret || rob_commit1_is_mret),
+    .sret_valid      (pipe0_sret_valid  ),
+    .sret_commit     (rob_commit0_is_sret || rob_commit1_is_sret),
     .trap_enter      (trap_enter        ),
     .trap_target     (trap_target       ),
     .trap_return     (trap_return       ),
+    .trap_return_target(trap_return_target),
     .mepc_out        (mepc_out          ),
+    .sepc_out        (sepc_out          ),
     .satp_out        (                  ),
-    .priv_mode_out   (                  ),
+    .priv_mode_out   (csr_priv_mode     ),
     .mstatus_mxr     (                  ),
     .mstatus_sum     (                  ),
     .global_int_en   (global_int_en     ),
@@ -4165,7 +4253,8 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .hpm_issue_bubble      (rob_instr_retired == 2'b00),
     .hpm_rocc_busy         (1'b0),
     .ext_timer_irq   (csr_ext_timer_irq),
-    .ext_external_irq(csr_ext_external_irq)
+    .ext_external_irq(csr_ext_external_irq),
+    .ext_supervisor_external_irq(csr_ext_supervisor_external_irq)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -4361,6 +4450,7 @@ if (USE_MEM_SUBSYS) begin : gen_mem_subsys
         .ext_irq_src       (ext_irq_src_clean),
         .ext_timer_irq     (mem_subsys_ext_timer_irq),
         .ext_external_irq  (mem_subsys_ext_external_irq),
+        .ext_supervisor_external_irq(mem_subsys_ext_supervisor_external_irq),
 
         // UART physical interface
         .uart_rx           (uart_rx),
@@ -4417,6 +4507,7 @@ end else begin : gen_mem_subsys_tieoff
     assign mem_subsys_tube_status    = 8'd0;
     assign mem_subsys_ext_timer_irq  = 1'b0;
     assign mem_subsys_ext_external_irq = 1'b0;
+    assign mem_subsys_ext_supervisor_external_irq = 1'b0;
     assign mem_subsys_uart_tx        = 1'b1;
     assign mem_subsys_debug_uart_tx_byte_valid = 1'b0;
     assign mem_subsys_debug_uart_tx_byte = 8'd0;
@@ -4430,6 +4521,7 @@ endgenerate
 
 assign ext_timer_irq    = use_mem_subsys ? mem_subsys_ext_timer_irq : 1'b0;
 assign ext_external_irq = use_mem_subsys ? mem_subsys_ext_external_irq : 1'b0;
+assign ext_supervisor_external_irq = use_mem_subsys ? mem_subsys_ext_supervisor_external_irq : 1'b0;
 assign tube_status      = use_mem_subsys ? mem_subsys_tube_status : legacy_tube_status;
 assign uart_tx          = use_mem_subsys ? mem_subsys_uart_tx : legacy_uart_tx;
 assign debug_core_ready = rstn;

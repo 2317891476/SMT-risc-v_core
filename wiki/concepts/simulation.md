@@ -60,9 +60,29 @@ As of 2026-05-22 10:03 +08:00, the boundary matrix above passed after two consec
 
 - Basic and FPGA-config tests have passed in the current debug line.
 - Directed UART16550 and PLIC source 2 tests have passed.
+- Linux prerequisite directed tests now pass: `test_priv_mret_sret_delegation`, `test_amo_lrsc`, `test_plic_s_context_uart_irq`, and `test_sbi_timer_injection`.
+- Classic `riscv-tests` now includes `rv32ua`; `python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua` passes 10/10 after extending the riscv-tests testbench timeout for the long LR/SC loop.
 - Store-buffer stress tests for long stream and long drain/poll patterns have passed.
 - Loader long simulation with 32-byte blocks passed after the branch-complete duplicate-pulse fix.
 - Verilator wrapper WSL stderr/stdout decoding is now tolerant of localized UTF-16LE WSL errors, so missing-distro or missing-tool failures are visible as environment blockers instead of Python decode exceptions.
+
+## Linux Preload Gate
+
+Linux bring-up uses a separate Verilator mode:
+
+```powershell
+python fpga\scripts\run_verilator_mainline.py --mode linux-preload --linux-payload build\linux\fw_payload.bin --dcache-mode read-only --mock-latency 1 --require-board-config-match
+```
+
+This mode preloads `fw_payload.bin` at `0x80000000`, starts the core at DDR3, disables the Dhrystone UART-prefix checker, and looks for Linux boot tokens in UART output. The pass condition is:
+
+- `OpenSBI`
+- `Boot HART ID: 0`
+- `Linux version`
+- `Run /init as init process`
+- `SIFANGCORE LINUX PASS`
+
+As of 2026-05-25, the mode is wired into the wrapper/harness but cannot pass because `build\linux\fw_payload.bin` is not produced yet and Sv32/MMU/PTW integration is still incomplete. The command correctly fails early with a missing-payload message when the image is absent.
 
 ## Recording Rule
 

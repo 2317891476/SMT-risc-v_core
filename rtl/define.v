@@ -10,6 +10,20 @@
 `define Jtype  7'b1101111 //Utype for jal
 `define MISC_MEM 7'b0001111 // FENCE/FENCE.I
 `define SYSTEM 7'b1110011 // SYSTEM opcode for CSR/MRET
+`define AMO_OP 7'b0101111 // Atomic memory operations (RV32A)
+
+// RV32A funct5 encodings in bits [31:27]
+`define AMO_ADD    5'b00000
+`define AMO_SWAP   5'b00001
+`define AMO_LR     5'b00010
+`define AMO_SC     5'b00011
+`define AMO_XOR    5'b00100
+`define AMO_OR     5'b01000
+`define AMO_AND    5'b01100
+`define AMO_MIN    5'b10000
+`define AMO_MAX    5'b10100
+`define AMO_MINU   5'b11000
+`define AMO_MAXU   5'b11100
  
  
 //-------------------ALU_MODE------------------
@@ -203,8 +217,11 @@
 `define PLIC_PRIORITY2      32'h0C000008
 `define PLIC_PENDING        32'h0C001000
 `define PLIC_ENABLE         32'h0C002000
+`define PLIC_S_ENABLE       32'h0C002080
 `define PLIC_THRESHOLD      32'h0C200000
 `define PLIC_CLAIM_COMPLETE 32'h0C200004
+`define PLIC_S_THRESHOLD    32'h0C201000
+`define PLIC_S_CLAIM_COMPLETE 32'h0C201004
 
 // DDR3 SDRAM (external, active when ENABLE_DDR3)
 `define DDR3_BASE           32'h8000_0000

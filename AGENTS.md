@@ -2,7 +2,7 @@
 
 ## Project Structure & Module Organization
 
-SifangCore: A RISC-V Processor Core is an RV32I/M out-of-order dual-issue core that is currently being debugged as a single-thread AX7203 FPGA target. The long-term project goal is a full-stack, competition-grade and industrial-grade dual-issue out-of-order pipeline processor core that can boot Linux and run benchmark/test programs with high performance. `rtl/` contains synthesizable core modules such as `sifang_core.v`, pipeline stages, ROB, caches, CSR, CLINT/PLIC, and UART blocks. `comp_test/` holds SystemVerilog testbenches and simulator support. `rom/` stores bare-metal assembly tests and linker scripts used to generate `inst.hex` and `data.hex`. `verification/` contains Python regression runners and RISCOF setup. `fpga/` contains AX7203 top modules, constraints, Vivado Tcl flow, and UART/benchmark automation. `wiki/` is the required living design/debug record. `benchmarks/`, `docs/`, and `libs/` hold benchmark ports, design notes, and behavioral RAM models. Treat `build/`, `.Xil/`, `*.vcd`, Vivado logs, and crash dumps as generated outputs.
+SifangCore: A RISC-V Processor Core is an RV32I/M out-of-order dual-issue core that is currently being debugged as a single-thread AX7203 FPGA target. The long-term project goal is a full-stack, competition-grade and industrial-grade dual-issue out-of-order pipeline processor core that can boot Linux and run benchmark/test programs with high performance. `rtl/` contains synthesizable core modules such as `sifang_core.v`, pipeline stages, ROB, caches, CSR, CLINT/PLIC, and UART blocks. `comp_test/` holds SystemVerilog testbenches and simulator support. `rom/` stores bare-metal assembly tests and linker scripts used to generate `inst.hex` and `data.hex`. `verification/` contains Python regression runners and RISCOF setup. `fpga/` contains AX7203 top modules, constraints, Vivado Tcl flow, and UART/benchmark automation. `software/linux/` contains the Linux/OpenSBI/initramfs bring-up staging flow. `wiki/` is the required living design/debug record. `benchmarks/`, `docs/`, and `libs/` hold benchmark ports, design notes, and behavioral RAM models. Treat `build/`, `.Xil/`, `*.vcd`, Vivado logs, and crash dumps as generated outputs.
 
 ## Build, Test, and Development Commands
 
@@ -87,6 +87,32 @@ The current short-term target is Dhrystone. For Dhrystone work, this loop overri
    ```
 
    All boundary runs must pass before returning to incremental implementation. Reset the consecutive incremental failure count only after this Verilator matrix passes. The `full` dcache row is a deliberate non-board-equivalent stress run; its summary must show the dcache mismatch.
+
+## Linux Bring-up Flow
+
+The Linux target is MMU Linux, not NoMMU: `RV32IMA_Zicsr_Zifencei`, S-mode, Sv32, OpenSBI, Linux, and a BusyBox initramfs. Do not claim Linux support from bare-metal Dhrystone or from an image that bypasses S-mode/Sv32.
+
+Linux work is staged:
+
+1. Keep Dhrystone green first. After any RTL change made for Linux, rerun the relevant Icarus directed tests, `--basic`, `--basic --fpga-config`, and the board-equivalent WSL Verilator Dhrystone gates before attempting Linux-specific Verilator runs.
+2. Validate Linux prerequisites with directed tests before building images:
+   ```powershell
+   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+   python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
+   ```
+3. Build Linux staging artifacts through WSL only:
+   ```bash
+   bash software/linux/scripts/build_linux_payload.sh
+   ```
+   The staging script may emit DTB/initramfs without a bootable `fw_payload.bin`. Treat `fw_payload.bin` as valid only after the OpenSBI/Linux/BusyBox source/config gate is explicitly enabled and the file is produced under `build/linux/`.
+4. First Linux execution gate is Verilator preload:
+   ```powershell
+   python fpga\scripts\run_verilator_mainline.py --mode linux-preload --linux-payload build\linux\fw_payload.bin --dcache-mode read-only --mock-latency 1 --require-board-config-match
+   ```
+   Passing requires UART tokens `OpenSBI`, `Boot HART ID: 0`, `Linux version`, `Run /init as init process`, and `SIFANGCORE LINUX PASS`, with no trap/stuck/unexpected UART.
+5. Only after `linux-preload` passes may AX7203 Linux board validation start. Use Vivado 2023.2 JTAG and COM5 UART, and fall back to Verilator traces on failure instead of iterating blindly in Vivado.
+
+Current Linux blockers to keep visible until fixed: I/D-side Sv32 translation is not wired into fetch/LSU, PTW has no memory-system port, precise fetch/load/store page faults are not fully plumbed to CSR, and hardware PTE A/D update behavior is not integrated.
 
 ## Commit & Pull Request Guidelines
 

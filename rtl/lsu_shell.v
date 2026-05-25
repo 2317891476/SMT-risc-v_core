@@ -60,6 +60,8 @@ module lsu_shell #(
     input  wire [TAG_W-1:0]   req_tag,           // RS tag for matching
     input  wire [4:0]         req_rd,            // Destination register
     input  wire [2:0]         req_func3,         // Memory operation type
+    input  wire               req_amo,           // RV32A atomic memory op
+    input  wire [4:0]         req_amo_op,        // AMO funct5 from inst[31:27]
     input  wire               req_wen,           // 1=store, 0=load
     input  wire [31:0]        req_addr,          // Effective address
     input  wire [31:0]        req_wdata,         // Store data (for stores)
@@ -188,9 +190,12 @@ wire [2:0]               sb_debug_count_t1 = 3'd0; // Single-thread: no T1
 wire                     sb_stall_event;
 wire                     sb_drain_urgent;
 
-// Load vs Store classification
-wire is_load  = req_valid && !req_wen;
-wire is_store = req_valid && req_wen;
+// Load/Store/AMO classification. AMO carries both read and write intent but is
+// handled as a serialized read-modify-write transaction, not as a store-buffer
+// enqueue.
+wire is_amo   = req_valid && req_amo;
+wire is_load  = req_valid && !req_wen && !req_amo;
+wire is_store = req_valid && req_wen && !req_amo;
 wire store_enqueue_fire;
 wire legacy_load_issue_fire;
 
@@ -235,7 +240,7 @@ wire sb_drain_ready_to_issue =
     use_mem_subsys && state_machine_idle && sb_mem_write_valid_int;
 wire mem_subsys_load_resp_fire =
                 use_mem_subsys && (lsu_state == LSU_WAIT_RESP) &&
-                m1_resp_valid && !m1_txn_is_drain;
+                m1_resp_valid && !m1_txn_is_drain && !m1_txn_is_amo;
 wire load_resp_accept_slot = mem_subsys_load_resp_fire;
 
 assign resp_early_wakeup_valid =
@@ -264,8 +269,14 @@ wire load_accept = !sb_load_hazard && !m1_drain_holdoff &&
                    !mmio_load_spec_block && !mmio_load_older_store_block &&
                    (state_machine_idle ||
                     (load_resp_accept_slot && !sb_forward_valid));
+wire amo_accept = use_mem_subsys && state_machine_idle &&
+                  !sb_drain_ready_to_issue &&
+                  !req_flush_kill &&
+                  req_at_rob_head &&
+                  !sb_older_store_pending_for_load;
 
-assign req_accept = is_store ? store_accept : load_accept;
+assign req_accept = req_amo ? amo_accept :
+                    is_store ? store_accept : load_accept;
 assign store_enqueue_fire = is_store && req_accept;
 assign legacy_load_issue_fire = !use_mem_subsys && is_load && req_accept && !sb_forward_valid;
 
@@ -319,7 +330,7 @@ store_buffer #(
     .mem_write_ready        (sb_mem_write_ready_mux),
 
     // Load query interface (for store-to-load forwarding)
-    .load_query_valid       (is_load),
+    .load_query_valid       (is_load || is_amo),
     .load_query_order_id    (req_order_id),
     .load_query_addr        (req_addr),
     .load_query_func3       (req_func3),
@@ -349,13 +360,15 @@ assign debug_store_buffer_count_t1 = sb_debug_count_t1;
 // =============================================================================
 
 // State encoding
-localparam LSU_IDLE      = 2'b00;  // Ready to accept new request
-localparam LSU_REQ       = 2'b01;  // Request sent, waiting for grant
-localparam LSU_WAIT_RESP = 2'b10;  // Waiting for response
-localparam LSU_RESP      = 2'b11;  // Response ready
+localparam LSU_IDLE           = 3'd0;  // Ready to accept new request
+localparam LSU_REQ            = 3'd1;  // Request sent, waiting for grant
+localparam LSU_WAIT_RESP      = 3'd2;  // Waiting for response
+localparam LSU_RESP           = 3'd3;  // Response ready
+localparam LSU_AMO_WRITE_REQ  = 3'd4;  // AMO writeback request
+localparam LSU_AMO_WRITE_RESP = 3'd5;  // AMO writeback response
 localparam [19:0] LSU_WAIT_WATCHDOG_MAX = 20'hfffff;
 
-reg [1:0] lsu_state;
+reg [2:0] lsu_state;
 reg               m1_req_valid_r;
 reg [31:0]        m1_req_addr_r;
 reg               m1_req_write_r;
@@ -374,14 +387,21 @@ reg               pending_regs_write;
 reg [2:0]         pending_fu;
 reg               pending_mem2reg;
 reg               pending_wen;
+reg               pending_amo;
+reg [4:0]         pending_amo_op;
 reg [31:0]        pending_addr;
+reg [31:0]        pending_wdata;
 reg               pending_forward_valid;  // Forwarding was used for this load
 reg [31:0]        pending_forward_data;   // Forwarded data
+reg [31:0]        pending_amo_resp_data;
 
 // Raw memory data register (for mem_subsys mode)
 reg [31:0]        raw_mem_rdata;
 reg               m1_txn_is_drain;
+reg               m1_txn_is_amo;
 reg               dbg_beacon_block_reported_r;
+reg               lr_reservation_valid_r;
+reg [29:0]        lr_reservation_word_r;
 wire              flush_hits_pending =
                     pending_valid;
 // Only kill when there IS a pending speculative request to kill.
@@ -400,14 +420,21 @@ assign sb_mem_write_ready_mux = use_mem_subsys ?
 
 wire mem_subsys_load_issue_fire =
     use_mem_subsys && req_valid && req_accept && is_load && !sb_forward_valid;
+wire mem_subsys_amo_issue_fire =
+    use_mem_subsys && req_valid && req_accept && is_amo;
 wire store_accept_resp_fire =
     (lsu_state == LSU_IDLE) && req_valid && req_accept && is_store;
 
-assign m1_req_valid = mem_subsys_load_issue_fire ? 1'b1 : m1_req_valid_r;
-assign m1_req_addr  = mem_subsys_load_issue_fire ? req_addr : m1_req_addr_r;
-assign m1_req_write = mem_subsys_load_issue_fire ? 1'b0 : m1_req_write_r;
-assign m1_req_wdata = mem_subsys_load_issue_fire ? 32'd0 : m1_req_wdata_r;
-assign m1_req_wen   = mem_subsys_load_issue_fire ? 4'b0000 : m1_req_wen_r;
+assign m1_req_valid = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
+                      1'b1 : m1_req_valid_r;
+assign m1_req_addr  = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
+                      req_addr : m1_req_addr_r;
+assign m1_req_write = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
+                      1'b0 : m1_req_write_r;
+assign m1_req_wdata = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
+                      32'd0 : m1_req_wdata_r;
+assign m1_req_wen   = (mem_subsys_load_issue_fire || mem_subsys_amo_issue_fire) ?
+                      4'b0000 : m1_req_wen_r;
 
 wire pending_at_rob_head_t0 =
     rob_head_valid_t0 && !rob_head_flushed_t0 &&
@@ -433,11 +460,38 @@ assign debug_older_store_blocked_mmio_load =
 assign debug_spec_mmio_load_violation =
     use_mem_subsys && (current_mmio_load_violation || pending_mmio_load_violation);
 
+wire lr_reservation_match =
+    lr_reservation_valid_r && (lr_reservation_word_r == pending_addr[31:2]);
+
+function [31:0] amo_next_value;
+    input [4:0]  amo_op;
+    input [31:0] old_value;
+    input [31:0] operand;
+    begin
+        case (amo_op)
+            `AMO_SWAP: amo_next_value = operand;
+            `AMO_ADD:  amo_next_value = old_value + operand;
+            `AMO_XOR:  amo_next_value = old_value ^ operand;
+            `AMO_AND:  amo_next_value = old_value & operand;
+            `AMO_OR:   amo_next_value = old_value | operand;
+            `AMO_MIN:  amo_next_value = ($signed(old_value) < $signed(operand)) ? old_value : operand;
+            `AMO_MAX:  amo_next_value = ($signed(old_value) > $signed(operand)) ? old_value : operand;
+            `AMO_MINU: amo_next_value = (old_value < operand) ? old_value : operand;
+            `AMO_MAXU: amo_next_value = (old_value > operand) ? old_value : operand;
+            default:   amo_next_value = operand;
+        endcase
+    end
+endfunction
+
 // State machine
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         lsu_state         <= LSU_IDLE;
         pending_valid     <= 1'b0;
+        pending_amo       <= 1'b0;
+        pending_amo_op    <= 5'd0;
+        pending_wdata     <= 32'd0;
+        pending_amo_resp_data <= 32'd0;
         m1_req_valid_r    <= 1'b0;
         m1_req_addr_r     <= 32'd0;
         m1_req_write_r    <= 1'b0;
@@ -446,10 +500,13 @@ always @(posedge clk or negedge rstn) begin
         lsu_wait_watchdog_r <= 20'd0;
         raw_mem_rdata     <= 32'd0;
         m1_txn_is_drain   <= 1'b0;
+        m1_txn_is_amo     <= 1'b0;
         dbg_beacon_block_reported_r <= 1'b0;
         m1_cooldown_r     <= 1'b0;
         debug_lsu_cooldown_set <= 1'b0;
         debug_lsu_cooldown_skipped_l1hit <= 1'b0;
+        lr_reservation_valid_r <= 1'b0;
+        lr_reservation_word_r  <= 30'd0;
     end else begin
         debug_lsu_cooldown_set <= 1'b0;
         debug_lsu_cooldown_skipped_l1hit <= 1'b0;
@@ -470,8 +527,10 @@ always @(posedge clk or negedge rstn) begin
                      flush_tid, flush_order_valid, flush_order_id, $time);
             `endif
             pending_valid   <= 1'b0;
+            pending_amo     <= 1'b0;
             m1_req_valid_r  <= 1'b0;
             m1_txn_is_drain <= 1'b0;
+            m1_txn_is_amo   <= 1'b0;
             // Allow drain to proceed concurrently with flush — committed
             // stores must reach memory even during continuous trap/mret cycles.
             if (lsu_state == LSU_IDLE && use_mem_subsys &&
@@ -483,6 +542,7 @@ always @(posedge clk or negedge rstn) begin
                 m1_req_write_r  <= 1'b1;
                 m1_req_wdata_r  <= sb_mem_write_data_int;
                 m1_req_wen_r    <= sb_mem_write_wen_int;
+                lr_reservation_valid_r <= 1'b0;
             end else begin
                 lsu_state       <= LSU_IDLE;
             end
@@ -495,13 +555,16 @@ always @(posedge clk or negedge rstn) begin
                 if (use_mem_subsys &&
                     sb_mem_write_valid_int && sb_mem_write_ready_mux) begin
                     pending_valid       <= 1'b0;
+                    pending_amo         <= 1'b0;
                     m1_txn_is_drain     <= 1'b1;
+                    m1_txn_is_amo       <= 1'b0;
                     lsu_state           <= LSU_REQ;
                     m1_req_valid_r      <= 1'b1;
                     m1_req_addr_r       <= sb_mem_write_addr_int;
                     m1_req_write_r      <= 1'b1;
                     m1_req_wdata_r      <= sb_mem_write_data_int;
                     m1_req_wen_r        <= sb_mem_write_wen_int;
+                    lr_reservation_valid_r <= 1'b0;
                 end else if (req_valid && req_accept) begin
 `ifdef VERBOSE_SIM_LOGS
                     if (is_store && (req_addr == `DEBUG_BEACON_EVT_ADDR)) begin
@@ -526,12 +589,29 @@ always @(posedge clk or negedge rstn) begin
                     pending_fu            <= req_fu;
                     pending_mem2reg       <= req_mem2reg;
                     pending_wen           <= req_wen;
+                    pending_amo           <= req_amo;
+                    pending_amo_op        <= req_amo_op;
                     pending_addr          <= req_addr;
+                    pending_wdata         <= req_wdata;
                     pending_forward_valid <= is_load && sb_forward_valid;
                     pending_forward_data  <= sb_forward_data;
+                    pending_amo_resp_data <= 32'd0;
                     m1_txn_is_drain       <= 1'b0;
+                    m1_txn_is_amo         <= req_amo;
 
-                    if (use_mem_subsys && is_load && !sb_forward_valid) begin
+                    if (use_mem_subsys && is_amo) begin
+                        if (m1_req_ready) begin
+                            lsu_state      <= LSU_WAIT_RESP;
+                            m1_req_valid_r <= 1'b0;
+                        end else begin
+                            lsu_state      <= LSU_REQ;
+                            m1_req_valid_r <= 1'b1;
+                            m1_req_addr_r  <= req_addr;
+                            m1_req_write_r <= 1'b0;
+                            m1_req_wdata_r <= 32'd0;
+                            m1_req_wen_r   <= 4'b0000;
+                        end
+                    end else if (use_mem_subsys && is_load && !sb_forward_valid) begin
                         // The load request is already visible on M1 in this
                         // cycle. Only park it if M1 cannot accept it now.
                         if (m1_req_ready) begin
@@ -553,6 +633,8 @@ always @(posedge clk or negedge rstn) begin
                         // Store: complete speculatively as it enters the SB.
                         lsu_state     <= LSU_IDLE;
                         pending_valid <= 1'b0;
+                        pending_amo   <= 1'b0;
+                        lr_reservation_valid_r <= 1'b0;
                     end else begin
                         // Load with forwarding or legacy mode: single cycle
                         lsu_state     <= LSU_RESP;
@@ -574,13 +656,16 @@ always @(posedge clk or negedge rstn) begin
                     end
 `endif
                     pending_valid       <= 1'b0;
+                    pending_amo         <= 1'b0;
                     m1_txn_is_drain     <= 1'b1;
+                    m1_txn_is_amo       <= 1'b0;
                     lsu_state           <= LSU_REQ;
                     m1_req_valid_r      <= 1'b1;
                     m1_req_addr_r       <= sb_mem_write_addr_int;
                     m1_req_write_r      <= 1'b1;
                     m1_req_wdata_r      <= sb_mem_write_data_int;
                     m1_req_wen_r        <= sb_mem_write_wen_int;
+                    lr_reservation_valid_r <= 1'b0;
                 end
             end
 
@@ -638,9 +723,43 @@ always @(posedge clk or negedge rstn) begin
                     $display("[LSU RESP] drain=%0d addr=%h raw=%h shaped=%h",
                              m1_txn_is_drain, pending_addr, m1_resp_data, mem_data_shaped);
                     `endif
-                    if (m1_txn_is_drain) begin
+                    if (m1_txn_is_amo) begin
+                        raw_mem_rdata <= m1_resp_data;
+                        if (pending_amo_op == `AMO_LR) begin
+                            pending_amo_resp_data <= m1_resp_data;
+                            lr_reservation_valid_r <= 1'b1;
+                            lr_reservation_word_r  <= pending_addr[31:2];
+                            m1_txn_is_amo <= 1'b0;
+                            lsu_state <= LSU_RESP;
+                        end else if (pending_amo_op == `AMO_SC) begin
+                            lr_reservation_valid_r <= 1'b0;
+                            if (lr_reservation_match) begin
+                                pending_amo_resp_data <= 32'd0;
+                                lsu_state       <= LSU_AMO_WRITE_REQ;
+                                m1_req_valid_r  <= 1'b1;
+                                m1_req_addr_r   <= pending_addr;
+                                m1_req_write_r  <= 1'b1;
+                                m1_req_wdata_r  <= pending_wdata;
+                                m1_req_wen_r    <= 4'b1111;
+                            end else begin
+                                pending_amo_resp_data <= 32'd1;
+                                m1_txn_is_amo <= 1'b0;
+                                lsu_state <= LSU_RESP;
+                            end
+                        end else begin
+                            pending_amo_resp_data <= m1_resp_data;
+                            lr_reservation_valid_r <= 1'b0;
+                            lsu_state       <= LSU_AMO_WRITE_REQ;
+                            m1_req_valid_r  <= 1'b1;
+                            m1_req_addr_r   <= pending_addr;
+                            m1_req_write_r  <= 1'b1;
+                            m1_req_wdata_r  <= amo_next_value(pending_amo_op, m1_resp_data, pending_wdata);
+                            m1_req_wen_r    <= 4'b1111;
+                        end
+                    end else if (m1_txn_is_drain) begin
                         lsu_state       <= LSU_IDLE;
                         m1_txn_is_drain <= 1'b0;
+                        m1_txn_is_amo   <= 1'b0;
                     end else if (req_valid && req_accept && is_load && !sb_forward_valid) begin
                         // Complete the old load and launch/capture the next
                         // load in the same cycle.  resp_* below still observes
@@ -656,10 +775,15 @@ always @(posedge clk or negedge rstn) begin
                         pending_fu            <= req_fu;
                         pending_mem2reg       <= req_mem2reg;
                         pending_wen           <= req_wen;
+                        pending_amo           <= 1'b0;
+                        pending_amo_op        <= 5'd0;
                         pending_addr          <= req_addr;
+                        pending_wdata         <= req_wdata;
                         pending_forward_valid <= 1'b0;
                         pending_forward_data  <= 32'd0;
+                        pending_amo_resp_data <= 32'd0;
                         m1_txn_is_drain       <= 1'b0;
+                        m1_txn_is_amo         <= 1'b0;
                         if (m1_req_ready) begin
                             lsu_state      <= LSU_WAIT_RESP;
                             m1_req_valid_r <= 1'b0;
@@ -675,7 +799,9 @@ always @(posedge clk or negedge rstn) begin
                         raw_mem_rdata   <= m1_resp_data;
                         lsu_state       <= LSU_IDLE;
                         pending_valid   <= 1'b0;
+                        pending_amo     <= 1'b0;
                         m1_txn_is_drain <= 1'b0;
+                        m1_txn_is_amo   <= 1'b0;
                         if (m1_resp_l1d_hit) begin
                             m1_cooldown_r <= 1'b0;
                             debug_lsu_cooldown_skipped_l1hit <= 1'b1;
@@ -686,15 +812,41 @@ always @(posedge clk or negedge rstn) begin
                     end
                 end else if (lsu_wait_watchdog_r == LSU_WAIT_WATCHDOG_MAX) begin
                     lsu_wait_watchdog_r <= 20'd0;
-                    if (m1_txn_is_drain) begin
+                    if (m1_txn_is_amo) begin
+                        pending_amo_resp_data <= 32'hffff_ffff;
+                        m1_txn_is_amo <= 1'b0;
+                        lsu_state <= LSU_RESP;
+                    end else if (m1_txn_is_drain) begin
                         lsu_state       <= LSU_IDLE;
                         m1_txn_is_drain <= 1'b0;
+                        m1_txn_is_amo   <= 1'b0;
                     end else begin
                         raw_mem_rdata   <= 32'd0;
                         lsu_state       <= LSU_RESP;
                         m1_txn_is_drain <= 1'b0;
+                        m1_txn_is_amo   <= 1'b0;
                         m1_cooldown_r   <= 1'b0;
                     end
+                end else begin
+                    lsu_wait_watchdog_r <= lsu_wait_watchdog_r + 20'd1;
+                end
+            end
+
+            LSU_AMO_WRITE_REQ: begin
+                if (m1_req_ready) begin
+                    m1_req_valid_r <= 1'b0;
+                    lsu_state <= LSU_AMO_WRITE_RESP;
+                end
+            end
+
+            LSU_AMO_WRITE_RESP: begin
+                if (m1_resp_valid) begin
+                    m1_txn_is_amo <= 1'b0;
+                    lsu_state <= LSU_RESP;
+                end else if (lsu_wait_watchdog_r == LSU_WAIT_WATCHDOG_MAX) begin
+                    m1_txn_is_amo <= 1'b0;
+                    lsu_wait_watchdog_r <= 20'd0;
+                    lsu_state <= LSU_RESP;
                 end else begin
                     lsu_wait_watchdog_r <= lsu_wait_watchdog_r + 20'd1;
                 end
@@ -713,11 +865,14 @@ always @(posedge clk or negedge rstn) begin
                 // Response ready, will be consumed by writeback
                 lsu_state       <= LSU_IDLE;
                 pending_valid   <= 1'b0;
+                pending_amo     <= 1'b0;
                 m1_txn_is_drain <= 1'b0;
+                m1_txn_is_amo   <= 1'b0;
             end
 
             default: begin
                 lsu_state <= LSU_IDLE;
+                m1_txn_is_amo <= 1'b0;
             end
         endcase
         end
@@ -849,7 +1004,17 @@ always @(posedge clk or negedge rstn) begin
             resp_rdata        <= 32'd0;
         end else if (((lsu_state == LSU_RESP) || mem_subsys_load_resp_fire) &&
                      !pending_flush_kill) begin
-            if (!pending_wen) begin
+            if (pending_amo) begin
+                resp_valid        <= 1'b1;
+                resp_order_id     <= pending_order_id;
+                resp_epoch        <= pending_epoch;
+                resp_tag          <= pending_tag;
+                resp_rd           <= pending_rd;
+                resp_func3        <= pending_func3;
+                resp_regs_write   <= pending_regs_write;
+                resp_fu           <= pending_fu;
+                resp_rdata        <= pending_amo_resp_data;
+            end else if (!pending_wen) begin
                 // Load response
                 resp_valid        <= 1'b1;
                 // resp_tid removed (single-thread)

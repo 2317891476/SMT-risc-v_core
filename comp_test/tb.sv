@@ -192,6 +192,9 @@ initial begin : uart16550_stimulus
     end else if (TB_SELECTED_TEST_ID == 34) begin
         #20000;
         tb_uart_send_byte(8'h3C);
+    end else if (TB_SELECTED_TEST_ID == 37) begin
+        #20000;
+        tb_uart_send_byte(8'h5A);
     end
 end
 

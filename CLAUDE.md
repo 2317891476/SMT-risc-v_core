@@ -10,7 +10,7 @@ Out-of-order dual-issue RV32I/M processor with 2-thread SMT, targeting Xilinx 7-
 IF -> FetchBuffer -> DualDecode -> Dispatch(Rename+IQ) -> ReadOperand -> Execute -> Memory -> WriteBack
 ```
 
-The current project focus is single-thread FPGA board validation and Dhrystone reproducibility after removing SMT behavior from the active debug baseline. Basic Icarus regressions are passing, the 16550A-compatible UART subset and PLIC source 2 are implemented, and the current blocker is producing and validating a fresh AX7203 bitstream with the latest RTL fixes. Do not restore SMT as a shortcut.
+The current project focus is single-thread FPGA board validation, Dhrystone reproducibility, and staged MMU Linux bring-up after removing SMT behavior from the active debug baseline. Basic Icarus regressions are passing, the 16550A-compatible UART subset and PLIC source 2 are implemented, Linux prerequisite work has started under `software/linux/`, and Sv32/MMU integration is the next Linux blocker. Do not restore SMT as a shortcut.
 
 ## R1 Wiki Synchronization Rule
 
@@ -62,6 +62,31 @@ The current short-term target is Dhrystone. This loop overrides generic FPGA bri
 4. `--fpga-impl-mode incremental` must fail closed; do not automatically fall back to aggressive implementation.
 5. If incremental implementation fails twice in a row, stop retrying Vivado and return to the Verilator boundary matrix in `wiki/concepts/simulation.md`.
 6. Bitstream download to AX7203 must use Vivado JTAG, normally through `fpga/program_ax7203_jtag.tcl` or a board script that calls it.
+
+## Linux Bring-up Flow
+
+The Linux target is MMU Linux: `RV32IMA_Zicsr_Zifencei`, S-mode, Sv32, OpenSBI, Linux, and BusyBox initramfs. Do not treat NoMMU Linux or bare-metal Dhrystone as Linux support evidence.
+
+Required Linux sequence:
+
+1. Keep the existing Dhrystone board-equivalent Verilator gates green after Linux-related RTL edits.
+2. Run directed prerequisite tests:
+   ```powershell
+   python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+   python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
+   ```
+3. Build Linux staging artifacts only through WSL:
+   ```bash
+   bash software/linux/scripts/build_linux_payload.sh
+   ```
+4. First boot evidence must be Verilator `linux-preload`:
+   ```powershell
+   python fpga\scripts\run_verilator_mainline.py --mode linux-preload --linux-payload build\linux\fw_payload.bin --dcache-mode read-only --mock-latency 1 --require-board-config-match
+   ```
+   Required UART tokens are `OpenSBI`, `Boot HART ID: 0`, `Linux version`, `Run /init as init process`, and `SIFANGCORE LINUX PASS`.
+5. AX7203 Linux board validation comes only after `linux-preload` passes, using Vivado 2023.2 JTAG and COM5 UART.
+
+Current blockers: I/D Sv32 translation is not wired into fetch/LSU, PTW has no memory-system port, precise page faults are not fully plumbed, and PTE A/D update behavior is not integrated.
 
 ## Current Repository State
 

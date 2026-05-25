@@ -83,6 +83,10 @@ BASIC_TEST_IDS = {
     "test_mmio_load_store_order": 32,
     "test_uart16550_polling": 33,
     "test_uart16550_plic_irq": 34,
+    "test_priv_mret_sret_delegation": 35,
+    "test_amo_lrsc": 36,
+    "test_plic_s_context_uart_irq": 37,
+    "test_sbi_timer_injection": 38,
 }
 
 
@@ -304,6 +308,10 @@ class TestRunner:
                 "test_mmio_load_store_order.s",
                 "test_uart16550_polling.s",
                 "test_uart16550_plic_irq.s",
+                "test_priv_mret_sret_delegation.s",
+                "test_amo_lrsc.s",
+                "test_plic_s_context_uart_irq.s",
+                "test_sbi_timer_injection.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",
@@ -353,7 +361,7 @@ class TestRunner:
             
             # Build ROM
             # Use rv32i_zicsr for CSR tests to support csrr/csrw/mret instructions
-            march_flag = "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
+            march_flag = "rv32ia_zicsr" if "amo" in test_name or "lrsc" in test_name else "rv32i_zicsr" if "csr" in test_name or "mret" in test_name or "system" in test_name or "interrupt" in test_name or "clint" in test_name or "plic" in test_name or "timer" in test_name or "sbi" in test_name else "rv32im" if "div" in test_name or "mul" in test_name else "rv32i"
             ret, out, err = self.build_basic_rom(test, test_name, march_flag)
             if ret != 0:
                 self.results.append((test_name, "BUILD_FAIL", err))

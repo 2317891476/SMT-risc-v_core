@@ -57,6 +57,12 @@ struct Summary {
     bool benchmark_done_seen = false;
     bool preload_benchmark_pass = false;
     bool loader_semantic_pass = false;
+    bool linux_opensbi_seen = false;
+    bool linux_boot_hart_seen = false;
+    bool linux_kernel_seen = false;
+    bool linux_init_seen = false;
+    bool linux_pass_seen = false;
+    bool linux_preload_pass = false;
     bool loader_prefix_pass = false;
     uint32_t loader_blocks_acked = 0;
     bool trap_seen = false;
@@ -468,6 +474,12 @@ void write_summary_json(const Summary& summary, const std::string& path) {
     ofs << "  \"BenchmarkDoneSeen\": " << (summary.benchmark_done_seen ? "true" : "false") << ",\n";
     ofs << "  \"PreloadBenchmarkPass\": " << (summary.preload_benchmark_pass ? "true" : "false") << ",\n";
     ofs << "  \"LoaderSemanticPass\": " << (summary.loader_semantic_pass ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxOpenSBISeen\": " << (summary.linux_opensbi_seen ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxBootHartSeen\": " << (summary.linux_boot_hart_seen ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxKernelSeen\": " << (summary.linux_kernel_seen ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxInitSeen\": " << (summary.linux_init_seen ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxPassSeen\": " << (summary.linux_pass_seen ? "true" : "false") << ",\n";
+    ofs << "  \"LinuxPreloadPass\": " << (summary.linux_preload_pass ? "true" : "false") << ",\n";
     ofs << "  \"LoaderPrefixPass\": " << (summary.loader_prefix_pass ? "true" : "false") << ",\n";
     ofs << "  \"LoaderBlocksAcked\": " << summary.loader_blocks_acked << ",\n";
     ofs << "  \"TrapSeen\": " << (summary.trap_seen ? "true" : "false") << ",\n";
@@ -1365,8 +1377,10 @@ int main(int argc, char** argv) {
             const uint8_t byte = static_cast<uint8_t>(top->debug_uart_tx_byte);
             static const std::string kExpectedUartPrefix = "0\n1\n2\nDH\nDHRYSTONE START\r\n";
             const bool loader_protocol_byte = loader_host && !loader_host->done();
+            const bool dhrystone_uart_check = cfg.mode != "linux-preload";
             const uint32_t uart_index = benchmark_uart_seen_count;
-            if (!loader_protocol_byte &&
+            if (dhrystone_uart_check &&
+                !loader_protocol_byte &&
                 !summary.unexpected_uart_seen &&
                 uart_index < kExpectedUartPrefix.size() &&
                 byte != static_cast<uint8_t>(kExpectedUartPrefix[uart_index])) {
@@ -1704,6 +1718,22 @@ int main(int argc, char** argv) {
         if (!summary.benchmark_done_seen && uart_ascii.find("DHRYSTONE DONE") != std::string::npos) {
             summary.benchmark_done_seen = true;
         }
+        if (!summary.linux_opensbi_seen && uart_ascii.find("OpenSBI") != std::string::npos) {
+            summary.linux_opensbi_seen = true;
+        }
+        if (!summary.linux_boot_hart_seen && uart_ascii.find("Boot HART ID: 0") != std::string::npos) {
+            summary.linux_boot_hart_seen = true;
+        }
+        if (!summary.linux_kernel_seen && uart_ascii.find("Linux version") != std::string::npos) {
+            summary.linux_kernel_seen = true;
+        }
+        if (!summary.linux_init_seen &&
+            uart_ascii.find("Run /init as init process") != std::string::npos) {
+            summary.linux_init_seen = true;
+        }
+        if (!summary.linux_pass_seen && uart_ascii.find("SIFANGCORE LINUX PASS") != std::string::npos) {
+            summary.linux_pass_seen = true;
+        }
         if (!summary.trap_seen && top->debug_trap_seen) {
             summary.trap_seen = true;
             summary.trap_cause = top->debug_trap_cause;
@@ -2038,6 +2068,10 @@ int main(int argc, char** argv) {
             summary.exit_reason = "done";
             break;
         }
+        if (cfg.mode == "linux-preload" && summary.linux_pass_seen) {
+            summary.exit_reason = "done";
+            break;
+        }
         if (loader_host && cfg.loader_prefix_blocks != 0 &&
             loader_host->blocks_acked() >= cfg.loader_prefix_blocks) {
             summary.loader_prefix_pass = true;
@@ -2119,6 +2153,17 @@ int main(int argc, char** argv) {
         !summary.trap_seen &&
         !summary.unexpected_uart_seen &&
         summary.spec_mmio_load_violation_count == 0;
+    summary.linux_preload_pass =
+        summary.mode == "linux-preload" &&
+        summary.exit_reason == "done" &&
+        summary.entry_reached &&
+        summary.linux_opensbi_seen &&
+        summary.linux_boot_hart_seen &&
+        summary.linux_kernel_seen &&
+        summary.linux_init_seen &&
+        summary.linux_pass_seen &&
+        !summary.trap_seen &&
+        summary.spec_mmio_load_violation_count == 0;
 
 #if VM_TRACE
     if (trace_open) {
@@ -2133,6 +2178,9 @@ int main(int argc, char** argv) {
 
     if (summary.mode == "preload") {
         return summary.preload_benchmark_pass ? 0 : 1;
+    }
+    if (summary.mode == "linux-preload") {
+        return summary.linux_preload_pass ? 0 : 1;
     }
     if (summary.exit_reason == "done") {
         return 0;

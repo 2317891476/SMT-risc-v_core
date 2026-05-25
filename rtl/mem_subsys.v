@@ -60,6 +60,7 @@ module mem_subsys (
     input  wire        ext_irq_src,       // Raw PLIC source input (optional TB/device drive)
     output wire        ext_timer_irq,     // CLINT timer interrupt pending (MTIP)
     output wire        ext_external_irq,  // PLIC external interrupt pending (MEIP)
+    output wire        ext_supervisor_external_irq, // PLIC supervisor external pending (SEIP)
 
     // ═══════════════════════════════════════════════════════════════════════════
     // UART physical interface
@@ -170,7 +171,7 @@ wire addr_is_uart_m1    = addr_is_uart_tx_m1 || addr_is_uart_status_m1
                         || addr_is_uart_rx_m1 || addr_is_uart_ctrl_m1
                         || addr_is_debug_beacon_evt_m1 || addr_is_uart16550_m1;
 wire addr_is_clint_m1   = (m1_req_addr >= `CLINT_BASE) && (m1_req_addr <= `CLINT_MTIME_HI);
-wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_CLAIM_COMPLETE);
+wire addr_is_plic_m1    = (m1_req_addr >= `PLIC_BASE) && (m1_req_addr <= `PLIC_S_CLAIM_COMPLETE);
 wire addr_is_uncached_m1 = addr_is_mmio_0x13_m1 || addr_is_clint_m1 || addr_is_plic_m1;
 
 // DDR3 region: address bit 31 set (0x8000_0000 - 0xFFFF_FFFF)
@@ -462,6 +463,7 @@ wire [31:0] plic_resp_rdata;
 wire        plic_resp_valid;
 wire [31:0] plic_read_data;
 wire        plic_ext_irq;
+wire        plic_s_ext_irq;
 wire        uart16550_irq_w;
 
 plic u_plic (
@@ -476,11 +478,13 @@ plic u_plic (
     .read_data   (plic_read_data),
     .ext_irq_src (ext_irq_src),
     .uart_irq_src(uart16550_irq_w),
-    .external_irq(plic_ext_irq)
+    .external_irq(plic_ext_irq),
+    .supervisor_external_irq(plic_s_ext_irq)
 );
 
 assign ext_timer_irq    = clint_timer_irq;
 assign ext_external_irq = plic_ext_irq;
+assign ext_supervisor_external_irq = plic_s_ext_irq;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // UART MMIO (TXDATA/STATUS/RXDATA/CTRL) – same register map as legacy_mem_subsys

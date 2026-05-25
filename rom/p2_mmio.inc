@@ -58,14 +58,17 @@
 .equ CLINT_MTIME_LO,      0x0200BFF8
 .equ CLINT_MTIME_HI,      0x0200BFFC
 
-# PLIC (Platform Level Interrupt Controller) - Single source, single context
+# PLIC (Platform Level Interrupt Controller) - two sources, M/S contexts
 .equ PLIC_BASE,           0x0C000000
 .equ PLIC_PRIORITY1,      0x0C000004
 .equ PLIC_PRIORITY2,      0x0C000008
 .equ PLIC_PENDING,        0x0C001000
 .equ PLIC_ENABLE,         0x0C002000
+.equ PLIC_S_ENABLE,       0x0C002080
 .equ PLIC_THRESHOLD,      0x0C200000
 .equ PLIC_CLAIM_COMPLETE, 0x0C200004
+.equ PLIC_S_THRESHOLD,    0x0C201000
+.equ PLIC_S_CLAIM_COMPLETE, 0x0C201004
 
 # DDR3 SDRAM (external, active when ENABLE_DDR3)
 .equ DDR3_BASE,           0x80000000

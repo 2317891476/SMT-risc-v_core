@@ -78,9 +78,15 @@ module decoder_dual (
     // ─── CSR/SYSTEM outputs ─────────────────────────────────────
     output wire        dec0_is_csr,
     output wire        dec0_is_mret,
+    output wire        dec0_is_sret,
+    output wire        dec0_is_ecall,
+    output wire        dec0_is_ebreak,
     output wire [11:0] dec0_csr_addr,
     output wire        dec1_is_csr,
     output wire        dec1_is_mret,
+    output wire        dec1_is_sret,
+    output wire        dec1_is_ecall,
+    output wire        dec1_is_ebreak,
     output wire [11:0] dec1_csr_addr,
 
     // ─── RoCC outputs ────────────────────────────────────────────
@@ -139,6 +145,9 @@ wire        d0_is_system, d1_is_system;
 wire        d0_is_misc_mem, d1_is_misc_mem;
 wire        d0_is_csr, d1_is_csr;
 wire        d0_is_mret, d1_is_mret;
+wire        d0_is_sret, d1_is_sret;
+wire        d0_is_ecall, d1_is_ecall;
+wire        d0_is_ebreak, d1_is_ebreak;
 wire [11:0] d0_csr_addr, d1_csr_addr;
 
 // ─── Internal RoCC signals ──────────────────────────────────────────────────
@@ -172,6 +181,9 @@ stage_is u_dec0 (
     .is_system       (d0_is_system    ),
     .is_csr          (d0_is_csr       ),
     .is_mret         (d0_is_mret      ),
+    .is_sret         (d0_is_sret      ),
+    .is_ecall        (d0_is_ecall     ),
+    .is_ebreak       (d0_is_ebreak    ),
     .csr_addr        (d0_csr_addr     ),
     .is_rocc         (d0_is_rocc      ),
     .rocc_funct7     (d0_rocc_funct7  )
@@ -204,6 +216,9 @@ stage_is u_dec1 (
     .is_system       (d1_is_system    ),
     .is_csr          (d1_is_csr       ),
     .is_mret         (d1_is_mret      ),
+    .is_sret         (d1_is_sret      ),
+    .is_ecall        (d1_is_ecall     ),
+    .is_ebreak       (d1_is_ebreak    ),
     .csr_addr        (d1_csr_addr     ),
     .is_rocc         (d1_is_rocc      ),
     .rocc_funct7     (d1_rocc_funct7  )
@@ -303,9 +318,15 @@ assign consume_1 = dec1_valid_int && !stall && !disp1_blocked;
 // ─── CSR/SYSTEM outputs ─────────────────────────────────────────────────────
 assign dec0_is_csr    = d0_is_csr;
 assign dec0_is_mret   = d0_is_mret;
+assign dec0_is_sret   = d0_is_sret;
+assign dec0_is_ecall  = d0_is_ecall;
+assign dec0_is_ebreak = d0_is_ebreak;
 assign dec0_csr_addr  = d0_csr_addr;
 assign dec1_is_csr    = d1_is_csr;
 assign dec1_is_mret   = d1_is_mret;
+assign dec1_is_sret   = d1_is_sret;
+assign dec1_is_ecall  = d1_is_ecall;
+assign dec1_is_ebreak = d1_is_ebreak;
 assign dec1_csr_addr  = d1_csr_addr;
 
 // ─── RoCC outputs ───────────────────────────────────────────────────────────
