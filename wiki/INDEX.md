@@ -24,9 +24,9 @@ Status as of 2026-05-25 +08:00:
 
 - Linux bring-up has started. Implemented and tested prerequisites: S-mode CSR/trap/delegation, SRET/MRET privilege transitions, RV32A AMO/LRSC, PLIC UART source 2 through S-context, and OpenSBI-style STIP injection into S-mode timer interrupt.
 - New Linux staging files live under `software/linux/`: AX7203 DTB, minimal initramfs `/init`, and a WSL build script that currently emits DTB/initramfs staging artifacts and intentionally gates full `fw_payload.bin` generation until OpenSBI/Linux/BusyBox source/configs are ready.
-- Current Linux blockers: `mmu_sv32` is still not wired into I-side fetch or D-side LSU paths, PTW does not yet have an integrated memory-system port, precise fetch/load/store page faults are not fully plumbed to CSR, and PTE A/D update behavior is not integrated.
-- Verification on 2026-05-25: `--basic` and `--basic --fpga-config` both pass 41/41; `rv32ua` riscv-tests pass 10/10; `python verification\run_all_tests.py --riscv-tests` passes with RV32I/M/A categories.
-- Board-equivalent WSL Verilator Dhrystone preload after the Linux prerequisite changes passes with `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap, no stuck PC, and no unexpected UART. Loader-semantic 5000-run board-equivalent Dhrystone also passed earlier in the same debug session before the linux-preload harness extension; rerun it after the next RTL change before Vivado.
+- Current Linux blockers: `mmu_sv32` is now standalone-tested and instantiated as a top-level scaffold, but I-side fetch and D-side LSU still use the existing physical-address paths, the PTW port is not yet arbitrated through `mem_subsys`, and precise fetch/load/store page faults are not fully carried into CSR at ROB commit.
+- Verification on 2026-05-25: `test_sv32_translation`, `test_sv32_page_faults`, and `test_sfence_vma` pass under `--fpga-config`; `--basic` and `--basic --fpga-config` both pass 41/41 after the MMU scaffold; `rv32ua` riscv-tests pass 10/10; `python verification\run_all_tests.py --riscv-tests` passes with RV32I/M/A categories.
+- Board-equivalent WSL Verilator Dhrystone after the MMU standalone/scaffold change passes in both 5000-run modes: preload has `BoardConfigMatch=True`, `PreloadBenchmarkPass=True`, no trap/stuck/unexpected UART; loader-semantic has `BoardConfigMatch=True`, `LoaderSemanticPass=True`, 128 block ACKs, `DHRYSTONE DONE`, no trap/stuck/unexpected UART.
 - The repository is being fully renamed to SifangCore. RTL, FPGA top modules, RISCOF plugin names, Tcl/Python default stems, documentation, and UART boot banners now use `sifang_core` / `SifangCore`.
 - SMT removal/single-thread RTL debugging is past the basic simulation bring-up stage.
 - Basic Icarus regressions and FPGA-config directed tests have passed in the current debug line, including UART16550/PLIC source 2 and long store-buffer tests.
@@ -46,6 +46,7 @@ Status as of 2026-05-25 +08:00:
 python verification\run_all_tests.py --basic
 python verification\run_all_tests.py --basic --fpga-config
 python verification\run_all_tests.py --tests test_priv_mret_sret_delegation test_amo_lrsc test_plic_s_context_uart_irq test_sbi_timer_injection --fpga-config
+python verification\run_all_tests.py --tests test_sv32_translation test_sv32_page_faults test_sfence_vma --fpga-config -v
 python verification\run_riscv_tests.py --suite riscv-tests --categories rv32ua
 python fpga\scripts\run_verilator_mainline.py --mode preload --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --max-cycles 600000000 --require-board-config-match
 python fpga\scripts\run_verilator_mainline.py --mode loader-semantic --benchmark dhrystone --runs 5000 --dcache-mode read-only --mock-latency 1 --loader-rom-profile board --benchmark-runtime-profile board --payload-start-gap-cycles 2500 --payload-gap-cycles 2500 --payload-chunk-gap-cycles 40000 --max-cycles 2000000000 --require-board-config-match
@@ -89,6 +90,7 @@ python fpga\scripts\run_fpga_benchmark_ddr3.py --benchmark dhrystone --port COM5
 
 ## Timeline
 
+- 2026-05-25: `mmu_sv32` was rewritten around a simple physical PTW port, hardware A/D update, U/S/SUM/MXR permission checks, page-fault metadata, and full-flush `sfence.vma`; module-level Sv32 tests pass and the MMU is instantiated in the core as a bare-mode scaffold.
 - 2026-05-25: Linux MMU bring-up started: S-mode CSR/trap, RV32A, PLIC S-context UART IRQ, and SBI timer-injection directed tests pass; Linux DTB/initramfs staging flow and Verilator `linux-preload` entry were added. Full Linux boot remains blocked on Sv32/MMU/PTW/page-fault integration.
 - 2026-05-24: WSL Verilator became available after Ubuntu-22.04 was started externally; preload and full loader-semantic Dhrystone now pass with board ROM profile and board-safe host pacing.
 - 2026-05-24: Verilator board-config checking was tightened to include loader ROM profile `board` and loader-semantic host pacing; `SIM_FAST_STORE_DRAIN`/`sim-fast` or fast-pacing loader runs are not board-equivalent evidence, and config mismatch summaries are written before WSL tool probing.

@@ -29,11 +29,12 @@ Implemented foundation:
 - `misa` reports `RV32IMA`, and RV32A AMO/LRSC operations are implemented through the LSU/memory path.
 - PLIC is now two-source and two-context. Source 1 remains the existing external interrupt, source 2 is UART16550, and M/S contexts have separate enable/threshold/claim-complete state.
 - OpenSBI-style supervisor timer injection is supported by writable `mip/sip` supervisor interrupt bits and S-mode delegated timer delivery.
+- `mmu_sv32` now has a simple physical PTW request/response port, 4KB and 4MB Sv32 walking, U/S/SUM/MXR permission checks, hardware A/D PTE writeback, page-fault cause/tval outputs, and full-flush `sfence.vma` coverage in module-level tests.
+- The top core now exposes `satp`, `priv_mode`, `mstatus.MXR`, and `mstatus.SUM` from `csr_unit` and instantiates the MMU as a scaffold while keeping I/D traffic on the existing physical path.
 
 Known architecture gaps before Linux can boot:
 
-- `mmu_sv32` exists but is not wired into I-cache refill/fetch or LSU/store-buffer requests.
-- PTW still needs an integrated physical memory port into `mem_subsys` and correct arbitration with DDR3/cache traffic.
+- The MMU scaffold is not yet wired into I-cache refill/fetch or LSU/store-buffer requests.
+- The PTW simple physical port still needs an integrated endpoint in `mem_subsys` with correct arbitration against DDR3/cache traffic.
 - Precise instruction/load/store page-fault causes and `tval` must be carried into CSR at the right ROB point.
-- PTE A/D bit update or a Linux-compatible fault path still needs implementation.
 - The current S-mode work is single hart only; SMP, FPU, compressed instructions, and device storage are intentionally out of scope for the first Linux pass.

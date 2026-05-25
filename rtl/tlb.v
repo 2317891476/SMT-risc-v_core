@@ -59,6 +59,9 @@ reg [IDX_W-1:0]      replace_ptr;
 reg                  hit_found;
 reg [IDX_W-1:0]      hit_idx;
 integer              i;
+reg                  refill_match_found;
+reg [IDX_W-1:0]      refill_match_idx;
+integer              refill_i;
 
 always @(*) begin
     hit_found = 1'b0;
@@ -88,6 +91,28 @@ assign lookup_hit     = hit_found && lookup_valid;
 assign lookup_ppn     = hit_found ? entry_ppn[hit_idx]     : {PPN_W{1'b0}};
 assign lookup_is_mega = hit_found ? entry_is_mega[hit_idx] : 1'b0;
 assign lookup_perm    = hit_found ? entry_perm[hit_idx]    : 8'd0;
+
+always @(*) begin
+    refill_match_found = 1'b0;
+    refill_match_idx   = {IDX_W{1'b0}};
+    for (refill_i = 0; refill_i < ENTRIES; refill_i = refill_i + 1) begin
+        if (!refill_match_found && entry_valid[refill_i]) begin
+            if ((entry_asid[refill_i] == refill_asid || entry_perm[refill_i][5] || refill_perm[5]) &&
+                (entry_is_mega[refill_i] == refill_is_mega)) begin
+                if (refill_is_mega) begin
+                    if (entry_vpn[refill_i][VPN_W-1:10] == refill_vpn[VPN_W-1:10]) begin
+                        refill_match_found = 1'b1;
+                        refill_match_idx   = refill_i[IDX_W-1:0];
+                    end
+                end
+                else if (entry_vpn[refill_i] == refill_vpn) begin
+                    refill_match_found = 1'b1;
+                    refill_match_idx   = refill_i[IDX_W-1:0];
+                end
+            end
+        end
+    end
+end
 
 // ─── Refill & Invalidation (sequential) ─────────────────────────────────────
 always @(posedge clk or negedge rstn) begin
@@ -130,13 +155,14 @@ always @(posedge clk or negedge rstn) begin
 
         // ── Refill ──────────────────────────────────────────────
         if (refill_valid) begin
-            entry_valid[replace_ptr]   <= 1'b1;
-            entry_asid[replace_ptr]    <= refill_asid;
-            entry_vpn[replace_ptr]     <= refill_vpn;
-            entry_ppn[replace_ptr]     <= refill_ppn;
-            entry_is_mega[replace_ptr] <= refill_is_mega;
-            entry_perm[replace_ptr]    <= refill_perm;
-            replace_ptr                <= replace_ptr + 1;
+            entry_valid[refill_match_found ? refill_match_idx : replace_ptr]   <= 1'b1;
+            entry_asid[refill_match_found ? refill_match_idx : replace_ptr]    <= refill_asid;
+            entry_vpn[refill_match_found ? refill_match_idx : replace_ptr]     <= refill_vpn;
+            entry_ppn[refill_match_found ? refill_match_idx : replace_ptr]     <= refill_ppn;
+            entry_is_mega[refill_match_found ? refill_match_idx : replace_ptr] <= refill_is_mega;
+            entry_perm[refill_match_found ? refill_match_idx : replace_ptr]    <= refill_perm;
+            if (!refill_match_found)
+                replace_ptr <= replace_ptr + 1;
         end
     end
 end

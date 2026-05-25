@@ -89,6 +89,12 @@ BASIC_TEST_IDS = {
     "test_sbi_timer_injection": 38,
 }
 
+MODULE_TESTS = {
+    "test_sv32_translation": "tb_mmu_sv32.sv",
+    "test_sv32_page_faults": "tb_mmu_sv32.sv",
+    "test_sfence_vma": "tb_mmu_sv32.sv",
+}
+
 
 class TestRunner:
     def __init__(self, verbose=False, enable_rocc=False, fpga_config=False):
@@ -221,6 +227,30 @@ class TestRunner:
         ]
         return self.run_command(compile_cmd, cwd=COMP_TEST_DIR)
 
+    def compile_module_testbench(self, test_name):
+        """Compile a focused RTL module-level testbench."""
+        out_dir = COMP_TEST_DIR / "out_iverilog" / "bin"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / f"tb_{test_name}.out"
+        if out_path.exists():
+            out_path.unlink()
+
+        tb_file = MODULE_TESTS[test_name]
+        compile_cmd = [
+            "iverilog",
+            "-g2012",
+            "-s",
+            "tb_mmu_sv32",
+            "-o",
+            str(out_path),
+            "-I",
+            str(PROJECT_ROOT / "rtl"),
+            str(PROJECT_ROOT / "rtl" / "tlb.v"),
+            str(PROJECT_ROOT / "rtl" / "mmu_sv32.v"),
+            str(COMP_TEST_DIR / tb_file),
+        ]
+        return self.run_command(compile_cmd, cwd=COMP_TEST_DIR)
+
     def evaluate_basic_result(self, out, err, ret):
         """Interpret simulation output using the explicit TB pass/fail banners."""
         pass_banner = "========= Test PASS !!!"
@@ -349,6 +379,21 @@ class TestRunner:
         
         for test in tests:
             test_name = Path(test).stem
+            if test_name in MODULE_TESTS:
+                self.log(f"Testing {test_name}...")
+                ret, out, err = self.compile_module_testbench(test_name)
+                if ret != 0:
+                    self.results.append((test_name, "COMPILE_FAIL", err))
+                    self.log(f"{test_name}: COMPILE_FAIL - {err[:100] if err else 'Unknown error'}", "ERROR")
+                    continue
+
+                run_cmd = ["vvp", str(COMP_TEST_DIR / "out_iverilog" / "bin" / f"tb_{test_name}.out")]
+                ret, out, err = self.run_command(run_cmd, cwd=COMP_TEST_DIR, timeout=60)
+                result, detail = self.evaluate_basic_result(out, err, ret)
+                self.results.append((test_name, result, detail))
+                self.log(f"{test_name}: {result}", "INFO" if result == "PASS" else "ERROR")
+                continue
+
             if "rocc" in test_name and not self.enable_rocc:
                 self.results.append((test_name, "SKIP", "RoCC disabled (use --enable-rocc to include accelerator tests)"))
                 self.log(f"{test_name}: SKIP - RoCC disabled")

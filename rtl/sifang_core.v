@@ -386,6 +386,9 @@ wire [31:0] mepc_out;
 wire [31:0] sepc_out;
 wire        global_int_en;
 wire [1:0]  csr_priv_mode;
+wire [31:0] csr_satp;
+wire        csr_mstatus_mxr;
+wire        csr_mstatus_sum;
 
 assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
@@ -4238,10 +4241,10 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .trap_return_target(trap_return_target),
     .mepc_out        (mepc_out          ),
     .sepc_out        (sepc_out          ),
-    .satp_out        (                  ),
+    .satp_out        (csr_satp          ),
     .priv_mode_out   (csr_priv_mode     ),
-    .mstatus_mxr     (                  ),
-    .mstatus_sum     (                  ),
+    .mstatus_mxr     (csr_mstatus_mxr   ),
+    .mstatus_sum     (csr_mstatus_sum   ),
     .global_int_en   (global_int_en     ),
     .instr_retired   (rob_instr_retired[0]),
     .instr_retired_1 (rob_instr_retired[1]),
@@ -4255,6 +4258,65 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .ext_timer_irq   (csr_ext_timer_irq),
     .ext_external_irq(csr_ext_external_irq),
     .ext_supervisor_external_irq(csr_ext_supervisor_external_irq)
+);
+
+// Sv32 MMU scaffold. This stage keeps fetch/LSU on the existing physical
+// address paths while making CSR state and the PTW interface visible in top
+// simulation/synthesis. I/D translation is connected after standalone MMU
+// behavior is stable.
+wire        mmu_itlb_resp_hit_unused;
+wire [31:0] mmu_itlb_resp_paddr_unused;
+wire        mmu_itlb_resp_fault_unused;
+wire [4:0]  mmu_itlb_resp_cause_unused;
+wire [31:0] mmu_itlb_resp_tval_unused;
+wire        mmu_itlb_busy_unused;
+wire        mmu_dtlb_resp_hit_unused;
+wire [31:0] mmu_dtlb_resp_paddr_unused;
+wire        mmu_dtlb_resp_fault_unused;
+wire [4:0]  mmu_dtlb_resp_cause_unused;
+wire [31:0] mmu_dtlb_resp_tval_unused;
+wire        mmu_dtlb_busy_unused;
+wire        mmu_ptw_req_valid_unused;
+wire        mmu_ptw_req_write_unused;
+wire [31:0] mmu_ptw_req_addr_unused;
+wire [31:0] mmu_ptw_req_wdata_unused;
+wire [3:0]  mmu_ptw_req_wen_unused;
+
+mmu_sv32 u_mmu_sv32 (
+    .clk             (clk),
+    .rstn            (rstn),
+    .satp            (csr_satp),
+    .priv_mode       (csr_priv_mode),
+    .mstatus_mxr     (csr_mstatus_mxr),
+    .mstatus_sum     (csr_mstatus_sum),
+    .sfence_valid    (1'b0),
+    .sfence_vaddr    (32'd0),
+    .sfence_asid     (9'd0),
+    .itlb_req_valid  (1'b0),
+    .itlb_req_vaddr  (32'd0),
+    .itlb_resp_hit   (mmu_itlb_resp_hit_unused),
+    .itlb_resp_paddr (mmu_itlb_resp_paddr_unused),
+    .itlb_resp_fault (mmu_itlb_resp_fault_unused),
+    .itlb_resp_cause (mmu_itlb_resp_cause_unused),
+    .itlb_resp_tval  (mmu_itlb_resp_tval_unused),
+    .itlb_busy       (mmu_itlb_busy_unused),
+    .dtlb_req_valid  (1'b0),
+    .dtlb_req_vaddr  (32'd0),
+    .dtlb_req_store  (1'b0),
+    .dtlb_resp_hit   (mmu_dtlb_resp_hit_unused),
+    .dtlb_resp_paddr (mmu_dtlb_resp_paddr_unused),
+    .dtlb_resp_fault (mmu_dtlb_resp_fault_unused),
+    .dtlb_resp_cause (mmu_dtlb_resp_cause_unused),
+    .dtlb_resp_tval  (mmu_dtlb_resp_tval_unused),
+    .dtlb_busy       (mmu_dtlb_busy_unused),
+    .ptw_req_valid   (mmu_ptw_req_valid_unused),
+    .ptw_req_ready   (1'b0),
+    .ptw_req_write   (mmu_ptw_req_write_unused),
+    .ptw_req_addr    (mmu_ptw_req_addr_unused),
+    .ptw_req_wdata   (mmu_ptw_req_wdata_unused),
+    .ptw_req_wen     (mmu_ptw_req_wen_unused),
+    .ptw_resp_valid  (1'b0),
+    .ptw_resp_rdata  (32'd0)
 );
 
 // ════════════════════════════════════════════════════════════════════════════
