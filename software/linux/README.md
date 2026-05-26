@@ -10,8 +10,11 @@ The RTL has the first Linux prerequisites under directed test:
 - RV32A AMO and LR/SC.
 - PLIC source 2 UART interrupt through M-context and S-context.
 - OpenSBI-style M-mode STIP injection into S-mode timer interrupt.
+- Sv32 I/D translation, PTW memory access, commit-ordered `sfence.vma`,
+  precise fetch/load/store page faults at ROB commit, and board-baseline PTW
+  A/D cache visibility.
 
-The Linux image flow is intentionally not marked as passing yet. The remaining RTL blockers are I/D-side Sv32 translation, PTW memory access, A/D PTE updates or compatible fault handling, and precise fetch/load/store page-fault plumbing into CSR.
+The Linux image flow is intentionally not marked as passing yet. The active blocker is producing a real `fw_payload.bin` from OpenSBI, RV32 Linux, BusyBox initramfs, and the SifangCore DTB, then running the Verilator `linux-preload` gate. Full write-back D-cache page-table coherence is still future work; the first Linux target uses the board-equivalent read-only D-cache configuration.
 
 ## Expected Build Outputs
 

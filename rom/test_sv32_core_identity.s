@@ -8,9 +8,9 @@
 # - Enter S-mode with satp.MODE=Sv32.
 # - Fetch through an identity-mapped code page.
 # - Store/load through a D-side translated data page whose PTE starts with A/D
-#   clear, forcing the PTW writeback path. A/D is verified in the standalone
-#   MMU test; this core test avoids reading the PTE back through L2 because the
-#   integrated cache-coherence policy for PTW writeback is not finished yet.
+#   clear, forcing the PTW writeback path. The test first caches the cold PTE
+#   through the CPU path, then verifies the PTW A/D writeback is visible through
+#   a later CPU load.
 # - Execute SFENCE.VMA in M-mode and S-mode to smoke the commit-ordered TLB
 #   flush path.
 # - Write PASS through an identity-mapped 0x1300_0000 MMIO megapage.
@@ -62,11 +62,20 @@ _start:
     j fail_mret
 
 supervisor_entry:
+    li x13, L0_PT_BASE + 4
+    lw x14, 0(x13)          # Cache the cold data-page PTE before PTW updates it.
+
     li x10, 0x00001000
     li x11, 0x5A5AA55A
     sw x11, 0(x10)
     lw x12, 0(x10)
     bne x11, x12, fail_data
+
+    lw x14, 0(x13)
+    andi x14, x14, 0x0C0
+    li x15, 0x0C0
+    bne x14, x15, fail_pte_ad
+
     .word 0x12000073      # sfence.vma x0, x0
 
     li x16, 0x04
@@ -89,3 +98,10 @@ fail_data:
     sw x16, 0(x17)
 fail_data_loop:
     j fail_data_loop
+
+fail_pte_ad:
+    li x16, 0xF3
+    li x17, TUBE_ADDR
+    sw x16, 0(x17)
+fail_pte_ad_loop:
+    j fail_pte_ad_loop

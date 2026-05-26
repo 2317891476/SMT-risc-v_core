@@ -34,6 +34,9 @@ module l1_dcache_m1 (
 
     output wire        dcache_miss_event,
 
+    input  wire        snoop_invalidate_valid,
+    input  wire [31:0] snoop_invalidate_addr,
+
     input  wire        flush_all,
     output wire        flush_busy,
     output wire        flush_done
@@ -53,6 +56,7 @@ assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
 assign flush_busy = 1'b0;
 assign flush_done = flush_all;
+wire _unused_snoop_passthrough = snoop_invalidate_valid || (|snoop_invalidate_addr);
 
 `elsif DCACHE_REGISTERED_PT
 // Registered pass-through: all requests go to DDR3, but through a registered FSM.
@@ -99,6 +103,7 @@ assign up_m1_resp_l1d_hit = 1'b0;
 assign dcache_miss_event = 1'b0;
 assign flush_busy = 1'b0;
 assign flush_done = flush_all;
+wire _unused_snoop_registered_pt = snoop_invalidate_valid || (|snoop_invalidate_addr);
 
 wire [2:0] rpt_req_word = rpt_addr[4:2];
 
@@ -222,6 +227,8 @@ reg [2:0]           ro_plru  [0:RO_SETS-1];
 wire [RO_TAG_W-1:0] ro_req_tag   = up_m1_req_addr[31:10];
 wire [4:0]           ro_req_index = up_m1_req_addr[9:5];
 wire [2:0]           ro_req_word  = up_m1_req_addr[4:2];
+wire [RO_TAG_W-1:0]  ro_snoop_tag = snoop_invalidate_addr[31:10];
+wire [4:0]           ro_snoop_index = snoop_invalidate_addr[9:5];
 
 reg        ro_hit;
 reg [1:0]  ro_hit_way;
@@ -310,7 +317,7 @@ assign dcache_miss_event = ro_can_accept && ro_is_load && !ro_hit;
 assign flush_busy = 1'b0;
 assign flush_done = flush_all;
 
-integer ro_si, ro_sj;
+integer ro_si, ro_sj, ro_sw;
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
         ro_state <= RO_IDLE;
@@ -339,6 +346,15 @@ always @(posedge clk or negedge rstn) begin
         ro_hit_resp_valid <= 1'b0;
         ro_install_resp_valid <= 1'b0;
         ro_store_resp_valid <= 1'b0;
+
+        if (snoop_invalidate_valid) begin
+            for (ro_sw = 0; ro_sw < RO_WAYS; ro_sw = ro_sw + 1) begin
+                if (ro_valid[ro_snoop_index][ro_sw] &&
+                    (ro_tag[ro_snoop_index][ro_sw] == ro_snoop_tag)) begin
+                    ro_valid[ro_snoop_index][ro_sw] <= 1'b0;
+                end
+            end
+        end
 
         case (ro_state)
         RO_IDLE: begin
@@ -494,6 +510,8 @@ reg [2:0]         plru        [0:SETS-1];
 wire [TAG_W-1:0]    req_tag   = up_m1_req_addr[31:10];
 wire [INDEX_W-1:0]  req_index = up_m1_req_addr[9:5];
 wire [2:0]          req_word  = up_m1_req_addr[4:2];
+wire [TAG_W-1:0]    snoop_tag = snoop_invalidate_addr[31:10];
+wire [INDEX_W-1:0]  snoop_index = snoop_invalidate_addr[9:5];
 
 // ─────────────────────────────────────────────────────────────
 // Combinational hit detection
@@ -636,7 +654,7 @@ end
 // ─────────────────────────────────────────────────────────────
 // Main FSM
 // ─────────────────────────────────────────────────────────────
-integer si, sj;
+integer si, sj, sw;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -675,6 +693,16 @@ always @(posedge clk or negedge rstn) begin
         hit_resp_valid_r     <= 1'b0;
         install_resp_valid_r <= 1'b0;
         flush_done_r         <= 1'b0;
+
+        if (snoop_invalidate_valid) begin
+            for (sw = 0; sw < WAYS; sw = sw + 1) begin
+                if (valid_array[snoop_index][sw] &&
+                    (tag_array[snoop_index][sw] == snoop_tag) &&
+                    !dirty_array[snoop_index][sw]) begin
+                    valid_array[snoop_index][sw] <= 1'b0;
+                end
+            end
+        end
 
         case (state)
         // ─────────────────────────────────────────────────────

@@ -217,6 +217,8 @@ wire [31:0] dc_m1_resp_data;
 wire        dcache_miss_event;
 wire        dcache_flush_busy_w;
 wire        dcache_flush_done_w;
+reg         dcache_snoop_invalidate_valid_r;
+reg [31:0]  dcache_snoop_invalidate_addr_r;
 
 l1_dcache_m1 u_dcache_m1 (
     .clk              (clk),
@@ -239,6 +241,8 @@ l1_dcache_m1 u_dcache_m1 (
     .dn_m1_resp_valid (dc_m1_resp_valid),
     .dn_m1_resp_data  (dc_m1_resp_data),
     .dcache_miss_event(dcache_miss_event),
+    .snoop_invalidate_valid(dcache_snoop_invalidate_valid_r),
+    .snoop_invalidate_addr (dcache_snoop_invalidate_addr_r),
     .flush_all        (dcache_flush_all),
     .flush_busy       (dcache_flush_busy_w),
     .flush_done       (dcache_flush_done_w)
@@ -431,7 +435,10 @@ wire [31:0] ptw_local_write_word = apply_wen32(ptw_local_read_word,
                                                 ptw_req_wen);
 reg         ptw_local_resp_valid_r;
 reg [31:0]  ptw_local_resp_data_r;
-wire        ptw_local_req_ready_w = ptw_local_req && !ram_write && !ptw_local_resp_valid_r;
+wire        ptw_local_req_ready_w = ptw_local_req && !ram_write &&
+                                    !ptw_local_resp_valid_r &&
+                                    l2_req_ready && !l2_req_valid;
+wire        ptw_local_write_accept = ptw_local_req_ready_w && ptw_req_write;
 
 assign ptw_req_ready = ptw_req_valid
                      ? (ptw_req_addr[31] ? ptw_ddr3_req_ready_w : ptw_local_req_ready_w)
@@ -463,6 +470,8 @@ l2_cache u_l2_cache (
     .ram_wdata      (ram_wdata),
     .ram_rdata      (ram_rdata),
     .ram_word_idx   (ram_word_idx),
+    .snoop_invalidate_valid(ptw_local_write_accept),
+    .snoop_invalidate_addr (ptw_req_addr),
     
     // Status
     .cache_state    (cache_state),
@@ -1477,6 +1486,8 @@ always @(posedge clk or negedge rstn) begin
         ptw_ddr3_resp_valid_r <= 1'b0;
         ptw_ddr3_resp_data_r  <= 32'd0;
         ptw_ddr3_wait_count_r <= 5'd0;
+        dcache_snoop_invalidate_valid_r <= 1'b0;
+        dcache_snoop_invalidate_addr_r  <= 32'd0;
         debug_m0_req_seen_r       <= 1'b0;
         debug_m0_req_count_r      <= 8'd0;
         debug_m0_accept_count_r   <= 8'd0;
@@ -1493,6 +1504,7 @@ always @(posedge clk or negedge rstn) begin
         m1_ddr3_resp_valid_r <= 1'b0;
         ptw_ddr3_req_ready_r <= 1'b0;
         ptw_ddr3_resp_valid_r <= 1'b0;
+        dcache_snoop_invalidate_valid_r <= 1'b0;
         debug_m0_req_seen_r  <= m0_ddr3_req;
 
         if (!ptw_ddr3_req || ptw_ddr3_req_ready_r) begin
@@ -1554,6 +1566,10 @@ always @(posedge clk or negedge rstn) begin
                         debug_m1_accept_count_r <= debug_m1_accept_count_r + 8'd1;
                     end else if (ddr3_owner_r == DDR3_OWNER_PTW) begin
                         ptw_ddr3_req_ready_r <= 1'b1;
+                        if (ptw_req_write) begin
+                            dcache_snoop_invalidate_valid_r <= 1'b1;
+                            dcache_snoop_invalidate_addr_r  <= ptw_req_addr;
+                        end
                     end
                     ddr3_arb_state <= DDR3_ARB_WAIT_RESP;
                 end

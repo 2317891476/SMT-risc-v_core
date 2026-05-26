@@ -40,6 +40,11 @@ module l2_cache (
     input  wire [31:0] ram_rdata,       // RAM read data
     output wire [2:0]  ram_word_idx,    // Word index within line
 
+    // External coherent writer notification. PTW A/D updates bypass this cache,
+    // so matching clean lines must be invalidated before software rereads PTEs.
+    input  wire        snoop_invalidate_valid,
+    input  wire [31:0] snoop_invalidate_addr,
+
     // ═══════════════════════════════════════════════════════════════════════════
     // Cache status (for debugging/tests)
     // ═══════════════════════════════════════════════════════════════════════════
@@ -135,6 +140,8 @@ assign cache_state  = pt_state;
 assign cache_hit    = 1'b0;
 assign cache_miss   = 1'b0;
 
+wire _unused_snoop_passthrough = snoop_invalidate_valid || (|snoop_invalidate_addr);
+
 `else
 // ═════════════════════════════════════════════════════════════════════════════
 // FULL L2 CACHE — 4-way set-associative with PLRU
@@ -203,6 +210,9 @@ wire [31:0]             update_word_data = {
     wen[1] ? wdata[15:8]  : hit_word_data[15:8],
     wen[0] ? wdata[7:0]   : hit_word_data[7:0]
 };
+
+wire [L2_TAG_W-1:0]     snoop_tag = snoop_invalidate_addr[31:L2_SET_IDX_W+L2_OFFSET_W];
+wire [L2_SET_IDX_W-1:0] snoop_set = snoop_invalidate_addr[L2_SET_IDX_W+L2_OFFSET_W-1:L2_OFFSET_W];
 
 // Tag comparison results
 wire [L2_TAG_W-1:0] tag_way [0:L2_WAYS-1];
@@ -276,6 +286,7 @@ integer init_idx;
 integer wb_idx;
 integer init_way;
 integer init_word;
+integer snoop_way;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -303,6 +314,16 @@ always @(posedge clk or negedge rstn) begin
         // Default: clear response valid
         resp_valid_r <= 1'b0;
         resp_last_r <= 1'b0;
+
+        if (snoop_invalidate_valid) begin
+            for (snoop_way = 0; snoop_way < L2_WAYS; snoop_way = snoop_way + 1) begin
+                if (tag_array[snoop_set][snoop_way][L2_TAG_W] &&
+                    (tag_array[snoop_set][snoop_way][L2_TAG_W-1:0] == snoop_tag)) begin
+                    tag_array[snoop_set][snoop_way][L2_TAG_W] <= 1'b0;
+                    tag_array[snoop_set][snoop_way][L2_TAG_W+1] <= 1'b0;
+                end
+            end
+        end
         
         case (state)
             IDLE: begin
