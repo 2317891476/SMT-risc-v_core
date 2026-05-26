@@ -41,6 +41,8 @@ module csr_unit #(
     output wire [1:0]         priv_mode_out,
     output wire               mstatus_mxr,
     output wire               mstatus_sum,
+    output wire               mstatus_mprv,
+    output wire [1:0]         mstatus_mpp_out,
     output wire               global_int_en,
 
     input  wire               instr_retired,
@@ -188,6 +190,8 @@ assign satp_out = satp;
 assign priv_mode_out = priv_mode;
 assign mstatus_mxr = mstatus[19];
 assign mstatus_sum = mstatus[18];
+assign mstatus_mprv = mstatus[17];
+assign mstatus_mpp_out = mstatus_mpp;
 assign global_int_en = mstatus_mie;
 
 reg        csr_write_pending;

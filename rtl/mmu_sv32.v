@@ -19,6 +19,7 @@ module mmu_sv32 #(
     // CSR state
     input  wire [31:0]        satp,           // [31]=MODE, [30:22]=ASID, [21:0]=PPN
     input  wire [1:0]         priv_mode,
+    input  wire [1:0]         dtlb_priv_mode,
     input  wire               mstatus_mxr,
     input  wire               mstatus_sum,
 
@@ -72,7 +73,8 @@ localparam [1:0] ACCESS_FETCH = 2'd0;
 localparam [1:0] ACCESS_LOAD  = 2'd1;
 localparam [1:0] ACCESS_STORE = 2'd2;
 
-wire        vm_enabled = satp[31] && (priv_mode != PRIV_M);
+wire        itlb_vm_enabled = satp[31] && (priv_mode != PRIV_M);
+wire        dtlb_vm_enabled = satp[31] && (dtlb_priv_mode != PRIV_M);
 wire [8:0]  satp_asid  = satp[30:22];
 wire [21:0] satp_ppn   = satp[21:0];
 
@@ -95,6 +97,13 @@ reg [19:0]  ptw_refill_vpn;
 reg [21:0]  ptw_refill_ppn;
 reg         ptw_refill_mega;
 reg [7:0]   ptw_refill_perm;
+reg         itlb_walk_fault_valid;
+reg [31:0]  itlb_walk_fault_vaddr;
+reg [4:0]   itlb_walk_fault_cause;
+reg         dtlb_walk_fault_valid;
+reg [31:0]  dtlb_walk_fault_vaddr;
+reg         dtlb_walk_fault_store;
+reg [4:0]   dtlb_walk_fault_cause;
 
 tlb #(
     .ENTRIES (ITLB_ENTRIES),
@@ -104,7 +113,7 @@ tlb #(
 ) u_itlb (
     .clk           (clk),
     .rstn          (rstn),
-    .lookup_valid  (itlb_req_valid && vm_enabled),
+    .lookup_valid  (itlb_req_valid && itlb_vm_enabled),
     .lookup_vpn    (itlb_req_vaddr[31:12]),
     .lookup_asid   (satp_asid),
     .lookup_hit    (itlb_hit),
@@ -130,7 +139,7 @@ tlb #(
 ) u_dtlb (
     .clk           (clk),
     .rstn          (rstn),
-    .lookup_valid  (dtlb_req_valid && vm_enabled),
+    .lookup_valid  (dtlb_req_valid && dtlb_vm_enabled),
     .lookup_vpn    (dtlb_req_vaddr[31:12]),
     .lookup_asid   (satp_asid),
     .lookup_hit    (dtlb_hit),
@@ -155,20 +164,29 @@ wire itlb_user_ok = (priv_mode == PRIV_U) ? itlb_perm[4] :
                     (priv_mode == PRIV_S) ? !itlb_perm[4] : 1'b1;
 wire itlb_perm_ok = itlb_perm[3] && itlb_user_ok;
 wire itlb_ad_ok   = itlb_perm[6];
-wire itlb_perm_fault = itlb_req_valid && vm_enabled && itlb_hit && !itlb_perm_ok;
-wire itlb_ad_miss    = itlb_req_valid && vm_enabled && itlb_hit && itlb_perm_ok && !itlb_ad_ok;
+wire itlb_perm_fault = itlb_req_valid && itlb_vm_enabled && itlb_hit && !itlb_perm_ok;
+wire itlb_ad_miss    = itlb_req_valid && itlb_vm_enabled && itlb_hit && itlb_perm_ok && !itlb_ad_ok;
 
-wire dtlb_user_ok = (priv_mode == PRIV_U) ? dtlb_perm[4] :
-                    (priv_mode == PRIV_S) ? (!dtlb_perm[4] || mstatus_sum) : 1'b1;
+wire dtlb_user_ok = (dtlb_priv_mode == PRIV_U) ? dtlb_perm[4] :
+                    (dtlb_priv_mode == PRIV_S) ? (!dtlb_perm[4] || mstatus_sum) : 1'b1;
 wire dtlb_r_ok    = dtlb_perm[1] || (mstatus_mxr && dtlb_perm[3]);
 wire dtlb_w_ok    = dtlb_perm[2];
 wire dtlb_perm_ok = dtlb_user_ok && (dtlb_req_store ? (dtlb_r_ok && dtlb_w_ok) : dtlb_r_ok);
 wire dtlb_ad_ok   = dtlb_perm[6] && (!dtlb_req_store || dtlb_perm[7]);
-wire dtlb_perm_fault = dtlb_req_valid && vm_enabled && dtlb_hit && !dtlb_perm_ok;
-wire dtlb_ad_miss    = dtlb_req_valid && vm_enabled && dtlb_hit && dtlb_perm_ok && !dtlb_ad_ok;
+wire dtlb_perm_fault = dtlb_req_valid && dtlb_vm_enabled && dtlb_hit && !dtlb_perm_ok;
+wire dtlb_ad_miss    = dtlb_req_valid && dtlb_vm_enabled && dtlb_hit && dtlb_perm_ok && !dtlb_ad_ok;
 
-wire itlb_needs_walk = itlb_req_valid && vm_enabled && !itlb_perm_fault && (!itlb_hit || itlb_ad_miss);
-wire dtlb_needs_walk = dtlb_req_valid && vm_enabled && !dtlb_perm_fault && (!dtlb_hit || dtlb_ad_miss);
+wire itlb_walk_fault_active = itlb_walk_fault_valid &&
+                              itlb_req_valid &&
+                              (itlb_req_vaddr == itlb_walk_fault_vaddr);
+wire dtlb_walk_fault_active = dtlb_walk_fault_valid &&
+                              dtlb_req_valid &&
+                              (dtlb_req_vaddr == dtlb_walk_fault_vaddr) &&
+                              (dtlb_req_store == dtlb_walk_fault_store);
+wire itlb_needs_walk = itlb_req_valid && itlb_vm_enabled && !itlb_perm_fault &&
+                       !itlb_walk_fault_active && (!itlb_hit || itlb_ad_miss);
+wire dtlb_needs_walk = dtlb_req_valid && dtlb_vm_enabled && !dtlb_perm_fault &&
+                       !dtlb_walk_fault_active && (!dtlb_hit || dtlb_ad_miss);
 
 // Physical address construction for hits.
 wire [31:0] itlb_paddr_tlb = itlb_is_mega ?
@@ -196,6 +214,9 @@ reg [3:0]  ptw_state;
 reg [19:0] ptw_vpn;
 reg [31:0] ptw_vaddr;
 reg [1:0]  ptw_access;
+reg [1:0]  ptw_priv_mode;
+reg        ptw_mstatus_mxr;
+reg        ptw_mstatus_sum;
 reg [31:0] ptw_pte;
 reg [31:0] ptw_pte_addr;
 reg        ptw_leaf_mega;
@@ -264,8 +285,8 @@ function automatic pte_access_allowed(
     end
 endfunction
 
-wire cur_pte_user_ok = pte_user_allowed(ptw_access, priv_mode, cur_pte_u, mstatus_sum);
-wire cur_pte_access_ok = pte_access_allowed(ptw_access, cur_pte_r, cur_pte_w, cur_pte_x, mstatus_mxr);
+wire cur_pte_user_ok = pte_user_allowed(ptw_access, ptw_priv_mode, cur_pte_u, ptw_mstatus_sum);
+wire cur_pte_access_ok = pte_access_allowed(ptw_access, cur_pte_r, cur_pte_w, cur_pte_x, ptw_mstatus_mxr);
 wire cur_pte_ad_ok = cur_pte_a && ((ptw_access != ACCESS_STORE) || cur_pte_d);
 wire [31:0] cur_pte_ad_updated = ptw_pte | 32'h0000_0040 |
                                  ((ptw_access == ACCESS_STORE) ? 32'h0000_0080 : 32'h0000_0000);
@@ -277,6 +298,9 @@ always @(posedge clk or negedge rstn) begin
         ptw_vpn             <= 20'd0;
         ptw_vaddr           <= 32'd0;
         ptw_access          <= ACCESS_LOAD;
+        ptw_priv_mode       <= PRIV_M;
+        ptw_mstatus_mxr     <= 1'b0;
+        ptw_mstatus_sum     <= 1'b0;
         ptw_pte             <= 32'd0;
         ptw_pte_addr        <= 32'd0;
         ptw_leaf_mega       <= 1'b0;
@@ -289,6 +313,13 @@ always @(posedge clk or negedge rstn) begin
         ptw_fault_for_itlb  <= 1'b0;
         ptw_fault_cause     <= 5'd0;
         ptw_fault_tval      <= 32'd0;
+        itlb_walk_fault_valid <= 1'b0;
+        itlb_walk_fault_vaddr <= 32'd0;
+        itlb_walk_fault_cause <= 5'd0;
+        dtlb_walk_fault_valid <= 1'b0;
+        dtlb_walk_fault_vaddr <= 32'd0;
+        dtlb_walk_fault_store <= 1'b0;
+        dtlb_walk_fault_cause <= 5'd0;
         ptw_req_valid       <= 1'b0;
         ptw_req_write       <= 1'b0;
         ptw_req_addr        <= 32'd0;
@@ -298,6 +329,10 @@ always @(posedge clk or negedge rstn) begin
     else begin
         ptw_refill_valid <= 1'b0;
         ptw_fault_valid  <= 1'b0;
+        if (sfence_valid || !itlb_walk_fault_active)
+            itlb_walk_fault_valid <= 1'b0;
+        if (sfence_valid || !dtlb_walk_fault_active)
+            dtlb_walk_fault_valid <= 1'b0;
 
         case (ptw_state)
             PTW_IDLE: begin
@@ -309,6 +344,9 @@ always @(posedge clk or negedge rstn) begin
                     ptw_vpn      <= itlb_req_vaddr[31:12];
                     ptw_vaddr    <= itlb_req_vaddr;
                     ptw_access   <= ACCESS_FETCH;
+                    ptw_priv_mode <= priv_mode;
+                    ptw_mstatus_mxr <= mstatus_mxr;
+                    ptw_mstatus_sum <= mstatus_sum;
                     ptw_state    <= PTW_L1_REQ;
                 end
                 else if (dtlb_needs_walk) begin
@@ -316,6 +354,9 @@ always @(posedge clk or negedge rstn) begin
                     ptw_vpn      <= dtlb_req_vaddr[31:12];
                     ptw_vaddr    <= dtlb_req_vaddr;
                     ptw_access   <= dtlb_req_store ? ACCESS_STORE : ACCESS_LOAD;
+                    ptw_priv_mode <= dtlb_priv_mode;
+                    ptw_mstatus_mxr <= mstatus_mxr;
+                    ptw_mstatus_sum <= mstatus_sum;
                     ptw_state    <= PTW_L1_REQ;
                 end
             end
@@ -422,6 +463,17 @@ always @(posedge clk or negedge rstn) begin
                 ptw_fault_for_itlb <= ptw_for_itlb;
                 ptw_fault_cause    <= access_cause(ptw_access);
                 ptw_fault_tval     <= ptw_vaddr;
+                if (ptw_for_itlb) begin
+                    itlb_walk_fault_valid <= 1'b1;
+                    itlb_walk_fault_vaddr <= ptw_vaddr;
+                    itlb_walk_fault_cause <= access_cause(ptw_access);
+                end
+                else begin
+                    dtlb_walk_fault_valid <= 1'b1;
+                    dtlb_walk_fault_vaddr <= ptw_vaddr;
+                    dtlb_walk_fault_store <= (ptw_access == ACCESS_STORE);
+                    dtlb_walk_fault_cause <= access_cause(ptw_access);
+                end
                 ptw_state          <= PTW_IDLE;
             end
 
@@ -436,24 +488,32 @@ end
 // -----------------------------------------------------------------------------
 // Outputs
 // -----------------------------------------------------------------------------
-assign itlb_resp_hit = vm_enabled ? (itlb_req_valid && itlb_hit && itlb_perm_ok && itlb_ad_ok) :
+assign itlb_resp_hit = itlb_vm_enabled ? (itlb_req_valid && itlb_hit && itlb_perm_ok && itlb_ad_ok) :
                        itlb_req_valid;
-assign itlb_resp_paddr = vm_enabled ? itlb_paddr_tlb : itlb_req_vaddr;
-assign itlb_resp_fault = vm_enabled ? (itlb_perm_fault || (ptw_fault_valid && ptw_fault_for_itlb)) :
+assign itlb_resp_paddr = itlb_vm_enabled ? itlb_paddr_tlb : itlb_req_vaddr;
+assign itlb_resp_fault = itlb_vm_enabled ?
+                         (itlb_perm_fault || itlb_walk_fault_active ||
+                          (ptw_fault_valid && ptw_fault_for_itlb)) :
                          1'b0;
 assign itlb_resp_cause = (ptw_fault_valid && ptw_fault_for_itlb) ? ptw_fault_cause :
+                         itlb_walk_fault_active ? itlb_walk_fault_cause :
                          CAUSE_INST_PAGE_FAULT;
-assign itlb_resp_tval  = (ptw_fault_valid && ptw_fault_for_itlb) ? ptw_fault_tval : itlb_req_vaddr;
-assign itlb_busy       = vm_enabled && itlb_req_valid && !itlb_resp_hit && !itlb_resp_fault;
+assign itlb_resp_tval  = (ptw_fault_valid && ptw_fault_for_itlb) ? ptw_fault_tval :
+                         itlb_walk_fault_active ? itlb_walk_fault_vaddr : itlb_req_vaddr;
+assign itlb_busy       = itlb_vm_enabled && itlb_req_valid && !itlb_resp_hit && !itlb_resp_fault;
 
-assign dtlb_resp_hit = vm_enabled ? (dtlb_req_valid && dtlb_hit && dtlb_perm_ok && dtlb_ad_ok) :
+assign dtlb_resp_hit = dtlb_vm_enabled ? (dtlb_req_valid && dtlb_hit && dtlb_perm_ok && dtlb_ad_ok) :
                        dtlb_req_valid;
-assign dtlb_resp_paddr = vm_enabled ? dtlb_paddr_tlb : dtlb_req_vaddr;
-assign dtlb_resp_fault = vm_enabled ? (dtlb_perm_fault || (ptw_fault_valid && !ptw_fault_for_itlb)) :
+assign dtlb_resp_paddr = dtlb_vm_enabled ? dtlb_paddr_tlb : dtlb_req_vaddr;
+assign dtlb_resp_fault = dtlb_vm_enabled ?
+                         (dtlb_perm_fault || dtlb_walk_fault_active ||
+                          (ptw_fault_valid && !ptw_fault_for_itlb)) :
                          1'b0;
 assign dtlb_resp_cause = (ptw_fault_valid && !ptw_fault_for_itlb) ? ptw_fault_cause :
+                         dtlb_walk_fault_active ? dtlb_walk_fault_cause :
                          (dtlb_req_store ? CAUSE_STORE_PAGE_FAULT : CAUSE_LOAD_PAGE_FAULT);
-assign dtlb_resp_tval  = (ptw_fault_valid && !ptw_fault_for_itlb) ? ptw_fault_tval : dtlb_req_vaddr;
-assign dtlb_busy       = vm_enabled && dtlb_req_valid && !dtlb_resp_hit && !dtlb_resp_fault;
+assign dtlb_resp_tval  = (ptw_fault_valid && !ptw_fault_for_itlb) ? ptw_fault_tval :
+                         dtlb_walk_fault_active ? dtlb_walk_fault_vaddr : dtlb_req_vaddr;
+assign dtlb_busy       = dtlb_vm_enabled && dtlb_req_valid && !dtlb_resp_hit && !dtlb_resp_fault;
 
 endmodule

@@ -79,6 +79,7 @@ mmu_sv32 #(
     .rstn            (rstn),
     .satp            (satp),
     .priv_mode       (priv_mode),
+    .dtlb_priv_mode  (priv_mode),
     .mstatus_mxr     (mstatus_mxr),
     .mstatus_sum     (mstatus_sum),
     .sfence_valid    (sfence_valid),

@@ -426,11 +426,42 @@ always @(posedge clk) begin
         end
         // Monitor exec_pipe1 memory requests
         if (u_sifang_core.p1_mem_req_valid) begin
-            $display("[P1 MEM REQ] addr=0x%08h wen=%0b wdata=0x%08h tag=%0d @%0t",
+            $display("[P1 MEM REQ] addr=0x%08h wen=%0b wdata=0x%08h tag=%0d priv=%0d dpriv=%0d mstatus=0x%08h mprv=%0b mpp=%0d dhit=%0b dfault=%0b dbusy=%0b ptw_state=%0d ptw_priv=%0d @%0t",
                      u_sifang_core.p1_mem_req_addr,
                      u_sifang_core.p1_mem_req_wen,
                      u_sifang_core.p1_mem_req_wdata,
                      u_sifang_core.p1_mem_req_tag,
+                     u_sifang_core.csr_priv_mode,
+                     u_sifang_core.mmu_dtlb_priv_mode,
+                     u_sifang_core.u_csr_unit.mstatus,
+                     u_sifang_core.csr_mstatus_mprv,
+                     u_sifang_core.csr_mstatus_mpp,
+                     u_sifang_core.mmu_dtlb_resp_hit,
+                     u_sifang_core.mmu_dtlb_resp_fault,
+                     u_sifang_core.mmu_dtlb_busy,
+                     u_sifang_core.u_mmu_sv32.ptw_state,
+                     u_sifang_core.u_mmu_sv32.ptw_priv_mode,
+                     $time);
+        end
+        if (u_sifang_core.u_mmu_sv32.ptw_req_valid) begin
+            $display("[PTW REQ] write=%0b addr=0x%08h wdata=0x%08h wen=0x%0h access=%0d priv=%0d sum=%0b ready=%0b @%0t",
+                     u_sifang_core.u_mmu_sv32.ptw_req_write,
+                     u_sifang_core.u_mmu_sv32.ptw_req_addr,
+                     u_sifang_core.u_mmu_sv32.ptw_req_wdata,
+                     u_sifang_core.u_mmu_sv32.ptw_req_wen,
+                     u_sifang_core.u_mmu_sv32.ptw_access,
+                     u_sifang_core.u_mmu_sv32.ptw_priv_mode,
+                     u_sifang_core.u_mmu_sv32.ptw_mstatus_sum,
+                     u_sifang_core.u_mmu_sv32.ptw_req_ready,
+                     $time);
+        end
+        if (u_sifang_core.u_mmu_sv32.ptw_resp_valid) begin
+            $display("[PTW RESP] rdata=0x%08h state=%0d access=%0d priv=%0d sum=%0b @%0t",
+                     u_sifang_core.u_mmu_sv32.ptw_resp_rdata,
+                     u_sifang_core.u_mmu_sv32.ptw_state,
+                     u_sifang_core.u_mmu_sv32.ptw_access,
+                     u_sifang_core.u_mmu_sv32.ptw_priv_mode,
+                     u_sifang_core.u_mmu_sv32.ptw_mstatus_sum,
                      $time);
         end
         // Monitor WB0
@@ -547,7 +578,7 @@ always @(posedge clk) begin
         end
         if (u_sifang_core.ext_timer_irq || u_sifang_core.ext_external_irq ||
             u_sifang_core.trap_enter || u_sifang_core.trap_return) begin
-            $display("[IRQ DBG] mtip=%0b meip=%0b trap_enter=%0b trap_return=%0b trap_pc=0x%08h trap_target=0x%08h mepc=0x%08h mcause=0x%08h mstatus=0x%08h mie=0x%08h mip=0x%08h mtvec=0x%08h @%0t",
+            $display("[IRQ DBG] mtip=%0b meip=%0b trap_enter=%0b trap_return=%0b trap_pc=0x%08h trap_target=0x%08h mepc=0x%08h mcause=0x%08h sepc=0x%08h scause=0x%08h stval=0x%08h mstatus=0x%08h mie=0x%08h mip=0x%08h mtvec=0x%08h stvec=0x%08h @%0t",
                      u_sifang_core.ext_timer_irq,
                      u_sifang_core.ext_external_irq,
                      u_sifang_core.trap_enter,
@@ -556,10 +587,14 @@ always @(posedge clk) begin
                      u_sifang_core.trap_target,
                      u_sifang_core.u_csr_unit.mepc,
                      u_sifang_core.u_csr_unit.mcause,
+                     u_sifang_core.u_csr_unit.sepc,
+                     u_sifang_core.u_csr_unit.scause,
+                     u_sifang_core.u_csr_unit.stval,
                      u_sifang_core.u_csr_unit.mstatus,
                      u_sifang_core.u_csr_unit.mie,
                      u_sifang_core.u_csr_unit.mip,
                      u_sifang_core.u_csr_unit.mtvec,
+                     u_sifang_core.u_csr_unit.stvec,
                      $time);
         end
         if ((u_sifang_core.dec0_pc >= 32'h00000054) &&

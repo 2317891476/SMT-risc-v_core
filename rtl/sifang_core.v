@@ -389,6 +389,12 @@ wire [1:0]  csr_priv_mode;
 wire [31:0] csr_satp;
 wire        csr_mstatus_mxr;
 wire        csr_mstatus_sum;
+wire        csr_mstatus_mprv;
+wire [1:0]  csr_mstatus_mpp;
+wire [1:0]  mmu_dtlb_priv_mode;
+
+assign mmu_dtlb_priv_mode = (csr_mstatus_mprv && (csr_priv_mode == `PRIV_M)) ?
+                            csr_mstatus_mpp : csr_priv_mode;
 
 assign smt_flush[0] = pipe0_br_ctrl && (pipe0_br_tid == 1'b0);
 assign smt_flush[1] = pipe0_br_ctrl && (pipe0_br_tid == 1'b1);
@@ -1685,9 +1691,11 @@ rob #(
 assign shadow_alloc0_valid = disp0_accepted && dec0_regs_write && (dec0_rd != 5'd0);
 assign shadow_alloc1_valid = disp1_accepted && dec1_regs_write && (dec1_rd != 5'd0);
 
-assign commit0_free_direct_valid = rob_commit0_valid && rob_commit0_regs_write &&
+assign commit0_free_direct_valid = rob_commit0_valid && !commit0_exc_valid &&
+                                   rob_commit0_regs_write &&
                                    (rob_commit0_prd_old != {PHYS_REG_W_CFG{1'b0}});
-assign commit1_free_direct_valid = rob_commit1_valid && rob_commit1_regs_write &&
+assign commit1_free_direct_valid = rob_commit1_valid && !commit1_exc_valid &&
+                                   rob_commit1_regs_write &&
                                    (rob_commit1_prd_old != {PHYS_REG_W_CFG{1'b0}});
 
 wire branch_ckpt_capture0_valid = disp0_accepted && dec0_br;
@@ -1706,6 +1714,23 @@ assign freelist_rebuild_valid =
     !rob_recover_walk_active &&
     !rmt_branch_ckpt_any_live;
 wire [NUM_PHYS_REG_CFG-1:0] freelist_rebuild_mask = rmt_mapped_mask_t0;
+wire exception_recover_valid = commit0_exc_valid &&
+                               rob_commit0_regs_write &&
+                               (rob_commit0_rd != 5'd0);
+wire recover_to_rmt_en = exception_recover_valid ||
+                         (rob_recover_en && !rmt_branch_ckpt_recover_blocks_rob_walk);
+wire [4:0] recover_to_rmt_rd = exception_recover_valid ? rob_commit0_rd :
+                                                        rob_recover_rd;
+wire [PHYS_REG_W_CFG-1:0] recover_to_rmt_prd = exception_recover_valid ?
+                                               rob_commit0_prd_old :
+                                               rob_recover_prd_old;
+wire recover_push_valid = exception_recover_valid ?
+                          (rob_commit0_prd_new != {PHYS_REG_W_CFG{1'b0}}) :
+                          (rob_recover_en && rob_recover_regs_write &&
+                           !rmt_branch_ckpt_recover_blocks_rob_walk);
+wire [PHYS_REG_W_CFG-1:0] recover_push_prd = exception_recover_valid ?
+                                             rob_commit0_prd_new :
+                                             rob_recover_prd_new;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -1760,9 +1785,9 @@ rename_map_table #(
     .cdb1_valid     (wb1_valid_safe && wb1_regs_write),
     .cdb1_prd       (tag_prd_map[wb1_tag]),
     // Recovery
-    .recover_en     (rob_recover_en && !rmt_branch_ckpt_recover_blocks_rob_walk),
-    .recover_rd     (rob_recover_rd),
-    .recover_prd    (rob_recover_prd_old),
+    .recover_en     (recover_to_rmt_en),
+    .recover_rd     (recover_to_rmt_rd),
+    .recover_prd    (recover_to_rmt_prd),
     // Bulk reset
     .reset_to_arch  (1'b0),
     .query0_prd     (fl_alloc0_prd),
@@ -1820,9 +1845,8 @@ freelist #(
     .free1_valid        (commit1_free_direct_valid),
     .free1_prd          (rob_commit1_prd_old),
     // Recovery push
-    .recover_push_valid (rob_recover_en && rob_recover_regs_write &&
-                          !rmt_branch_ckpt_recover_blocks_rob_walk),
-    .recover_push_prd   (rob_recover_prd_new),
+    .recover_push_valid (recover_push_valid),
+    .recover_push_prd   (recover_push_prd),
     .branch_ckpt_capture0_valid(branch_ckpt_capture0_valid),
     .branch_ckpt_capture0_order_id(disp0_order_id),
     .branch_ckpt_capture0_alloc_count(branch_ckpt_capture0_alloc_count),
@@ -2315,6 +2339,12 @@ wire sfence_commit_hit_t0 = sfence_pending_t0 && rob_commit0_valid &&
                             (rob_commit0_order_id == sfence_pending_order_t0);
 wire sfence_commit_hit_t1 = sfence_pending_t1 && rob_commit1_valid &&
                             (rob_commit1_order_id == sfence_pending_order_t1);
+wire csr_commit_hit_t0 = csr_pending_t0 &&
+                         ((rob_commit0_valid && (rob_commit0_order_id == csr_pending_order_t0)) ||
+                          (rob_commit1_valid && (rob_commit1_order_id == csr_pending_order_t0)));
+wire csr_commit_hit_t1 = csr_pending_t1 &&
+                         ((rob_commit0_valid && (rob_commit0_order_id == csr_pending_order_t1)) ||
+                          (rob_commit1_valid && (rob_commit1_order_id == csr_pending_order_t1)));
 wire sfence_ready_t0 = sfence_pending_t0 &&
                        (sfence_commit_seen_t0 || sfence_commit_hit_t0) &&
                        lsu_debug_store_buffer_empty;
@@ -2447,12 +2477,10 @@ always @(posedge clk or negedge rstn) begin
                 mret_pending_t1 <= 1'b0;
         end
 
-        if (pipe0_csr_valid) begin
-            if (p0_pre_ro_tid == 1'b0)
-                csr_pending_t0 <= 1'b0;
-            else
-                csr_pending_t1 <= 1'b0;
-        end
+        if (csr_commit_hit_t0)
+            csr_pending_t0 <= 1'b0;
+        if (csr_commit_hit_t1)
+            csr_pending_t1 <= 1'b0;
 
         if (disp0_accepted && (dec0_is_xret || dec0_is_trap)) begin
             if (dec0_tid == 1'b0) begin
@@ -3971,6 +3999,7 @@ reg [31:0] tag_exc_tval  [0:RS_TAG_DEPTH_CFG];
 integer exc_track_idx;
 
 wire lsu_resp_exc_live_match = lsu_resp_live_match && lsu_resp_exc_valid;
+wire pipe0_exc_live_match = pipe0_exc_valid && p0_ex_valid_safe;
 wire commit0_exc_valid =
     rob_commit0_valid && (rob_commit0_tag != {RS_TAG_W_CFG{1'b0}}) &&
     tag_exc_valid[rob_commit0_tag];
@@ -3987,12 +4016,10 @@ wire [31:0] commit_exc_tval  = commit0_exc_valid ? tag_exc_tval[rob_commit0_tag]
 wire [31:0] commit_exc_pc    = commit0_exc_valid ? rob_commit0_pc :
                                 commit1_exc_valid ? rob_commit1_pc :
                                 32'd0;
-wire csr_sync_exc_valid = commit_exc_valid || pipe0_exc_valid;
-wire [31:0] csr_sync_exc_cause = commit_exc_valid ? commit_exc_cause : pipe0_exc_cause;
-wire [31:0] csr_sync_exc_tval  = commit_exc_valid ? commit_exc_tval  : pipe0_exc_tval;
-wire [31:0] csr_sync_exc_pc    = commit_exc_valid ? commit_exc_pc :
-                                  pipe0_exc_valid  ? pipe0_exc_pc :
-                                                     trap_entry_pc;
+wire csr_sync_exc_valid = commit_exc_valid;
+wire [31:0] csr_sync_exc_cause = commit_exc_valid ? commit_exc_cause : 32'd0;
+wire [31:0] csr_sync_exc_tval  = commit_exc_valid ? commit_exc_tval  : 32'd0;
+wire [31:0] csr_sync_exc_pc    = commit_exc_valid ? commit_exc_pc    : trap_entry_pc;
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -4028,6 +4055,11 @@ always @(posedge clk or negedge rstn) begin
             tag_exc_valid[lsu_resp_tag] <= 1'b1;
             tag_exc_cause[lsu_resp_tag] <= lsu_resp_exc_cause;
             tag_exc_tval[lsu_resp_tag]  <= lsu_resp_exc_tval;
+        end
+        if (pipe0_exc_live_match && (p0_ex_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[p0_ex_tag] <= 1'b1;
+            tag_exc_cause[p0_ex_tag] <= pipe0_exc_cause;
+            tag_exc_tval[p0_ex_tag]  <= pipe0_exc_tval;
         end
         if (disp0_accepted && dec0_fetch_fault && (sb_disp0_tag != {RS_TAG_W_CFG{1'b0}})) begin
             tag_exc_valid[sb_disp0_tag] <= 1'b1;
@@ -4477,6 +4509,8 @@ csr_unit #(.HART_ID(0)) u_csr_unit(
     .priv_mode_out   (csr_priv_mode     ),
     .mstatus_mxr     (csr_mstatus_mxr   ),
     .mstatus_sum     (csr_mstatus_sum   ),
+    .mstatus_mprv    (csr_mstatus_mprv  ),
+    .mstatus_mpp_out (csr_mstatus_mpp   ),
     .global_int_en   (global_int_en     ),
     .instr_retired   (rob_instr_retired[0]),
     .instr_retired_1 (rob_instr_retired[1]),
@@ -4499,6 +4533,7 @@ mmu_sv32 u_mmu_sv32 (
     .rstn            (rstn),
     .satp            (csr_satp),
     .priv_mode       (csr_priv_mode),
+    .dtlb_priv_mode  (mmu_dtlb_priv_mode),
     .mstatus_mxr     (csr_mstatus_mxr),
     .mstatus_sum     (csr_mstatus_sum),
     .sfence_valid    (sfence_vma_flush),

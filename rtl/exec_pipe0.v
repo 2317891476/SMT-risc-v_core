@@ -179,25 +179,34 @@ wire [31:0] ecall_cause =
                                 32'd8;
 
 wire [31:0] branch_actual_target = (stored_br_addr_mode == `J_REG) ?
-                                   (stored_op_a + stored_imm) :
+                                   ((stored_op_a + stored_imm) & 32'hFFFF_FFFE) :
                                    (stored_pc + stored_imm);
 wire        branch_actual_taken = stored_valid && stored_br && stored_br_mark;
+wire        branch_target_misaligned = branch_actual_taken && (branch_actual_target[1:0] != 2'b00);
 wire [31:0] branch_correct_next = branch_actual_taken ? branch_actual_target :
                                                         (stored_pc + 32'd4);
 wire        branch_target_mismatch = stored_pred_taken &&
                                      branch_actual_taken &&
                                      (stored_pred_target != branch_actual_target);
 wire        branch_redirect_needed = stored_valid && stored_br &&
+                                     !branch_target_misaligned &&
                                      ((stored_pred_taken != branch_actual_taken) ||
                                       branch_target_mismatch);
 wire        nonbranch_pred_redirect = stored_valid && !stored_br && stored_pred_taken;
 wire        redirect_needed = branch_redirect_needed || nonbranch_pred_redirect;
 wire [31:0] redirect_target = nonbranch_pred_redirect ? (stored_pc + 32'd4) :
                                                        branch_correct_next;
-wire        bpu_update_needed = (stored_valid && stored_br) || nonbranch_pred_redirect;
+wire        bpu_update_needed = (stored_valid && stored_br && !branch_target_misaligned) ||
+                                nonbranch_pred_redirect;
 wire        bpu_update_taken = stored_br && branch_actual_taken;
 wire [31:0] bpu_update_target = stored_br ? branch_actual_target :
                                              (stored_pc + 32'd4);
+wire [31:0] current_branch_target = (in_br_addr_mode == `J_REG) ?
+                                    ((op_A_pre + in_imm) & 32'hFFFF_FFFE) :
+                                    (in_pc + in_imm);
+wire        current_branch_taken = input_valid && in_br && br_mark;
+wire        current_branch_target_misaligned =
+            current_branch_taken && (current_branch_target[1:0] != 2'b00);
 
 always @(posedge clk or negedge rstn) begin
     if (!rstn) begin
@@ -264,17 +273,18 @@ always @(posedge clk or negedge rstn) begin
         out_tag_r        <= input_valid ? in_tag : {TAG_W{1'b0}};
         out_result_r     <= input_valid ? (in_is_csr ? csr_rdata : alu_out) : 32'd0;
         out_rd_r         <= input_valid ? in_rd : 5'd0;
-        out_regs_write_r <= input_valid && in_regs_write;
+        out_regs_write_r <= input_valid && in_regs_write && !current_branch_target_misaligned;
         out_fu_r         <= input_valid ? in_fu : 3'd0;
         out_order_id_r   <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
         mret_valid_r     <= input_valid && in_is_mret;
         mret_order_id_r  <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
         sret_valid_r     <= input_valid && in_is_sret;
         sret_order_id_r  <= input_valid ? in_order_id : {`METADATA_ORDER_ID_W{1'b0}};
-        exc_valid_r      <= input_valid && (in_is_ecall || in_is_ebreak);
-        exc_cause_r      <= in_is_ebreak ? 32'd3 : ecall_cause;
+        exc_valid_r      <= input_valid && (in_is_ecall || in_is_ebreak || current_branch_target_misaligned);
+        exc_cause_r      <= current_branch_target_misaligned ? 32'd0 :
+                            in_is_ebreak ? 32'd3 : ecall_cause;
         exc_pc_r         <= input_valid ? in_pc : 32'd0;
-        exc_tval_r       <= 32'd0;
+        exc_tval_r       <= current_branch_target_misaligned ? current_branch_target : 32'd0;
 
         // Branch resolution uses stored values from previous cycle
         br_ctrl_r     <= redirect_needed && !stored_flush_kill;
