@@ -44,6 +44,9 @@ module stage_if #(
     output wire [31:0] if_pc,          // instruction PC
     output wire        if_pred_taken,  // BPU prediction for this instruction
     output wire [31:0] if_pred_target,
+    output wire        if_fault,
+    output wire [4:0]  if_fault_cause,
+    output wire [31:0] if_fault_tval,
 
     // Sv32 I-side translation. Metadata keeps virtual PCs; inst_memory sees
     // translated physical addresses.
@@ -105,6 +108,9 @@ reg [31:0] resp_inst        [0:FETCH_Q_DEPTH-1];
 reg [31:0] resp_pc          [0:FETCH_Q_DEPTH-1];
 reg        resp_pred_taken  [0:FETCH_Q_DEPTH-1];
 reg [31:0] resp_pred_target [0:FETCH_Q_DEPTH-1];
+reg        resp_fault       [0:FETCH_Q_DEPTH-1];
+reg [4:0]  resp_fault_cause [0:FETCH_Q_DEPTH-1];
+reg [31:0] resp_fault_tval  [0:FETCH_Q_DEPTH-1];
 reg        resp_valid_q     [0:FETCH_Q_DEPTH-1];
 reg [FETCH_Q_IDX_W:0] resp_head;
 reg [FETCH_Q_IDX_W:0] resp_tail;
@@ -132,11 +138,14 @@ wire                     response_stale;
 wire                     response_flushed;
 wire                     fetch_candidate;
 wire                     fetch_translation_ready;
+wire                     fetch_translation_fault;
+wire                     fetch_fault_fifo_ready;
+wire                     fetch_fault_launch;
+wire                     fetch_translation_done;
 wire [31:0]              fetch_phys_addr;
 wire [FETCH_Q_IDX_W+1:0] fetch_credits_used =
     {1'b0, meta_count} + {1'b0, resp_count};
 wire [31:0] fetch_pc_pending;
-wire        _unused_mmu_itlb_fault_meta = |{mmu_itlb_resp_cause, mmu_itlb_resp_tval};
 
 // Keep request metadata in order so ICache hits can be pipelined.  The
 // response FIFO absorbs fetch-buffer backpressure without losing one-cycle
@@ -156,13 +165,19 @@ assign fetch_candidate = rstn && !pc_stall && meta_slot_available &&
 assign mmu_itlb_req_valid = fetch_candidate;
 assign mmu_itlb_req_vaddr = pc_out;
 assign fetch_translation_ready = mmu_itlb_resp_hit && !mmu_itlb_resp_fault;
+assign fetch_translation_fault = fetch_candidate && mmu_itlb_resp_fault;
+assign fetch_fault_fifo_ready = !resp_full || response_buffer_pop;
+assign fetch_fault_launch = fetch_translation_fault && fetch_fault_fifo_ready &&
+                            !response_fifo_push;
+assign fetch_translation_done = fetch_translation_ready || fetch_fault_launch;
 assign fetch_phys_addr = fetch_translation_ready ? mmu_itlb_resp_paddr : pc_out;
 assign pc_stall_combined = pc_stall || !meta_slot_available ||
-                           !response_credit_available || !fetch_translation_ready ||
-                           !req_ready_from_mem || if_flush || icache_invalidate;
+                           !response_credit_available || !fetch_translation_done ||
+                           (!fetch_fault_launch && !req_ready_from_mem) ||
+                           if_flush || icache_invalidate;
 wire fetch_req_launch = fetch_candidate && fetch_translation_ready &&
                         req_ready_from_mem;
-wire pc_advance = fetch_req_launch;
+wire pc_advance = fetch_req_launch || fetch_fault_launch;
 wire pred_ctrl  = fetch_req_launch ? bpu_pred_taken : 1'b0;
 
 pc_mt u_pc_mt (
@@ -281,6 +296,9 @@ always @(posedge clk or negedge rstn) begin
             resp_pc[fetch_q_i]          <= 32'd0;
             resp_pred_taken[fetch_q_i]  <= 1'b0;
             resp_pred_target[fetch_q_i] <= 32'd0;
+            resp_fault[fetch_q_i]       <= 1'b0;
+            resp_fault_cause[fetch_q_i] <= 5'd0;
+            resp_fault_tval[fetch_q_i]  <= 32'd0;
             resp_valid_q[fetch_q_i]     <= 1'b0;
         end
     end
@@ -331,6 +349,7 @@ always @(posedge clk or negedge rstn) begin
                          resp_head_idx, resp_inst[resp_head_idx], resp_valid_q[resp_head_idx], $time);
 `endif
                 resp_valid_q[resp_head_idx] <= 1'b0;
+                resp_fault[resp_head_idx] <= 1'b0;
                 resp_head <= resp_head + {{FETCH_Q_IDX_W{1'b0}}, 1'b1};
             end
 
@@ -344,12 +363,26 @@ always @(posedge clk or negedge rstn) begin
                 resp_pc[resp_tail_idx]          <= meta_pc[meta_head_idx];
                 resp_pred_taken[resp_tail_idx]  <= meta_pred_taken[meta_head_idx];
                 resp_pred_target[resp_tail_idx] <= meta_pred_target[meta_head_idx];
+                resp_fault[resp_tail_idx]       <= 1'b0;
+                resp_fault_cause[resp_tail_idx] <= 5'd0;
+                resp_fault_tval[resp_tail_idx]  <= 32'd0;
+                resp_valid_q[resp_tail_idx]     <= 1'b1;
+                resp_tail <= resp_tail + {{FETCH_Q_IDX_W{1'b0}}, 1'b1};
+            end else if (fetch_fault_launch) begin
+                resp_inst[resp_tail_idx]        <= 32'h0000_0013; // addi x0, x0, 0
+                resp_pc[resp_tail_idx]          <= mmu_itlb_resp_tval;
+                resp_pred_taken[resp_tail_idx]  <= 1'b0;
+                resp_pred_target[resp_tail_idx] <= mmu_itlb_resp_tval + 32'd4;
+                resp_fault[resp_tail_idx]       <= 1'b1;
+                resp_fault_cause[resp_tail_idx] <= mmu_itlb_resp_cause;
+                resp_fault_tval[resp_tail_idx]  <= mmu_itlb_resp_tval;
                 resp_valid_q[resp_tail_idx]     <= 1'b1;
                 resp_tail <= resp_tail + {{FETCH_Q_IDX_W{1'b0}}, 1'b1};
             end
 
             resp_count <= resp_count +
-                          {{FETCH_Q_IDX_W{1'b0}}, response_fifo_push} -
+                          {{FETCH_Q_IDX_W{1'b0}}, response_fifo_push} +
+                          {{FETCH_Q_IDX_W{1'b0}}, fetch_fault_launch} -
                           {{FETCH_Q_IDX_W{1'b0}}, response_buffer_pop};
         end
     end
@@ -371,6 +404,9 @@ assign if_valid      = if_valid_r;
 assign if_inst       = resp_inst[resp_head_idx];
 assign if_pred_taken = resp_pred_taken[resp_head_idx];
 assign if_pred_target = resp_pred_target[resp_head_idx];
+assign if_fault      = resp_fault[resp_head_idx];
+assign if_fault_cause = resp_fault_cause[resp_head_idx];
+assign if_fault_tval  = resp_fault_tval[resp_head_idx];
 assign debug_fetch_pc_pending = fetch_pc_pending;
 assign debug_pc_out           = pc_out;
 assign debug_if_inst          = if_inst;

@@ -89,6 +89,7 @@ BASIC_TEST_IDS = {
     "test_sbi_timer_injection": 38,
     "test_sv32_core_identity": 39,
     "test_sv32_core_page_fault": 40,
+    "test_sv32_core_fetch_page_fault": 41,
 }
 
 MODULE_TESTS = {
@@ -346,6 +347,7 @@ class TestRunner:
                 "test_sbi_timer_injection.s",
                 "test_sv32_core_identity.s",
                 "test_sv32_core_page_fault.s",
+                "test_sv32_core_fetch_page_fault.s",
                 # Store Buffer dedicated tests
                 "test_store_buffer_simple.s",
                 "test_store_buffer_commit.s",

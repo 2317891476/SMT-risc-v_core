@@ -21,10 +21,12 @@ module decoder_dual (
     input  wire        inst0_valid,
     input  wire [31:0] inst0_word,      // instruction 0 (older in program order)
     input  wire [31:0] inst0_pc,
+    input  wire        inst0_fault,
 
     input  wire        inst1_valid,
     input  wire [31:0] inst1_word,      // instruction 1 (younger)
     input  wire [31:0] inst1_pc,
+    input  wire        inst1_fault,
 
     // ─── Output: Decoded instruction 0 ──────────────────────────
     output wire        dec0_valid,      // decoded & can be dispatched
@@ -242,6 +244,7 @@ wire waw_conflict;
 wire any_system;        // NEW: any SYSTEM instruction blocks dual-issue
 wire any_misc_mem;      // FENCE/FENCE.I serializes the decode group
 wire any_rocc;          // NEW: any RoCC instruction blocks dual-issue
+wire any_fault;         // Fetch-fault pseudo-uops must commit alone.
 
 assign both_branch     = d0_br && d1_br;
 assign both_mem        = (d0_mem_read || d0_mem_write) && (d1_mem_read || d1_mem_write);
@@ -251,8 +254,9 @@ assign d1_is_misc_mem  = (inst1_word[6:0] == `MISC_MEM);
 assign any_system      = d0_is_system || d1_is_system;  // Serialize SYSTEM ops
 assign any_misc_mem    = d0_is_misc_mem || d1_is_misc_mem;
 assign any_rocc        = d0_is_rocc || d1_is_rocc;      // Serialize RoCC ops
+assign any_fault       = inst0_fault || inst1_fault;
 assign structural_conflict = both_branch || both_mem || waw_conflict ||
-                             any_system || any_misc_mem || any_rocc;
+                             any_system || any_misc_mem || any_rocc || any_fault;
 
 // ─── Final valid signals ────────────────────────────────────────────────────
 // Important: We always consume from fetch_buffer (consume_0 always asserted if inst0_valid)

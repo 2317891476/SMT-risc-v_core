@@ -24,6 +24,9 @@ module fetch_buffer #(
     input  wire [31:0] push_pc,
     input  wire        push_pred_taken,
     input  wire [31:0] push_pred_target,
+    input  wire        push_fault,
+    input  wire [4:0]  push_fault_cause,
+    input  wire [31:0] push_fault_tval,
     output wire        push_ready,
 
     // Pop port 0 (to Decoder 0, oldest instruction)
@@ -32,6 +35,9 @@ module fetch_buffer #(
     output wire [31:0] pop0_pc,
     output wire        pop0_pred_taken,
     output wire [31:0] pop0_pred_target,
+    output wire        pop0_fault,
+    output wire [4:0]  pop0_fault_cause,
+    output wire [31:0] pop0_fault_tval,
 
     // Pop port 1 (to Decoder 1, second-oldest)
     output wire        pop1_valid,
@@ -39,6 +45,9 @@ module fetch_buffer #(
     output wire [31:0] pop1_pc,
     output wire        pop1_pred_taken,
     output wire [31:0] pop1_pred_target,
+    output wire        pop1_fault,
+    output wire [4:0]  pop1_fault_cause,
+    output wire [31:0] pop1_fault_tval,
 
     // Consume (from decode stage)
     input  wire        consume_0,
@@ -52,6 +61,9 @@ reg [31:0] buf_inst [0:DEPTH-1];
 reg [31:0] buf_pc   [0:DEPTH-1];
 reg        buf_pred_taken [0:DEPTH-1];
 reg [31:0] buf_pred_target[0:DEPTH-1];
+reg        buf_fault      [0:DEPTH-1];
+reg [4:0]  buf_fault_cause[0:DEPTH-1];
+reg [31:0] buf_fault_tval [0:DEPTH-1];
 reg        buf_valid[0:DEPTH-1];
 
 // FIFO pointers
@@ -80,6 +92,9 @@ assign pop0_inst  = buf_inst[tail_idx];
 assign pop0_pc    = buf_pc[tail_idx];
 assign pop0_pred_taken  = buf_pred_taken[tail_idx];
 assign pop0_pred_target = buf_pred_target[tail_idx];
+assign pop0_fault       = buf_fault[tail_idx];
+assign pop0_fault_cause = buf_fault_cause[tail_idx];
+assign pop0_fault_tval  = buf_fault_tval[tail_idx];
 
 // Slot 1 valid only if: count >= 2 and both valid
 wire slot1_exists;
@@ -89,6 +104,9 @@ assign pop1_inst  = buf_inst[tail_idx_p1];
 assign pop1_pc    = buf_pc[tail_idx_p1];
 assign pop1_pred_taken  = buf_pred_taken[tail_idx_p1];
 assign pop1_pred_target = buf_pred_target[tail_idx_p1];
+assign pop1_fault       = buf_fault[tail_idx_p1];
+assign pop1_fault_cause = buf_fault_cause[tail_idx_p1];
+assign pop1_fault_tval  = buf_fault_tval[tail_idx_p1];
 
 integer i;
 
@@ -102,6 +120,9 @@ always @(posedge clk or negedge rstn) begin
             buf_pc[i]    <= 32'd0;
             buf_pred_taken[i]  <= 1'b0;
             buf_pred_target[i] <= 32'd0;
+            buf_fault[i]       <= 1'b0;
+            buf_fault_cause[i] <= 5'd0;
+            buf_fault_tval[i]  <= 32'd0;
         end
     end
     else begin
@@ -135,6 +156,9 @@ always @(posedge clk or negedge rstn) begin
                 buf_pc[head[IDX_W-1:0]]    <= push_pc;
                 buf_pred_taken[head[IDX_W-1:0]]  <= push_pred_taken;
                 buf_pred_target[head[IDX_W-1:0]] <= push_pred_target;
+                buf_fault[head[IDX_W-1:0]]       <= push_fault;
+                buf_fault_cause[head[IDX_W-1:0]] <= push_fault_cause;
+                buf_fault_tval[head[IDX_W-1:0]]  <= push_fault_tval;
                 buf_valid[head[IDX_W-1:0]] <= 1'b1;
                 head <= head + 1;
             end

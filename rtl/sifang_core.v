@@ -593,6 +593,9 @@ wire [31:0] if_pc;
 wire [0:0]  if_tid = 1'b0;
 wire        if_pred_taken;
 wire [31:0] if_pred_target;
+wire        if_fault;
+wire [4:0]  if_fault_cause;
+wire [31:0] if_fault_tval;
 wire [31:0] debug_fetch_pc_pending;
 wire [31:0] debug_fetch_pc_out;
 wire [31:0] debug_fetch_if_inst;
@@ -692,6 +695,9 @@ stage_if #(
     .if_pc            (if_pc            ),
     .if_pred_taken    (if_pred_taken    ),
     .if_pred_target   (if_pred_target   ),
+    .if_fault         (if_fault         ),
+    .if_fault_cause   (if_fault_cause   ),
+    .if_fault_tval    (if_fault_tval    ),
     .mmu_itlb_req_valid(mmu_itlb_req_valid),
     .mmu_itlb_req_vaddr(mmu_itlb_req_vaddr),
     .mmu_itlb_resp_hit (mmu_itlb_resp_hit),
@@ -733,6 +739,9 @@ wire [31:0] fb_pop0_pc,    fb_pop1_pc;
 wire [0:0]  fb_pop0_tid = 1'b0, fb_pop1_tid = 1'b0;
 wire        fb_pop0_pred_taken, fb_pop1_pred_taken;
 wire [31:0] fb_pop0_pred_target, fb_pop1_pred_target;
+wire        fb_pop0_fault, fb_pop1_fault;
+wire [4:0]  fb_pop0_fault_cause, fb_pop1_fault_cause;
+wire [31:0] fb_pop0_fault_tval, fb_pop1_fault_tval;
 wire        fb_consume_0,  fb_consume_1;
 
 fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
@@ -744,17 +753,26 @@ fetch_buffer #(.DEPTH(FETCH_BUFFER_DEPTH_CFG)) u_fetch_buffer(
     .push_pc    (if_pc          ),
     .push_pred_taken (if_pred_taken),
     .push_pred_target(if_pred_target),
+    .push_fault (if_fault       ),
+    .push_fault_cause(if_fault_cause),
+    .push_fault_tval(if_fault_tval),
     .push_ready (fb_push_ready  ),
     .pop0_valid (fb_pop0_valid  ),
     .pop0_inst  (fb_pop0_inst   ),
     .pop0_pc    (fb_pop0_pc     ),
     .pop0_pred_taken (fb_pop0_pred_taken),
     .pop0_pred_target(fb_pop0_pred_target),
+    .pop0_fault (fb_pop0_fault),
+    .pop0_fault_cause(fb_pop0_fault_cause),
+    .pop0_fault_tval(fb_pop0_fault_tval),
     .pop1_valid (fb_pop1_valid  ),
     .pop1_inst  (fb_pop1_inst   ),
     .pop1_pc    (fb_pop1_pc     ),
     .pop1_pred_taken (fb_pop1_pred_taken),
     .pop1_pred_target(fb_pop1_pred_target),
+    .pop1_fault (fb_pop1_fault),
+    .pop1_fault_cause(fb_pop1_fault_cause),
+    .pop1_fault_tval(fb_pop1_fault_tval),
     .consume_0  (fb_consume_0   ),
     .consume_1  (fb_consume_1   )
 );
@@ -803,9 +821,11 @@ decoder_dual u_decoder_dual(
     .inst0_valid     (fb_pop0_valid    ),
     .inst0_word      (fb_pop0_inst     ),
     .inst0_pc        (fb_pop0_pc       ),
+    .inst0_fault     (fb_pop0_fault    ),
     .inst1_valid     (fb_pop1_valid    ),
     .inst1_word      (fb_pop1_inst     ),
     .inst1_pc        (fb_pop1_pc       ),
+    .inst1_fault     (fb_pop1_fault    ),
     .dec0_valid      (dec0_valid       ),
     .dec0_pc         (dec0_pc          ),
     .dec0_imm        (dec0_imm         ),
@@ -877,6 +897,10 @@ assign dec0_is_sfence_vma = dec0_valid && (fb_pop0_inst[6:0] == `SYSTEM) &&
 assign dec1_is_sfence_vma = dec1_valid && (fb_pop1_inst[6:0] == `SYSTEM) &&
                             (fb_pop1_inst[14:12] == 3'b000) &&
                             (fb_pop1_inst[31:25] == 7'b0001001);
+wire dec0_fetch_fault = dec0_valid && fb_pop0_fault;
+wire dec1_fetch_fault = dec1_valid && fb_pop1_fault;
+wire [31:0] dec0_fetch_fault_cause = {27'd0, fb_pop0_fault_cause};
+wire [31:0] dec1_fetch_fault_cause = {27'd0, fb_pop1_fault_cause};
 
 // Squash dispatches if flush active
 wire disp0_valid_pre_rob = dec0_valid && !smt_flush[dec0_tid];
@@ -4004,6 +4028,16 @@ always @(posedge clk or negedge rstn) begin
             tag_exc_valid[lsu_resp_tag] <= 1'b1;
             tag_exc_cause[lsu_resp_tag] <= lsu_resp_exc_cause;
             tag_exc_tval[lsu_resp_tag]  <= lsu_resp_exc_tval;
+        end
+        if (disp0_accepted && dec0_fetch_fault && (sb_disp0_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[sb_disp0_tag] <= 1'b1;
+            tag_exc_cause[sb_disp0_tag] <= dec0_fetch_fault_cause;
+            tag_exc_tval[sb_disp0_tag]  <= fb_pop0_fault_tval;
+        end
+        if (disp1_accepted && dec1_fetch_fault && (sb_disp1_tag != {RS_TAG_W_CFG{1'b0}})) begin
+            tag_exc_valid[sb_disp1_tag] <= 1'b1;
+            tag_exc_cause[sb_disp1_tag] <= dec1_fetch_fault_cause;
+            tag_exc_tval[sb_disp1_tag]  <= fb_pop1_fault_tval;
         end
     end
 end

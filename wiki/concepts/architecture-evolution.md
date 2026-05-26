@@ -16,7 +16,7 @@ The long-term goal is broader than the current bring-up target: build a full-sta
 
 - Basic single-thread Icarus tests are past the all-timeout phase.
 - UART16550 and PLIC source 2 are part of the current architecture.
-- The latest pre-rename Dhrystone board-only run passed with Vivado 2023.2 JTAG and COM5 UART. After the SifangCore structural rename, fresh simulation and a new `sifang_core_ax7203` implementation are required before claiming post-rename board status.
+- The post-rename SifangCore Dhrystone board-only run passed with Vivado 2023.2 JTAG and COM5 UART using the `sifang_core_ax7203` flow. Linux work still remains simulation-first until `linux-preload` passes.
 
 ## Linux Bring-up Architecture
 
@@ -35,10 +35,11 @@ Implemented foundation:
 - `sfence.vma` is now tracked as a serializing SYSTEM instruction. The first integrated version waits for ROB commit and an empty store buffer, then issues a full TLB flush to `mmu_sv32`; selective ASID/VPN operands are intentionally ignored for v1.
 - A core-level Sv32 identity test now installs page tables in local RAM, executes `sfence.vma` in M-mode and S-mode, enters S-mode with Sv32 enabled, fetches through the I-side MMU, performs D-side translated store/load, and writes PASS through an identity-mapped MMIO megapage.
 - D-side load/store page faults now complete through the LSU without issuing memory or enqueuing stores, record cause/tval by RS tag, and enter `csr_unit` only when the corresponding ROB entry commits. `test_sv32_core_page_fault` validates delegated S-mode load/store page faults with `scause`, `stval`, and `sepc`.
+- I-side instruction page faults now enter the same ROB-commit exception path. `stage_if` injects a fault-marked NOP into the fetch buffer instead of issuing an instruction memory request; the fetch/fault metadata rides through decode, dispatch, and the tag exception sideband until the ROB commits the faulting entry. The synthetic uop uses the MMU faulting VA as its ROB PC, so `csr_unit` writes precise `sepc` while `stval` carries the same faulting address. `test_sv32_core_fetch_page_fault` validates delegated S-mode instruction page fault `scause=12`, `stval`, `sepc`, and `sret` recovery.
 
 Known architecture gaps before Linux can boot:
 
-- Precise instruction-fetch page-fault causes and `tval` still need a fetch-fault uop or equivalent ROB metadata path. D-side load/store page faults now have a ROB-commit CSR path.
 - PTW A/D writeback currently updates the physical backing store/DDR3 path, but it does not invalidate or update CPU cache lines that may already contain the same PTE. The standalone MMU test verifies hardware A/D behavior at the PTW memory interface; OS-visible PTE coherence still needs a shared cache path or invalidation policy before Linux can rely on A/D bits under cached page-table reads.
+- The Linux `fw_payload.bin` build is not yet complete. The next software gate is producing OpenSBI + RV32 Linux + BusyBox initramfs + DTB and then running Verilator `--mode linux-preload`.
 - The current no-page-table privilege smoke writes `satp.MODE=0`; actual MODE=1 execution is intentionally covered by Sv32/MMU tests that install page tables first.
 - The current S-mode work is single hart only; SMP, FPU, compressed instructions, and device storage are intentionally out of scope for the first Linux pass.
