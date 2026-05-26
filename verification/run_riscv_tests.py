@@ -150,12 +150,44 @@ def create_model_test_header():
 
 def create_adapter_header():
     """Create header that adapts test reporting to our TUBE"""
-    return '''
+    return r'''
 #ifndef _SIFANG_CORE_TEST_H
 #define _SIFANG_CORE_TEST_H
 
 // TUBE address for test completion
 #define TUBE_ADDR 0x13000000
+
+// Minimal privileged constants required by riscv-tests rv32si.  The local
+// riscv-tests/env checkout is empty, so the adapter owns this subset.
+#define DRAM_BASE 0x00000000
+#define RISCV_PGSHIFT 12
+#define RISCV_PGSIZE 4096
+#define PTE_PPN_SHIFT 10
+#define PTE_V 0x001
+#define PTE_R 0x002
+#define PTE_W 0x004
+#define PTE_X 0x008
+#define PTE_U 0x010
+#define PTE_A 0x040
+#define PTE_D 0x080
+#define SATP_MODE 0x80000000
+#define SATP_MODE_SV32 1
+#define SATP_MODE_SV39 1
+#define PRV_S 1
+#define MSTATUS_MPP 0x00001800
+#define MSTATUS_MPP_S 0x00000800
+#define MSTATUS_MPRV 0x00020000
+#define MSTATUS_SUM 0x00040000
+#define MSTATUS_FS 0x00006000
+#define SSTATUS_SIE 0x00000002
+#define SSTATUS_SPP 0x00000100
+#define SIP_SSIP 0x00000002
+#define CAUSE_MISALIGNED_FETCH 0
+#define CAUSE_ILLEGAL_INSTRUCTION 2
+#define CAUSE_BREAKPOINT 3
+#define CAUSE_USER_ECALL 8
+#define CAUSE_MACHINE_ECALL 11
+#define CAUSE_STORE_PAGE_FAULT 15
 
 // Simplified pass/fail using memory-mapped I/O
 #define RVTEST_PASS                                                     \
@@ -177,10 +209,13 @@ def create_adapter_header():
 #define DELEGATE_NO_TRAPS
 #define RISCV_MULTICORE_DISABLE
 
-// Empty init macro
-#define RVTEST_RV32U                                                    \
-  .macro init;                                                          \
-  .endm
+// Test mode selector consumed by RVTEST_CODE_BEGIN.
+#define RVTEST_RV32U .set rvtest_mode, 0
+#define RVTEST_RV32M .set rvtest_mode, 1
+#define RVTEST_RV32S .set rvtest_mode, 2
+
+#define RVTEST_RV64M RVTEST_RV32M
+#define RVTEST_RV64S RVTEST_RV32S
 
 #define TESTNUM gp
 #define CHECK_XLEN
@@ -194,7 +229,38 @@ _start:                                                                 \
         j reset_vector;                                                 \
         .align 2;                                                       \
 reset_vector:                                                           \
-        li TESTNUM, 0;
+        .weak stvec_handler;                                            \
+        .weak mtvec_handler;                                            \
+        li TESTNUM, 0;                                                  \
+        li t0, rvtest_mode;                                             \
+        li t1, 1;                                                       \
+        beq t0, t1, rvtest_machine_init;                                \
+        li t1, 2;                                                       \
+        beq t0, t1, rvtest_supervisor_init;                             \
+        j rvtest_init_done;                                             \
+rvtest_machine_init:                                                    \
+        la t0, mtvec_handler;                                           \
+        csrw mtvec, t0;                                                 \
+        li t0, MSTATUS_MPP;                                             \
+        csrc mstatus, t0;                                               \
+        j rvtest_init_done;                                             \
+rvtest_supervisor_init:                                                 \
+        la t0, stvec_handler;                                           \
+        csrw stvec, t0;                                                 \
+        li t0, ((1 << CAUSE_MISALIGNED_FETCH) |                         \
+                (1 << CAUSE_ILLEGAL_INSTRUCTION) |                      \
+                (1 << CAUSE_BREAKPOINT) |                               \
+                (1 << CAUSE_USER_ECALL) |                               \
+                (1 << CAUSE_STORE_PAGE_FAULT));                         \
+        csrw medeleg, t0;                                               \
+        la t0, rvtest_init_done;                                        \
+        csrw mepc, t0;                                                  \
+        li t0, MSTATUS_MPP;                                             \
+        csrc mstatus, t0;                                               \
+        li t0, MSTATUS_MPP_S;                                           \
+        csrs mstatus, t0;                                               \
+        mret;                                                           \
+rvtest_init_done:
 
 #define RVTEST_CODE_END                                                 \
         unimp
@@ -230,14 +296,13 @@ def compile_test(test_path, output_dir, adapter_dir, suite_name="riscv-tests"):
         # Include original riscv-tests headers
         # Use RV32IMA so the same adapter can build the A-extension category.
         cmd = [
-            GCC, "-march=rv32ima_zifencei", "-mabi=ilp32", "-static",
+            GCC, "-march=rv32ima_zicsr_zifencei", "-mabi=ilp32", "-static",
             "-mcmodel=medany", "-fvisibility=hidden",
             "-nostdlib", "-nostartfiles", "-g",
             f"-I{adapter_dir}",
             f"-I{suite_dir}/env",
             f"-I{suite_dir}/isa/macros/scalar",
             f"-T{adapter_dir}/link.ld",
-            "-DRVTEST_RV32U",
             "-o", str(elf_path),
             test_path
         ]
